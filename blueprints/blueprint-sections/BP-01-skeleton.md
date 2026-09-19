@@ -9,7 +9,7 @@ Goal: Studio-created `app/` that compiles its gates in this lane and installs fr
 
 ## Executor steps (this lane, after human creates app/)
 1. Wire Nav (`Home/Call/Chat/Photo/Log`), Hilt modules, Room `CallDadDatabase` (contacts/calls/messages entities + DAOs), one ViewModel/screen with `StateFlow`/`SharedFlow`.
-2. First unit test: `CallUiStateTest` (giant-button state + allowlist=DAD only) + DAO in-memory test.
+2. First unit test: `RoutesTest` (route contract, pure-JVM) — LANDED. Hilt/Room/DAO deferred (BP-02+).
 3. Gates G1: `testDebugUnitTest` PASS + `lintDebug` 0 errors + verify script.
 
 ## Out

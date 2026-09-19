@@ -5,7 +5,15 @@
 """Call-Dad scaffold gate (stdlib only). Run with hub python as-is:
 C:\\venv-hub\\venv\\Scripts\\python.exe tools\\verify_project.py
 Checks tree + required docs + bans secrets/real-child-data markers. Never builds.
+
+Studio-note: the human builds in Android Studio, so Studio-generated local
+artifacts (build/, .gradle/, local.properties, gradle-daemon-jvm.properties,
+app/google-services.json) are EXPECTED on disk and gitignored. The secret
+check therefore targets git-TRACKED files (index + HEAD via `git ls-files`);
+only when git is unavailable does it fall back to a strict on-disk scan that
+skips known Studio output dirs.
 """
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,6 +41,22 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]
+# Studio output dirs skipped by the fallback on-disk scan.
+SKIP_DIRS = {"build", ".gradle", ".cxx", ".idea", "captures",
+             ".externalNativeBuild", "__pycache__", ".git"}
+
+
+def tracked_files():
+    """Paths tracked in the git index/HEAD, relative to ROOT. None if no git."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=ROOT, capture_output=True,
+            text=True, timeout=30)
+    except (OSError, ValueError):
+        return None
+    if out.returncode != 0:
+        return None
+    return [l for l in out.stdout.splitlines() if l]
 
 
 def main() -> int:
@@ -43,12 +67,25 @@ def main() -> int:
     for f in REQUIRED_FILES:
         if not (ROOT / f).is_file():
             errors.append(f"missing file: {f}")
-    for p in ROOT.rglob("*"):
-        if p.is_file():
+    tracked = tracked_files()
+    if tracked is None:
+        for p in ROOT.rglob("*"):
+            if not p.is_file():
+                continue
+            if any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts):
+                continue
+            rel = str(p.relative_to(ROOT))
             if p.name in BANNED_NAMES:
-                errors.append(f"banned file present: {p.relative_to(ROOT)}")
-            if p.suffix in BANNED_SUFFIXES and ".git" not in p.parts:
-                errors.append(f"banned keystore present: {p.relative_to(ROOT)}")
+                errors.append(f"banned file present: {rel}")
+            if p.suffix in BANNED_SUFFIXES:
+                errors.append(f"banned keystore present: {rel}")
+    else:
+        for rel in tracked:
+            name = Path(rel).name
+            if name in BANNED_NAMES:
+                errors.append(f"banned file TRACKED by git: {rel}")
+            if Path(rel).suffix in BANNED_SUFFIXES:
+                errors.append(f"banned keystore TRACKED by git: {rel}")
     for f in REQUIRED_FILES:
         p = ROOT / f
         if p.is_file() and p.suffix == ".md":
@@ -61,7 +98,8 @@ def main() -> int:
         for e in errors:
             print(f"  - {e}")
         return 1
-    print(f"VERIFY PASS: {len(REQUIRED_DIRS)} dirs + {len(REQUIRED_FILES)} files, no secrets.")
+    mode = "git-tracked" if tracked is not None else "on-disk"
+    print(f"VERIFY PASS ({mode}): {len(REQUIRED_DIRS)} dirs + {len(REQUIRED_FILES)} files, no secrets.")
     return 0
 
 

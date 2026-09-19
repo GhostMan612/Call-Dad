@@ -2,8 +2,11 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/CallScreen.kt
+// ui/screens/CallScreen.kt — Phase 2 rewire
 // Location: app/src/main/java/com/calldad/ui/screens/CallScreen.kt
+//
+// The composable hierarchy and dimensions from Phase 1 are preserved.
+// Only the state reads and the new Error branch are added.
 package com.calldad.ui.screens
 
 import androidx.compose.animation.animateColorAsState
@@ -25,7 +28,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.Icon
@@ -55,35 +60,66 @@ fun CallScreen(
     modifier: Modifier = Modifier,
     viewModel: CallViewModel = viewModel()
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val elapsed by viewModel.elapsedSeconds.collectAsStateWithLifecycle()
+    val isCameraOn by viewModel.isCameraOn.collectAsStateWithLifecycle()
+
     CallContent(
         state = state,
+        elapsedSeconds = elapsed,
+        isCameraOn = isCameraOn,
         onToggleCamera = viewModel::onToggleCamera,
+        onRetry = viewModel::clearError,
         onHangUp = {
-            viewModel.onHangUp()
+            viewModel.endCall()
             onFinished()
         },
         modifier = modifier
     )
 }
 
-/**
- * Stateless call surface.
- *  - Status area: 220dp avatar well + oversized status label.
- *  - Hang Up: 140dp tall, fills all remaining width, saturated red. Unmissable.
- *  - Camera: secondary 140dp square. Present but visually subordinate.
- */
 @Composable
 private fun CallContent(
-    state: CallUiState,
+    state: CallState,
+    elapsedSeconds: Int,
+    isCameraOn: Boolean,
+    onToggleCamera: () -> Unit,
+    onRetry: () -> Unit,
+    onHangUp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    when (state) {
+        is CallState.Error -> ErrorContent(
+            message = state.message,
+            onRetry = onRetry,
+            onHangUp = onHangUp,
+            modifier = modifier
+        )
+        else -> ConnectedContent(
+            state = state,
+            elapsedSeconds = elapsedSeconds,
+            isCameraOn = isCameraOn,
+            onToggleCamera = onToggleCamera,
+            onHangUp = onHangUp,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun ConnectedContent(
+    state: CallState,
+    elapsedSeconds: Int,
+    isCameraOn: Boolean,
     onToggleCamera: () -> Unit,
     onHangUp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val statusLabel = when (state.status) {
-        CallStatus.CONNECTING -> "Calling Dad…"
-        CallStatus.CONNECTED -> "Dad is here!"
-        CallStatus.ENDED -> "Bye bye!"
+    val statusLabel = when (state) {
+        CallState.Idle -> "Ready"
+        CallState.Connecting -> "Calling Dad…"
+        is CallState.InCall -> "Dad is here!"
+        is CallState.Error -> "" // handled by ErrorContent
     }
 
     Column(
@@ -95,7 +131,6 @@ private fun CallContent(
     ) {
         Spacer(Modifier.height(16.dp))
 
-        // ---------- STATUS AREA ----------
         Box(
             modifier = Modifier
                 .size(220.dp)
@@ -123,7 +158,7 @@ private fun CallContent(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = state.timerLabel,
+            text = formatElapsed(elapsedSeconds),
             style = MaterialTheme.typography.displaySmall,
             color = Color.White.copy(alpha = 0.85f),
             textAlign = TextAlign.Center
@@ -131,7 +166,6 @@ private fun CallContent(
 
         Spacer(Modifier.weight(1f))
 
-        // ---------- CONTROLS ----------
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -139,19 +173,88 @@ private fun CallContent(
             horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             CameraToggleButton(
-                isCameraOn = state.isCameraOn,
+                isCameraOn = isCameraOn,
                 onClick = onToggleCamera,
-                modifier = Modifier
-                    .size(140.dp)
-                    .fillMaxHeight()
+                modifier = Modifier.fillMaxHeight().size(140.dp)
             )
-
             HangUpButton(
                 onClick = onHangUp,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorContent(
+    message: String,
+    onRetry: () -> Unit,
+    onHangUp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(CallGreenDark)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.ErrorOutline,
+            contentDescription = null,
+            modifier = Modifier.size(140.dp),
+            tint = Color.White
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.headlineMedium,
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(40.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().height(120.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Retry — green
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-            )
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xFF2E7D32))
+                    .clickable(onClick = onRetry)
+                    .semantics { contentDescription = "Try again" },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(72.dp),
+                    tint = Color.White
+                )
+            }
+            // Hang up — red
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(HangUpRed)
+                    .clickable(onClick = onHangUp)
+                    .semantics { contentDescription = "Go back home" },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CallEnd,
+                    contentDescription = null,
+                    modifier = Modifier.size(72.dp),
+                    tint = Color.White
+                )
+            }
         }
     }
 }
@@ -164,10 +267,10 @@ private fun CameraToggleButton(
 ) {
     val shape = RoundedCornerShape(28.dp)
     val background by animateColorAsState(
-        targetValue = if (isCameraOn) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+        targetValue = if (isCameraOn) Color.White.copy(alpha = 0.22f)
+        else Color.White.copy(alpha = 0.08f),
         label = "cameraBackground"
     )
-
     Box(
         modifier = modifier
             .clip(shape)
@@ -223,8 +326,11 @@ private fun HangUpButton(
 private fun CallContentPreview() {
     CallDadTheme {
         CallContent(
-            state = CallUiState(status = CallStatus.CONNECTED, elapsedSeconds = 42),
+            state = CallState.InCall(CallRole.CALLER, startedAtMillis = 0L),
+            elapsedSeconds = 42,
+            isCameraOn = true,
             onToggleCamera = {},
+            onRetry = {},
             onHangUp = {}
         )
     }

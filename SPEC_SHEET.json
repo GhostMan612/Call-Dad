@@ -1,7 +1,7 @@
 {
   "app": "Call Dad (working title)",
   "package": "com.calldad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "user": "6-year-old (kid device) <-> Dad (operator device)",
   "allowlist_v01": ["DAD"],
   "features_v01": [
@@ -38,7 +38,7 @@
     "RendezvousClient + relay main.go :8792/udp",
     "RealTimeTransportRouter P1-LAN P2-SIM"
   ],
-  "firebase": "deferred Phase 4 fallback (no google-services.json in v0.1)",
+  "firebase": "Phase 2 ACTIVE for call signaling only (Firestore calls/dad_channel, google-services.json gitignored/operator-placed); media/E2EE keys never via Firebase; P2P deferred",
   "devices": ["Moto G 2025 (android-36, truth)", "BLU View 5"],
   "gates": ["testDebugUnitTest", "lintDebug", "tools/verify_project.py", "human device proof"]
 }

@@ -18,7 +18,8 @@ AGP 8.13.2 / Kotlin 2.1.0 / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02
 | `tools/verify_project.py` | WRITTEN, PENDING run | stdlib scaffold gate |
 | `fixtures/` + `assets/` | PLACEHOLDERS | synthetic only |
 | `app/` | PHASE 1 LANDED 2026-09-19 (uncommitted) | `com.calldad`: MainActivity + Routes/AppNavHost + theme(3) + GiantComponents + 4 screens w/ ViewModels + Manifest + themes/colors + `RoutesTest` + module/root Gradle + catalog + wrapper props (no `gradlew` binaries — Studio generates) |
-| `SPEC_SHEET.json` | AMENDED | package `com.calldad` (Phase 1 truth); routes Home/Call/Ptt/Game/Helper supersede Chat/Photo/Log for Phase 1 |
+| `app/.../data/signaling/` | PHASE 2 LANDED 2026-09-19 (uncommitted) | `SignalingModels` + `SignalingClient` (Firestore `calls/dad_channel`) + `CallState` + VM rewire + Screen Error/Retry + `SignalingModelsTest` + Firebase Gradle/Manifest |
+| `SPEC_SHEET.json` | AMENDED | package `com.calldad` (Phase 1 truth); routes Home/Call/Ptt/Game/Helper supersede Chat/Photo/Log for Phase 1; v0.2.0 Firebase-signaling-active |
 | `C:\venv-hub\call-dad\` | CREATED (empty) | isolated lane |
 
 ## Known-issue registry
@@ -28,7 +29,7 @@ AGP 8.13.2 / Kotlin 2.1.0 / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02
 | K1 | No `app/` Gradle skeleton yet — human Studio step required | CLOSED (scaffold written) → OPEN human Studio sync + `testDebugUnitTest`/`lintDebug` + Moto G install proof |
 | K2 | minSdk 30 vs 26 (old kid tablet?) | DECIDED B (26) per operator scaffold → ADR-001 |
 | K3 | Video approach: extend-UDP vs WebRTC | OPEN → Gemini research + ADR |
-| K4 | P2P-first vs Firebase-first signaling | OPEN → ADR-002 |
+| K4 | P2P-first vs Firebase-first signaling | DECIDED Firebase-for-signaling (operator Phase 2 directive) → ADR-002; P2P deferred to BP-04 |
 | K5 | SQLCipher now vs later | OPEN → ADR-003 |
 | K6 | No `call-dad` keystore (debug only) | OPEN → operator provisions later |
 | K7 | `gh`/Firebase CLI not on PATH | ACCEPTED (not needed v0.1) |
@@ -37,3 +38,4 @@ AGP 8.13.2 / Kotlin 2.1.0 / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02
 
 - G0 scaffold gate: GREEN (2026-09-19: VERIFY PASS 10 dirs + 28 files).
 - G1 skeleton: CODE LANDED, gates PENDING human Studio run (`RoutesTest` + `lintDebug`; this lane never builds). No Hilt/Room yet (BP-02+).
+- G2 signaling (Phase 2, operator directive): CODE LANDED 2026-09-19 — `SignalingClient` + `CallState` + VM/Screen rewire + Firebase Gradle + Manifest perms + `SignalingModelsTest`; gates PENDING human Studio run + operator-placed `google-services.json` (gitignored).

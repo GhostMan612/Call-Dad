@@ -17,10 +17,12 @@
 - [ ] Human Studio run: `testDebugUnitTest` + `lintDebug` + Moto G install proof (this lane never builds)
 - [ ] Handoff + CURRENT_STATE updated
 
-## Phase 2 — Voice (BP-02)
-- [ ] `CallSignalingManager` port + unit tests
-- [ ] `LiveCallSession` + `AudioFrameCipher` + Opus pipeline + P1 router
-- [ ] Host gates green; human Moto G LAN-call proof recorded
+## Phase 2 — Signaling (operator directive landed 2026-09-19, ADR-002 DECIDED Firebase)
+- [x] `data/signaling/` (`SignalingModels` + `SignalingClient` Firestore `calls/dad_channel`) + `CallState` sealed interface + VM rewire + CallScreen Error/Retry
+- [x] Gradle: Firebase BOM 33.5.1 + google-services 4.4.2 + coroutines-play-services; Manifest INTERNET + ACCESS_NETWORK_STATE; versionName 0.2.0 (toolchain kept at frozen AGP 8.13.2 / Kotlin 2.1.0 — draft downgrade rejected)
+- [x] `SignalingModelsTest` (pure-JVM: fromWire leniency, ICE defaults, error-kind contract) — GREEN pending human Studio run
+- [ ] Human Studio run: `testDebugUnitTest` (Routes + SignalingModels) + `lintDebug`; place `google-services.json` in `app/` (gitignored) for device signaling test
+- [ ] Sovereign P2P ports (BP-02 original scope) deferred to BP-04 revisit
 
 ## Phase 3 — Chat + remote (BP-03)
 - [ ] `SovereignCommsEngine` + receipts + voice memo

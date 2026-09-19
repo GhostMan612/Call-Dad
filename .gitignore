@@ -10,6 +10,7 @@ RELEASE_*.txt
 
 # Gradle / Android build outputs (human builds in Studio; this lane never builds)
 .gradle/
+gradle/gradle-daemon-jvm.properties
 build/
 app/build/
 */build/

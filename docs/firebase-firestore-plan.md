@@ -1,7 +1,9 @@
-# Firebase / Firestore plan (paid account — DEFERRED, Phase 4 fallback)
+# Firebase / Firestore plan (paid account — ACTIVE for Phase 2 signaling)
 
-- Status: account available; **zero `google-services.json` in repo or `C:\android` (verified 2026-09-19) — intentional.**
-- v0.1 (BP-01..05): NO Firebase. Sovereign P2P-first: LAN → rendezvous relay (`main.go` :8792/udp, signaling only) → DTN. Keeps kid thread/photo off-cloud, zero accounts.
-- Phase 4 fallback (design in BP-04, build only if ADR-002 authorizes): FCM data-message wake for NAT-hard remote (Dad device asleep / carrier NAT), optional Firestore presence/thread mirror with parent opt-in + redaction default. Keys/media never go through Firebase; signaling tokens only.
-- If authorized later: operator downloads `google-services.json` into `app/` (gitignored), adds `com.google.gms.google-services` plugin + BOM pins via ADR, executor wires opt-in flag (default OFF). Service-account files never enter repo.
-- R&D (Gemini): validate FCM-vs-relay wake latency + privacy trade; Architect (DeepSeek): rule ADR-002.
+- Status: ACTIVE for call signaling (2026-09-19 operator directive, ADR-002 DECIDED). Operator places `google-services.json` into `app/` (gitignored, verify-banned) — without it the first Firestore call throws `IllegalStateException: Default FirebaseApp is not initialized`.
+- Phase 2 scope: Firestore `calls/dad_channel` SDP OFFER/ANSWER + `candidates` ICE trickle via `SignalingClient`; INTERNET + ACCESS_NETWORK_STATE granted; RECORD_AUDIO/CAMERA stay commented until Phase 3 peer connection. No FCM/auth/analytics.
+- Privacy: media/E2EE keys never via Firebase; kid thread/photo on-device; sovereign P2P/rendezvous DEFERRED to BP-04 revisit.
+
+- History: account available since scaffold; `google-services.json` absent from repo (verified 2026-09-19). P2P-first was the v0.1 plan until the operator's Phase 2 directive.
+- Service-account files never enter repo. FCM/auth/analytics NOT added (future phases only, need ADR).
+- R&D (Gemini): review `SignalingClient` error mapping + offline UX; Architect (DeepSeek): confirm media-path privacy before Phase 3 peer connection.
