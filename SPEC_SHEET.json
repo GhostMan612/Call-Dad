@@ -1,0 +1,44 @@
+{
+  "app": "Call Dad (working title)",
+  "package": "com.calldad.app",
+  "version": "0.1.0",
+  "user": "6-year-old (kid device) <-> Dad (operator device)",
+  "allowlist_v01": ["DAD"],
+  "features_v01": [
+    "voice_call_lan_first",
+    "video_call_lan_first",
+    "text_chat_1to1_receipts",
+    "voice_memo_opus",
+    "photo_share_chunked_verified",
+    "call_log_message_store_local",
+    "allowlist_parent_gate"
+  ],
+  "non_goals_v01": [
+    "group_calls",
+    "multi_contact",
+    "cloud_backup",
+    "analytics_accounts_ads",
+    "app_store_release"
+  ],
+  "stack": {
+    "language": "Kotlin 2.1.0",
+    "ui": "single-Activity + Compose Navigation + Hilt + ViewModel StateFlow/SharedFlow",
+    "data": "Room 2.6.1 (+SQLCipher decision ADR-003)",
+    "audio": "Concentus-Opus 1.0.2",
+    "camera": "CameraX 1.3.4",
+    "compat": "compileSdk 35 / targetSdk 35 / minSdk 30 (ADR-001 revisits 26)"
+  },
+  "comms_donor": "C:\\sovereign_mantle\\android_node (read-only)",
+  "ports": [
+    "CallSignalingManager Invite-Accept-Decline-End",
+    "SovereignCommsEngine chat+voice-memo+receipts",
+    "LiveCallSession UDP :8789 voice",
+    "AudioFrameCipher AES-256-GCM per-frame",
+    "SovereignImageEngine chunked photo",
+    "RendezvousClient + relay main.go :8792/udp",
+    "RealTimeTransportRouter P1-LAN P2-SIM"
+  ],
+  "firebase": "deferred Phase 4 fallback (no google-services.json in v0.1)",
+  "devices": ["Moto G 2025 (android-36, truth)", "BLU View 5"],
+  "gates": ["testDebugUnitTest", "lintDebug", "tools/verify_project.py", "human device proof"]
+}

@@ -1,0 +1,7 @@
+# local.properties template — copy to local.properties (GITIGNORED, never commit)
+# sdk.dir=C\:\\android\\sdk
+# Optional later: CARTO-style keys, Firebase-adjacent flags, release signing.
+# Release signing (only when operator provisions a call-dad keystore):
+# RELEASE_STORE_PASSWORD=
+# RELEASE_KEY_ALIAS=
+# RELEASE_KEY_PASSWORD=

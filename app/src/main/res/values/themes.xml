@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Minimal host theme. Compose draws everything; this satisfies Manifest @style/Theme.CallDad. -->
+    <style name="Theme.CallDad" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/warm_cream</item>
+    </style>
+</resources>

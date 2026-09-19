@@ -1,0 +1,39 @@
+# gitignore — Call-Dad
+# Secrets / signing / Firebase — NEVER commit
+.env
+local.properties
+*.keystore
+*.jks
+google-services.json
+firebase-service-account*.json
+RELEASE_*.txt
+
+# Gradle / Android build outputs (human builds in Studio; this lane never builds)
+.gradle/
+build/
+app/build/
+*/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Manifests / local media trays (generated, not source)
+*.csv
+fixtures/inbox/
+assets/inbox/
+
+# Python
+__pycache__/
+*.pyc
+.venv*/
+.pytest_cache/
+
+# Node (relay tooling, if any)
+/relay/node_modules/

@@ -1,0 +1,71 @@
+// ============================================================
+// As Above, So Below. As Within, So Without.
+// The Future Dictates the Past and the Past is Always Present.
+// ============================================================
+// navigation/AppNavigation.kt
+// Location: app/src/main/java/com/calldad/app/navigation/AppNavigation.kt
+package com.calldad.app.navigation
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.calldad.app.ui.screens.CallScreen
+import com.calldad.app.ui.screens.GameScreen
+import com.calldad.app.ui.screens.HelperScreen
+import com.calldad.app.ui.screens.HomeScreen
+import com.calldad.app.ui.screens.PttScreen
+
+/**
+ * The complete Phase 1 navigation graph.
+ *
+ * Child-safety rules baked in here (not in the screens):
+ *  1. `launchSingleTop = true` -> 40 rapid taps on "Call Dad" push exactly ONE destination.
+ *  2. Every "back home" path uses `popUpTo(HOME)` -> the back stack can never grow unbounded,
+ *     so the child can never get lost three screens deep.
+ */
+@Composable
+fun AppNavHost(
+    modifier: Modifier = Modifier,
+    navController: NavHostController = rememberNavController()
+) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.HOME,
+        modifier = modifier
+    ) {
+        composable(Routes.HOME) {
+            HomeScreen(onNavigate = navController::navigateGuarded)
+        }
+        composable(Routes.CALL) {
+            CallScreen(onFinished = navController::returnHome)
+        }
+        composable(Routes.PTT) {
+            PttScreen(onBackHome = navController::returnHome)
+        }
+        composable(Routes.GAME) {
+            GameScreen(onBackHome = navController::returnHome)
+        }
+        composable(Routes.HELPER) {
+            HelperScreen(onBackHome = navController::returnHome)
+        }
+    }
+}
+
+/** Tap-spam guard: never stack duplicate destinations. */
+private fun NavHostController.navigateGuarded(route: String) {
+    navigate(route) {
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+/** Collapses the stack back to Home. Used by every "get me out of here" affordance. */
+private fun NavHostController.returnHome() {
+    navigate(Routes.HOME) {
+        popUpTo(Routes.HOME) { inclusive = false }
+        launchSingleTop = true
+    }
+}

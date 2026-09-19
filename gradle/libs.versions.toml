@@ -1,0 +1,19 @@
+# Call-Dad version catalog. Donor pins frozen until ADR (AGP 8.13.2 / Kotlin 2.1.0 / Gradle 8.13).
+# Phase 1 scaffold uses Compose BOM 2024.10.01 per operator-provided scaffold (drift from frozen 2024.12.01 noted in handoff).
+[versions]
+agp = "8.13.2"
+kotlin = "2.1.0"
+compose-bom = "2024.10.01"
+core-ktx = "1.13.1"
+activity-compose = "1.9.3"
+lifecycle = "2.8.7"
+navigation-compose = "2.8.4"
+junit = "4.13.2"
+
+[libraries]
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
