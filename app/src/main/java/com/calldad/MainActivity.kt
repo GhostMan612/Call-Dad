@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // MainActivity.kt
-// Location: app/src/main/java/com/calldad/app/MainActivity.kt
-package com.calldad.app
+// Location: app/src/main/java/com/calldad/MainActivity.kt
+package com.calldad
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,8 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.calldad.app.navigation.AppNavHost
-import com.calldad.app.ui.theme.CallDadTheme
+import com.calldad.navigation.AppNavHost
+import com.calldad.ui.theme.CallDadTheme
 
 /**
  * Single-activity host. All UI is Compose; all navigation is Navigation-Compose.

@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/HelperViewModel.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/HelperViewModel.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/HelperViewModel.kt
+package com.calldad.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/HelperScreen.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/HelperScreen.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/HelperScreen.kt
+package com.calldad.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,11 +47,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.calldad.app.ui.components.GiantIconButton
-import com.calldad.app.ui.theme.CallDadTheme
-import com.calldad.app.ui.theme.HelperPurple
-import com.calldad.app.ui.theme.HelperPurpleLight
-import com.calldad.app.ui.theme.InkBlack
+import com.calldad.ui.components.GiantIconButton
+import com.calldad.ui.theme.CallDadTheme
+import com.calldad.ui.theme.HelperPurple
+import com.calldad.ui.theme.HelperPurpleLight
+import com.calldad.ui.theme.InkBlack
 
 @Composable
 fun HelperScreen(

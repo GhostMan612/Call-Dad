@@ -17,8 +17,8 @@ AGP 8.13.2 / Kotlin 2.1.0 / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02
 | `.opencode/` 3 agents + 3 commands | WRITTEN | native-dev, comms-porter, kid-ux-guardian; verify/probe/smoke |
 | `tools/verify_project.py` | WRITTEN, PENDING run | stdlib scaffold gate |
 | `fixtures/` + `assets/` | PLACEHOLDERS | synthetic only |
-| `app/` | PHASE 1 LANDED 2026-09-19 (uncommitted) | `com.calldad.app`: MainActivity + Routes/AppNavHost + theme(3) + GiantComponents + 4 screens w/ ViewModels + Manifest + themes/colors + `RoutesTest` + module/root Gradle + catalog + wrapper props (no `gradlew` binaries — Studio generates) |
-| `SPEC_SHEET.json` | AMENDED | package `com.calldad.app` (Phase 1 truth); routes Home/Call/Ptt/Game/Helper supersede Chat/Photo/Log for Phase 1 |
+| `app/` | PHASE 1 LANDED 2026-09-19 (uncommitted) | `com.calldad`: MainActivity + Routes/AppNavHost + theme(3) + GiantComponents + 4 screens w/ ViewModels + Manifest + themes/colors + `RoutesTest` + module/root Gradle + catalog + wrapper props (no `gradlew` binaries — Studio generates) |
+| `SPEC_SHEET.json` | AMENDED | package `com.calldad` (Phase 1 truth); routes Home/Call/Ptt/Game/Helper supersede Chat/Photo/Log for Phase 1 |
 | `C:\venv-hub\call-dad\` | CREATED (empty) | isolated lane |
 
 ## Known-issue registry

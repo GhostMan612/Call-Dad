@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/GameScreen.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/GameScreen.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/GameScreen.kt
+package com.calldad.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -29,9 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.calldad.app.ui.components.GiantButton
-import com.calldad.app.ui.theme.CallDadTheme
-import com.calldad.app.ui.theme.GameBlue
+import com.calldad.ui.components.GiantButton
+import com.calldad.ui.theme.CallDadTheme
+import com.calldad.ui.theme.GameBlue
 
 /**
  * Full-screen HTML5 game host — Phase 1 placeholder.

@@ -3,9 +3,9 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // Phase 1 host-side smoke: pure-JVM routes contract. No Android deps.
-package com.calldad.app
+package com.calldad
 
-import com.calldad.app.navigation.Routes
+import com.calldad.navigation.Routes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

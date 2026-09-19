@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/theme/Type.kt
-// Location: app/src/main/java/com/calldad/app/ui/theme/Type.kt
-package com.calldad.app.ui.theme
+// Location: app/src/main/java/com/calldad/ui/theme/Type.kt
+package com.calldad.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

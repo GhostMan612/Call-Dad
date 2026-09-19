@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/PttScreen.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/PttScreen.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/PttScreen.kt
+package com.calldad.ui.screens
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -53,10 +53,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.calldad.app.ui.components.GiantIconButton
-import com.calldad.app.ui.theme.CallDadTheme
-import com.calldad.app.ui.theme.PttOrange
-import com.calldad.app.ui.theme.PttTransmitRed
+import com.calldad.ui.components.GiantIconButton
+import com.calldad.ui.theme.CallDadTheme
+import com.calldad.ui.theme.PttOrange
+import com.calldad.ui.theme.PttTransmitRed
 
 @Composable
 fun PttScreen(

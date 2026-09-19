@@ -1,5 +1,5 @@
 // Call-Dad app module. Phase 1 scaffold — donor toolchain pins in ../../gradle/libs.versions.toml.
-// Package com.calldad.app. minSdk 26 per operator Phase 1 scaffold (ADR-001 option B).
+// Package com.calldad. minSdk 26 per operator Phase 1 scaffold (ADR-001 option B).
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.calldad.app"
+    namespace = "com.calldad"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.calldad.app"
+        applicationId = "com.calldad"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

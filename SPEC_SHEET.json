@@ -1,6 +1,6 @@
 {
   "app": "Call Dad (working title)",
-  "package": "com.calldad.app",
+  "package": "com.calldad",
   "version": "0.1.0",
   "user": "6-year-old (kid device) <-> Dad (operator device)",
   "allowlist_v01": ["DAD"],

@@ -11,7 +11,7 @@
 - [x] Commit by explicit path (2026-09-19: local `d6399d9`, no push — RULES §1.4)
 
 ## Phase 1 — Skeleton (BP-01, operator scaffold landed 2026-09-19)
-- [x] `app/` scaffold written (`com.calldad.app`, minSdk 26 per ADR-001-B, compile/target 35)
+- [x] `app/` scaffold written (`com.calldad`, minSdk 26 per ADR-001-B, compile/target 35)
 - [x] Compose Nav (Home/Call/Ptt/Game/Helper) + theme + giant components + 4 ViewModels + Manifest + themes.xml
 - [x] First unit test written (`RoutesTest`, host-side, pure-JVM) — GREEN pending human Studio run
 - [ ] Human Studio run: `testDebugUnitTest` + `lintDebug` + Moto G install proof (this lane never builds)

@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/components/GiantComponents.kt
-// Location: app/src/main/java/com/calldad/app/ui/components/GiantComponents.kt
-package com.calldad.app.ui.components
+// Location: app/src/main/java/com/calldad/ui/components/GiantComponents.kt
+package com.calldad.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

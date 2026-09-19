@@ -3,11 +3,11 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/HomeViewModel.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/HomeViewModel.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/HomeViewModel.kt
+package com.calldad.ui.screens
 
 import androidx.lifecycle.ViewModel
-import com.calldad.app.navigation.Routes
+import com.calldad.navigation.Routes
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

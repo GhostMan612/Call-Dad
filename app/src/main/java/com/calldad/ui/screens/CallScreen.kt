@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/CallScreen.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/CallScreen.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/CallScreen.kt
+package com.calldad.ui.screens
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -45,9 +45,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.calldad.app.ui.theme.CallDadTheme
-import com.calldad.app.ui.theme.CallGreenDark
-import com.calldad.app.ui.theme.HangUpRed
+import com.calldad.ui.theme.CallDadTheme
+import com.calldad.ui.theme.CallGreenDark
+import com.calldad.ui.theme.HangUpRed
 
 @Composable
 fun CallScreen(

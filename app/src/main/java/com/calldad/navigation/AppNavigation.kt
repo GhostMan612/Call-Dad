@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // navigation/AppNavigation.kt
-// Location: app/src/main/java/com/calldad/app/navigation/AppNavigation.kt
-package com.calldad.app.navigation
+// Location: app/src/main/java/com/calldad/navigation/AppNavigation.kt
+package com.calldad.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -12,11 +12,11 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.calldad.app.ui.screens.CallScreen
-import com.calldad.app.ui.screens.GameScreen
-import com.calldad.app.ui.screens.HelperScreen
-import com.calldad.app.ui.screens.HomeScreen
-import com.calldad.app.ui.screens.PttScreen
+import com.calldad.ui.screens.CallScreen
+import com.calldad.ui.screens.GameScreen
+import com.calldad.ui.screens.HelperScreen
+import com.calldad.ui.screens.HomeScreen
+import com.calldad.ui.screens.PttScreen
 
 /**
  * The complete Phase 1 navigation graph.

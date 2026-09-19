@@ -3,8 +3,8 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 // ui/screens/HomeScreen.kt
-// Location: app/src/main/java/com/calldad/app/ui/screens/HomeScreen.kt
-package com.calldad.app.ui.screens
+// Location: app/src/main/java/com/calldad/ui/screens/HomeScreen.kt
+package com.calldad.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,12 +31,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.calldad.app.ui.components.GiantActionCard
-import com.calldad.app.ui.theme.CallDadTheme
-import com.calldad.app.ui.theme.CallGreen
-import com.calldad.app.ui.theme.GameBlue
-import com.calldad.app.ui.theme.HelperPurple
-import com.calldad.app.ui.theme.PttOrange
+import com.calldad.ui.components.GiantActionCard
+import com.calldad.ui.theme.CallDadTheme
+import com.calldad.ui.theme.CallGreen
+import com.calldad.ui.theme.GameBlue
+import com.calldad.ui.theme.HelperPurple
+import com.calldad.ui.theme.PttOrange
 
 @Composable
 fun HomeScreen(
