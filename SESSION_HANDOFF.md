@@ -47,7 +47,7 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - D2: minSdk 30 (donor default) vs 26 (old kid tablet reuse). Owner: DeepSeek (ADR-001).
 - D3: v0.1 signaling: sovereign P2P+LAN+rendezvous only (recommended) vs Firebase/FCM assist. Owner: DeepSeek + Gemini (ADR-002). Firebase paid account ready but unused.
 - D4: Video: extend `LiveCallSession` UDP pattern with CameraX frames (recommended spike) vs adopt WebRTC (new dep, needs ADR). Owner: Gemini research.
-- D5: GitHub repo init + remote: when + who pushes (no push until told). Owner: operator.
+- D5: GitHub repo init + remote: DONE local (`main`, origin `https://github.com/GhostMan612/Call-Dad`, commit `d6399d9`, NO push per RULES §1.4). Push only on operator order. Owner: operator.
 
 ## Toolchain notes (2026-09-19, verified read-only)
 

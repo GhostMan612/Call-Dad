@@ -8,7 +8,7 @@
 - [x] Blueprints (MASTER/ROADMAP/CURRENT/ARCH + BP-01..05 + ADR-001..003)
 - [x] Docs (5 guides) + agents/commands + verify script + fixtures/assets placeholders
 - [x] `tools/verify_project.py` GREEN (2026-09-19: VERIFY PASS 10 dirs + 28 files)
-- [ ] Commit by explicit path (no push unless told)
+- [x] Commit by explicit path (2026-09-19: local `d6399d9`, no push — RULES §1.4)
 
 ## Phase 1 — Skeleton (BP-01, operator scaffold landed 2026-09-19)
 - [x] `app/` scaffold written (`com.calldad.app`, minSdk 26 per ADR-001-B, compile/target 35)
