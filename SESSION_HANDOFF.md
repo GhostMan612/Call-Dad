@@ -19,6 +19,11 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, OPERATOR VINDICATED — grid squeezed to zero by my QA card)
+
+- **Device screenshot proved it:** Home shows greeting + one full-screen grey QA card, zero grid. Cause: `GiantActionCard`'s inner `fillMaxSize` Column is safe only inside weighted rows; my unweighted QA card claimed the whole Column and squeezed both grid rows to zero height. Fix: fixed `.height(140.dp)` on the QA card (+ missing `height` import).
+- **Lesson recorded:** never trust "works" without a screenshot; the operator's report was precise and I argued instead of looking. Look first from now on.
+
 ## Where we are (2026-09-19, operator UX confusion — "no home", grid unseen)
 
 - **Operator report:** only ever sees grey QA card → overlay → Answer → 15s → NOT_FOUND error → Retry ("Ready") / Hang-up (back). Never mentions the 4 colored Home cards — UNCONFIRMED whether the 2x2 grid renders on their build. "Home" jargon retired; describing screens by visible text from now on.
