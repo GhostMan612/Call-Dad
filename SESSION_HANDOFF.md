@@ -32,6 +32,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Earlier FAILED session explained:** simultaneous callers clobbered the single room (stale SDP pair) — choreography + wipe/poll fixes resolved it. Single-room clobbering still must go before real use (Phase 5 per-call rooms).
 - **Still unverified:** AUDIO both ways (operator ear-check needed); TURN/symmetric-NAT (K8); Firestore rules still dev-open; no call-history/ringtone.
 
+## Where we are (2026-09-19, zombie-call guards — executor lane, UNCOMMITTED)
+
+- **Operator bug (confirmed design gap):** caller quick-hangups → callee answers a deleted room → sits InCall with a ghost forever. Guards: (1) 15s media watchdog on every InCall entry (no CONNECTED → silent Idle → auto-home, no scary card); (2) incoming overlay watches the room — vanishes pre-Answer → home. Peer-connected flag resets per call.
+- **Test:** BLU calls → hang up within 2s → Moto answers (or sits on overlay) → Moto should be home within ~15s, noRetry card, no crash. Then normal call to confirm the watchdog doesn't bite healthy calls.
+
 ## Where we are (2026-09-19, one-sided hangup root-caused — fix committed, needs rebuild)
 
 - **Operator report:** hanging up one side strands the other (must hang up both). Root cause: `endCall` fired teardown into `viewModelScope` then navigated instantly — the pop clears the VM, cancels the scope, and the room delete usually dies with it, so the peer's room-deleted listener never fires. Fix: `endCallAndAwait()` (3s cap, offline-safe) awaited BEFORE navigation on local hangup/decline; fire-and-forget `endCall()` kept for the remote-triggered path.

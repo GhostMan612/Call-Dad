@@ -47,6 +47,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         },
         onRemoteVideoTrack = { track -> _remoteVideoTrack.value = track },
         onConnectionStateChanged = { state ->
+            _peerConnected.value = (state == "CONNECTED")
             WebRtcLog.transition("VM observed peer state: $state")
         }
     )
@@ -68,6 +69,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _localVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val localVideoTrack: StateFlow<VideoTrack?> = _localVideoTrack.asStateFlow()
+
+    /** True once the peer connection reaches CONNECTED. Drives the watchdog. */
+    private val _peerConnected = MutableStateFlow(false)
 
     private var timerJob: Job? = null
     private var remoteListenerJob: Job? = null
@@ -168,6 +172,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     startedAtMillis = System.currentTimeMillis()
                 )
                 startTimer()
+                watchConnection()
                 listenForRemoteCandidates()
                 listenForRemoteHangup()
             } catch (t: Throwable) {
@@ -176,6 +181,40 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 if (t is CancellationException) throw t
                 reportError(t)
             }
+        }
+    }
+
+    /**
+     * Zombie-call guard: answered a room whose peer already vanished (quick
+     * hangup race) → media never connects. Give it 15s (LAN connects in
+     * ~1-3s proven), then leave silently — auto-home follows, no scary card
+     * for a kid whose dad hung up first. Revisit the timeout with TURN.
+     */
+    private fun watchConnection() {
+        viewModelScope.launch {
+            delay(15_000)
+            if (!_peerConnected.value && _state.value is CallState.InCall) {
+                WebRtcLog.transition("Media never connected — leaving call")
+                _state.value = CallState.Idle
+            }
+        }
+    }
+
+    /**
+     * Incoming overlay only: if the room vanishes before Answer (caller hung
+     * up fast), follow home instead of stranding on the overlay. Never
+     * tears down here — the room is already gone (or never existed).
+     */
+    fun watchIncomingRoom() {
+        viewModelScope.launch {
+            signaling.observeRoomDeleted()
+                .catch { /* stay on overlay; Answer path reports properly */ }
+                .collect {
+                    if (_state.value is CallState.Incoming) {
+                        WebRtcLog.transition("Room gone before answer — leaving")
+                        _state.value = CallState.Idle
+                    }
+                }
         }
     }
 
@@ -223,6 +262,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         _remoteVideoTrack.value = null
         _eglContext.value = null
         _localVideoTrack.value = null
+        _peerConnected.value = false
         _state.value = CallState.Idle
     }
 
@@ -268,6 +308,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                             startedAtMillis = System.currentTimeMillis()
                         )
                         startTimer()
+                        watchConnection()
                     }
                 }
         }

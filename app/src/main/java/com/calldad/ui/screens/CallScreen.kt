@@ -103,7 +103,10 @@ fun CallScreen(
     )
     LaunchedEffect(Unit) {
         requestPermissions()
-        if (mode == "incoming") viewModel.simulateIncomingCall()
+        if (mode == "incoming") {
+            viewModel.simulateIncomingCall()
+            viewModel.watchIncomingRoom()
+        }
     }
 
     // Any return to Idle after real activity (ringing, incoming, in-call,
