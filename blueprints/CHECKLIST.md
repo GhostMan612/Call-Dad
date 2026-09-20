@@ -28,7 +28,8 @@
 - [x] `webrtc/` (Config/Log/Client, stream-webrtc-android 1.3.10, trickle ICE, STUN-only) + `CallPermissions` + catalog dep + Manifest mic/camera (`required=false`)
 - [x] VM AndroidViewModel rewrite (callee fix) + `callViewModel()` factory fix + permission-gated auto-start
 - [x] Host gates GREEN in same build (unit + lint). Crash fix (idempotent dispose) + cancel-rethrow committed — needs rebuild
-- [ ] OPERATOR CONSOLE: enable Firestore on the project + create database + dev rules (calls/dad_channel + candidates, unauthenticated — Phase 5 hardens); then rebuild, retest, `logcat -s WebRTC:D` (expect `OFFER published`; never paste SDP/ICE)
+- [x] OPERATOR CONSOLE done (Firestore enabled): rebuild → `OFFER published` ~3s BOTH sessions, no UNKNOWN, no crash (PID 17206, lane-verified). Caller leg GREEN.
+- [ ] Callee leg (ANSWER/CONNECTED) needs Moto G; then Phase 4: TURN provider, renderer wiring, incoming-call overlay
 - [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
 
 ## Phase 3 — Chat + remote (BP-03)

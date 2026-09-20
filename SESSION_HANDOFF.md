@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, Phase 3 caller leg GREEN on device — both fixes proven)
+
+- **Operator run (BLU, new build PID 17206, two sessions):** `OFFER publish started` → **`OFFER published`** (~3s, Firestore enabled) in BOTH sessions. No `Call failed: UNKNOWN`. No crash.
+- **Executor lane check:** zero `FATAL/AndroidRuntime` for PID 17206 across two hangups; last crash remains 20:17 PID 16209 (old build). Double-dispose fix + cancel-rethrow both device-proven.
+- **G3-device status:** caller leg GREEN (publish + clean teardown). Callee leg (ANSWER/CONNECTED) BLOCKED on second device — Moto G gaming. Renderers + TURN + incoming-call UI remain Phase 4.
+
 ## Where we are (2026-09-19, ROOT CAUSES PROVEN from device — both fixed in code / console)
 
 - **Hang cause (Firestore, device-proven):** logcat shows `PERMISSION_DENIED: Cloud Firestore API has not been used in project calldad-508d7 before or it is disabled` — project exists and json matches, but **no Firestore database provisioned**. Writes pend in offline mode forever → "Calling Dad…" hang. Fix = console-side (operator): enable Firestore + create database + dev rules below. NOT a code bug.
