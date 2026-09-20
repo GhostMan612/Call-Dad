@@ -4,7 +4,7 @@
 
 ## Toolchain freeze (2026-09-19, verified read-only)
 
-AGP 8.13.2 / Kotlin 2.1.0 / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02+) / OkHttp 4.12.0 / CBOR 1.7.3 / Concentus 1.0.2 / CameraX 1.3.4 / ZXing 3.5.3 / NDK 27.0.12077973 / cmake 3.22.1. App target: compileSdk 35 / target 35 / minSdk 26 (ADR-001 DECIDED B). Phase 1 scaffold pins Compose BOM 2024.10.01 + nav 2.8.4 + lifecycle 2.8.7 (drift from frozen BOM 2024.12.01 — DeepSeek to rule).
+AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02+) / OkHttp 4.12.0 / CBOR 1.7.3 / Concentus 1.0.2 / CameraX 1.3.4 / ZXing 3.5.3 / NDK 27.0.12077973 / cmake 3.22.1. App target: compileSdk 35 / target 35 / minSdk 26 (ADR-001 DECIDED B). Phase 1 scaffold pins Compose BOM 2024.10.01 + nav 2.8.4 + lifecycle 2.8.7 (donor-frozen BOM retired — ADR-004). Phase 2: google-services 4.5.0 + Firebase BOM 34.19.0 (KTX merged, `getInstance()`).
 
 ## File map (scaffold session)
 

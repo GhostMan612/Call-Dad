@@ -7,14 +7,10 @@
 package com.calldad.data.signaling
 
 import com.google.firebase.firestore.DocumentChange
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.ktx.firestore
-import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -44,7 +40,7 @@ import kotlinx.coroutines.tasks.await
  * Android context. It exposes suspend functions and cold Flows only.
  */
 class SignalingClient(
-    private val firestore: FirebaseFirestore = Firebase.firestore,
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
     private val roomId: String = DEFAULT_ROOM_ID
 ) {
 

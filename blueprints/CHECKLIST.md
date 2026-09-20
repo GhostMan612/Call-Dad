@@ -19,7 +19,7 @@
 
 ## Phase 2 — Signaling (operator directive landed 2026-09-19, ADR-002 DECIDED Firebase)
 - [x] `data/signaling/` (`SignalingModels` + `SignalingClient` Firestore `calls/dad_channel`) + `CallState` sealed interface + VM rewire + CallScreen Error/Retry
-- [x] Gradle: Firebase BOM 33.5.1 + google-services 4.4.2 + coroutines-play-services; Manifest INTERNET + ACCESS_NETWORK_STATE; versionName 0.2.0 (toolchain kept at frozen AGP 8.13.2 / Kotlin 2.1.0 — draft downgrade rejected)
+- [x] Gradle: catalog is single source of truth (ADR-004: AGP 8.7.2 / Kotlin 2.0.21 adopted by operator); Firebase BOM 34.19.0 + google-services 4.5.0 + coroutines-play-services; KTX merged (`getInstance()`); Manifest INTERNET + ACCESS_NETWORK_STATE; versionName 0.2.0 / versionCode 2; package `com.calldad` held; junit restored
 - [x] `SignalingModelsTest` (pure-JVM: fromWire leniency, ICE defaults, error-kind contract) — GREEN pending human Studio run
 - [ ] Human Studio run: `testDebugUnitTest` (Routes + SignalingModels) + `lintDebug`; place `google-services.json` in `app/` (gitignored) for device signaling test
 - [ ] Sovereign P2P ports (BP-02 original scope) deferred to BP-04 revisit
