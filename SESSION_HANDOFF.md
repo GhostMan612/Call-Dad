@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, NOT_FOUND explained + two robustness fixes)
+
+- **Operator run (both phones, QA overlay):** `Call failed: NOT_FOUND` on both = CORRECT behavior — QA overlay is Firestore-blind; both sides opened it with no live OFFER in the room (caller must ring FIRST and stay on-screen; any hangup/decline teardown-deletes the room). Not a bug.
+- **Executor robustness fixes (committed next):** (1) caller wipes the room before publishing (stale ANSWER/candidates from prior QA runs or crashes no longer poison new calls — callee side never wipes); (2) callee polls `fetchOffer` ~15s on NOT_FOUND only (absorbs two-human tap timing; other failures still throw immediately).
+- **Correct choreography:** BLU taps Call Dad and WAITS on "Calling Dad…" → Moto taps gray QA button → overlay → Answer within ~15s → ANSWER published → both CONNECTED. Decline/hangup either side kills the room — start over if Retry appears.
+
 ## Where we are (2026-09-19, Phase 4 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed (1 created, 5 modified, package `com.calldad`):** `CallState.Incoming`, `VideoRenderer` (composable-owned init/release, client EGL only, null = black placeholder), `WebRtcConfig.iceServers` (STUN + REPLACE_ME-gated TURN), WebRTCClient (ctor iceServers, `eglContext`/`localVideoTrack` accessors, `buildRtcConfig()`, attach*/detach* + fields DELETED), VM (EGL/track flows, `simulateIncomingCall()`, cancel-safe), CallScreen (Incoming overlay + Answer/No ≥160dp, InCall video Box with remote/PiP/timer/controls, `mode` param), nav-arg `call?mode={mode}`, DEBUG-only Home QA button (`buildConfig=true`), `CallStateTest`.

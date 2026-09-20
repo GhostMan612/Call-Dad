@@ -79,6 +79,10 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
+                // Fresh room: wipe stale OFFER/ANSWER/candidates left by prior
+                // QA runs or crashes. Failures ignored (room may not exist).
+                // Caller-only: the callee must NEVER wipe a live OFFER.
+                runCatching { signaling.teardown() }
                 webrtc.initialize()
                 webrtc.createPeerConnection()
                 _eglContext.value = webrtc.eglContext
@@ -114,8 +118,25 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 _localVideoTrack.value = webrtc.localVideoTrack
                 webrtc.startCapture()
 
-                val offer = signaling.fetchOffer().getOrThrow()
-                webrtc.setRemoteDescription(offer)
+                // Two humans never tap in sync: poll for the OFFER up to
+                // ~15s (NOT_FOUND only — other failures throw immediately).
+                // Covers caller-taps-second as well as caller-taps-first.
+                var offer: SessionDescription? = null
+                repeat(15) {
+                    val attempt = signaling.fetchOffer()
+                    offer = attempt.getOrNull()
+                    if (offer != null) return@repeat
+                    val failure = attempt.exceptionOrNull() as? SignalingFailure
+                    if (failure != null && failure.kind != SignalingErrorKind.NOT_FOUND) {
+                        throw failure
+                    }
+                    delay(1_000)
+                }
+                val validOffer = offer ?: throw SignalingFailure(
+                    SignalingErrorKind.NOT_FOUND,
+                    "Call room does not exist yet."
+                )
+                webrtc.setRemoteDescription(validOffer)
                 WebRtcLog.transition("Remote OFFER applied")
 
                 val answer = webrtc.createAnswer()
