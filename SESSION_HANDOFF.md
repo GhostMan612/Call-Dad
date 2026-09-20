@@ -44,16 +44,18 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Prompt bugs fixed:** shared activity-scoped PTT VM (prompt's sharing claim was wrong twice — crash + silent non-sharing); no fake receiving pulse (template confirms Idle-forever accepted); host-test infra (returnDefaultValues + coroutines-test) + 4 engine tests.
 - **Needs operator:** Studio sync (no new deps — pure code) → §K matrix (press/release logcat, drag-off release, in-call interlock, boundary grep).
 
-## Where we are (2026-09-20, auth GREEN — Phase 5 unblocked)
-
-- **Operator run:** `Anonymous auth: signed in` (00:55, fresh PID) + `already signed in` on next launch (cached user persists). Whatever was wrong (console toggle or Play Services) is resolved. No PERMISSION_DENIED in the window; no crashes; PTT lane constructs cleanly (`Sovereign Mantle not on classpath` = expected).
-- **Next:** CALLEE_UID swap-builds → app-to-app call on per-call rooms → killed-app FCM test → §L rules proofs.
-
 ## Where we are (2026-09-20, Phase 5 console triage — rules live, auth failing on BLU)
 
 - **Lane-proven:** new strict rules ARE deployed (`ring/dad` listen → PERMISSION_DENIED for unauthenticated — correct). But BLU logs `Anonymous auth: FAILED`, so every Firestore call is denied and nothing works. Moto side unknown (wireless adb timed out from lane).
 - **Two suspects, operator checks in order:** (1) Anonymous provider not enabled in console (Auth → Sign-in method) — most likely; (2) BLU Play Services broken (GMS broker SecurityException + Phenotype errors in same window) → update Play Services, reboot.
 - **Needed back:** console Anonymous status; BLU retest (`Anonymous auth: signed in`?); Moto auth line (run locally — lane wireless timed out).
+
+## Where we are (2026-09-20, auth healed + PTT press/release GREEN on device)
+
+- **Auth:** `Anonymous auth: signed in` + `already signed in` on device 1 (console toggle or Play Services healed — operator-side fix worked). Moto auth line not yet seen.
+- **PTT §K.2 (Moto, 2 cycles):** focus granted → fallback to simulated → TX started → TX stopped → focus abandoned, twice, zero errors. Proprietary boundary holds at runtime too (no Mantle). Remaining: drag-off release, in-call interlock, camera toggle already seen working.
+- **No crashes** anywhere in either dump (only historical 09-19 tombstones).
+- **Still open:** Moto auth line; CALLEE_UID swap-build status; any actual Phase 5 call (no OFFER/ANSWER in these windows); full §L matrix (killed-app, rules proofs, TURN check).
 
 ## Where we are (2026-09-19, Phase 5 landed — executor lane, UNCOMMITTED)
 
