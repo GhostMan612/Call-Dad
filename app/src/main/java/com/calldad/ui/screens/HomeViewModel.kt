@@ -57,6 +57,9 @@ class HomeViewModel(
                     // Our own ringback (we called, hung up, called again):
                     // never ring ourselves. See OwnOfferRegistry.
                     if (OwnOfferRegistry.isOwn(remote.sdp)) return@collect
+                    // Abandoned ring (caller vanished without teardown):
+                    // never ring for the dead. See OFFER_STALE_MS.
+                    if (remote.isStale()) return@collect
                     val hash = remote.sdp.hashCode()
                     if (hash != seenOfferHash) {
                         seenOfferHash = hash

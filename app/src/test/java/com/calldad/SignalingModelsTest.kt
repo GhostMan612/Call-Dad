@@ -7,7 +7,9 @@
 package com.calldad
 
 import com.calldad.data.signaling.IceCandidate
+import com.calldad.data.signaling.OFFER_STALE_MS
 import com.calldad.data.signaling.SdpType
+import com.calldad.data.signaling.SessionDescription
 import com.calldad.data.signaling.SignalingErrorKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -47,5 +49,13 @@ class SignalingModelsTest {
         val kinds = SignalingErrorKind.entries.map { it.name }.toSet()
         setOf("OFFLINE", "TIMEOUT", "NOT_FOUND", "PERMISSION_DENIED", "MALFORMED", "UNKNOWN")
             .forEach { assert(kinds.contains(it)) }
+    }
+
+    @Test
+    fun staleOffer_neverAnswerable() {
+        val now = System.currentTimeMillis()
+        assert(SessionDescription(SdpType.OFFER, "s", now).isStale(now).not())
+        assert(SessionDescription(SdpType.OFFER, "s", now - OFFER_STALE_MS - 1).isStale(now))
+        assert(SessionDescription(SdpType.OFFER, "s", null).isStale(now))
     }
 }

@@ -6,6 +6,9 @@
 // Location: app/src/main/java/com/calldad/data/signaling/SignalingModels.kt
 package com.calldad.data.signaling
 
+/** Offers older than this are abandoned rings, never answered. */
+const val OFFER_STALE_MS = 60_000L
+
 /** The two SDP exchange roles permitted by the Firestore schema. */
 enum class SdpType {
     OFFER,
@@ -24,8 +27,13 @@ enum class SdpType {
 /** The value carried by the single call-room document. */
 data class SessionDescription(
     val type: SdpType,
-    val sdp: String
-)
+    val sdp: String,
+    /** Writer's clock at publish; null = pre-timestamp room (treated as stale). */
+    val createdAtMillis: Long? = null
+) {
+    fun isStale(nowMillis: Long = System.currentTimeMillis()): Boolean =
+        createdAtMillis == null || nowMillis - createdAtMillis > OFFER_STALE_MS
+}
 
 /**
  * A single trickled ICE candidate.

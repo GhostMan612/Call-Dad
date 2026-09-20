@@ -59,7 +59,8 @@ class SignalingClient(
         roomRef.set(
             mapOf(
                 FIELD_TYPE to SdpType.OFFER.name,
-                FIELD_SDP to localSdp
+                FIELD_SDP to localSdp,
+                FIELD_CREATED_AT to System.currentTimeMillis()
             ),
             SetOptions.merge()
         ).await()
@@ -85,7 +86,12 @@ class SignalingClient(
             // Our own ringback (double-call/hangup races) — not answerable.
             throw SignalingFailure(SignalingErrorKind.NOT_FOUND, "Call room does not exist yet.")
         }
-        SessionDescription(type, sdp)
+        val description = SessionDescription(type, sdp, snapshot.getLong(FIELD_CREATED_AT))
+        if (description.isStale()) {
+            // Abandoned ring (caller vanished without teardown) — not answerable.
+            throw SignalingFailure(SignalingErrorKind.NOT_FOUND, "Call room does not exist yet.")
+        }
+        description
     }
 
     /** Callee writes the ANSWER document. Idempotent via merge. */
@@ -122,7 +128,7 @@ class SignalingClient(
             val type = SdpType.fromWire(snapshot.getString(FIELD_TYPE))
             val sdp = snapshot.getString(FIELD_SDP)
             if (type == expectedType && !sdp.isNullOrBlank()) {
-                trySend(SessionDescription(type, sdp))
+                trySend(SessionDescription(type, sdp, snapshot.getLong(FIELD_CREATED_AT)))
             }
         }
         awaitClose { registration.remove() }
@@ -290,6 +296,7 @@ class SignalingClient(
 
         private const val FIELD_TYPE = "type"
         private const val FIELD_SDP = "sdp"
+        private const val FIELD_CREATED_AT = "createdAt"
         private const val FIELD_SERVER_URL = "serverUrl"
         private const val FIELD_SDP_MID = "sdpMid"
         private const val FIELD_SDP_MLINE_INDEX = "sdpMLineIndex"
