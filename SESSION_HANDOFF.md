@@ -44,6 +44,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Prompt bugs fixed:** shared activity-scoped PTT VM (prompt's sharing claim was wrong twice — crash + silent non-sharing); no fake receiving pulse (template confirms Idle-forever accepted); host-test infra (returnDefaultValues + coroutines-test) + 4 engine tests.
 - **Needs operator:** Studio sync (no new deps — pure code) → §K matrix (press/release logcat, drag-off release, in-call interlock, boundary grep).
 
+## Where we are (2026-09-20, auth GREEN — Phase 5 unblocked)
+
+- **Operator run:** `Anonymous auth: signed in` (00:55, fresh PID) + `already signed in` on next launch (cached user persists). Whatever was wrong (console toggle or Play Services) is resolved. No PERMISSION_DENIED in the window; no crashes; PTT lane constructs cleanly (`Sovereign Mantle not on classpath` = expected).
+- **Next:** CALLEE_UID swap-builds → app-to-app call on per-call rooms → killed-app FCM test → §L rules proofs.
+
 ## Where we are (2026-09-20, Phase 5 console triage — rules live, auth failing on BLU)
 
 - **Lane-proven:** new strict rules ARE deployed (`ring/dad` listen → PERMISSION_DENIED for unauthenticated — correct). But BLU logs `Anonymous auth: FAILED`, so every Firestore call is denied and nothing works. Moto side unknown (wireless adb timed out from lane).
