@@ -75,6 +75,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **NOT yet proven:** everything needs a Studio sync (new deps: auth/messaging/play-services-auth) + `firebase deploy --only functions,firestore:rules` + CALLEE_UID provisioning + killed-app test. Handoff §M boxes filled from operator pastes only — nothing fabricated.
 - **Operator console steps (in order):** enable Anonymous sign-in (Auth → Sign-in method) → `firebase deploy --only functions,firestore:rules` → read both phones' uids (Auth → Users) → CALLEE_UID swap-builds → test matrix in prompt §L.
 
+## Where we are (2026-09-20, rules mismatch proven — server runs stale rules)
+
+- **Operator pasted deployed rules:** old dev-open `calls/dad_channel` only. My `firestore.rules` (per-call rooms + ring bridge) was NEVER deployed → every Phase 5 write default-denies (`OFFER publish started` → 0.4s → PERMISSION_DENIED, both phones). All prior theories (crossed/stale UIDs) were wrong; apologize for the runaround.
+- **Fix (no rebuild):** console → Firestore → Rules → replace ALL text with `C:\Call-Dad\firestore.rules` content → Publish. Retest call immediately.
+- **Process correction (operator's call, accepted):** stop whack-a-mole from the lane; route open research through Gemini/DeepSeek, lane verifies against device evidence. Verification-first questions before theories.
+
 ## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
 
 - **Operator report:** Incoming overlay hangs until another call+hangup cycle; both phones on v3 (lane-verified dumpsys) so NOT a stale build. Root cause: overlay opens on a possibly-stale snapshot and only watches for FUTURE deletions — an already-gone room strands it (nothing will ever fire). Fix: `watchIncomingRoom` validates entry (fetchOffer answerable? else bounce home at once) then watches. Covers stale-snapshot, own-ringback, and pre-hangup races.
