@@ -265,7 +265,16 @@ class WebRTCClient(
 
     // -------- teardown --------
 
+    private var disposed = false
+
+    /**
+     * Idempotent: endCall() and onCleared() both call this (hangup pops the
+     * nav destination, clearing the VM). A second eglBase.release() throws —
+     * that was the post-hangup crash (executor fix, device-proven).
+     */
     fun dispose() {
+        if (disposed) return
+        disposed = true
         runCatching { videoCapturer?.stopCapture() }
         videoCapturer?.dispose(); videoCapturer = null
         surfaceHelper?.dispose(); surfaceHelper = null

@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, ROOT CAUSES PROVEN from device — both fixed in code / console)
+
+- **Hang cause (Firestore, device-proven):** logcat shows `PERMISSION_DENIED: Cloud Firestore API has not been used in project calldad-508d7 before or it is disabled` — project exists and json matches, but **no Firestore database provisioned**. Writes pend in offline mode forever → "Calling Dad…" hang. Fix = console-side (operator): enable Firestore + create database + dev rules below. NOT a code bug.
+- **Crash cause (double dispose, device-proven ×3):** `WebRTCClient.dispose:278` (`eglBase.release()`) from `onCleared` — endCall() disposes, hangup pops nav → VM cleared → onCleared disposes again → throw. Fixed: idempotent `disposed` guard. Plus `CancellationException` rethrow in startCall/answerCall (the stray `Call failed: UNKNOWN` was scope-cancel at clear, not an error).
+- **Fix commit pending:** dispose guard + cancel-rethrow above. Rebuild + retest after console step.
+
 ## Where we are (2026-09-19, first device run AUDITED — Firestore write never completed)
 
 - **Operator run (BLU, single device):** Home → Call Dad; logcat showed Factory→PC→capture→HAVE_LOCAL_OFFER→Local OFFER→GATHERING, then 26s silence, then user hangup (CLOSED cascade + dispose). **`OFFER published` NEVER appeared → per prompt §J, fault is in SignalingClient/Firestore, not WebRTC.**

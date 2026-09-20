@@ -19,6 +19,7 @@ import com.calldad.data.signaling.SignalingErrorKind
 import com.calldad.data.signaling.SignalingFailure
 import com.calldad.webrtc.WebRTCClient
 import com.calldad.webrtc.WebRtcLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,6 +84,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 listenForAnswer()
                 listenForRemoteCandidates()
             } catch (t: Throwable) {
+                // Scope cancellation (e.g. hangup popping the destination and
+                // clearing the VM) is not an error — never report it.
+                if (t is CancellationException) throw t
                 reportError(t)
             }
         }
@@ -115,6 +119,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 startTimer()
                 listenForRemoteCandidates()
             } catch (t: Throwable) {
+                // Scope cancellation (e.g. hangup popping the destination and
+                // clearing the VM) is not an error — never report it.
+                if (t is CancellationException) throw t
                 reportError(t)
             }
         }

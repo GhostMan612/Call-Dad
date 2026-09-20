@@ -27,7 +27,8 @@
 ## Phase 3 — Peer connection (architect prompt landed 2026-09-19, ADR-005)
 - [x] `webrtc/` (Config/Log/Client, stream-webrtc-android 1.3.10, trickle ICE, STUN-only) + `CallPermissions` + catalog dep + Manifest mic/camera (`required=false`)
 - [x] VM AndroidViewModel rewrite (callee fix) + `callViewModel()` factory fix + permission-gated auto-start
-- [x] Host gates GREEN in same build (unit + lint). Remaining human: `:app:assembleDebug` + `logcat -s WebRTC:D` state sequence (never paste SDP/ICE)
+- [x] Host gates GREEN in same build (unit + lint). Crash fix (idempotent dispose) + cancel-rethrow committed — needs rebuild
+- [ ] OPERATOR CONSOLE: enable Firestore on the project + create database + dev rules (calls/dad_channel + candidates, unauthenticated — Phase 5 hardens); then rebuild, retest, `logcat -s WebRTC:D` (expect `OFFER published`; never paste SDP/ICE)
 - [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
 
 ## Phase 3 — Chat + remote (BP-03)
