@@ -92,6 +92,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Lane read of both tails:** rings observed BOTH ways (`Ring observed` BLU ×2, Moto ×1), publishes clean, teardowns clean — popup path fully proven. But zero Answer taps anywhere: every overlay exit was silent (no DECLINED line) → system back button escaping without room cleanup → ghost rooms + the lingering both-caller chaos. Fix: BackHandler = Hang Up (Decline on overlay), same awaited path.
 - **Retest that matters:** rebuild both → BLU calls → Moto overlay → tap ANSWER (green, the one untested button) → expect CONNECTED both sides.
 
+## Where we are (2026-09-20, PHASE 5 CALL GREEN — video both ends, pipeline takes over)
+
+- **Operator report:** connects, video both directions. The candidate-flush fix closed it. No more midnight hunting — open research goes to Gemini per operator order.
+- **CRITICAL device intel (new):** BLU is a TEST MULE only. The daughter's real device is a tablet at home, currently inaccessible. Implications: minSdk 26 (ADR-001-B) must hold; tablet model + Android version + camera/mic behavior NEEDED before sign-off (operator to supply); emulator + BLU coverage does not equal tablet coverage.
+- **Still unproven (Gemini/Phase 6 territory):** killed-app FCM wakeup, TURN/mobile-data, token plumbing, rules proofs (§L), call history, tablet run.
+
 ## Where we are (2026-09-20, no-remote-video root-caused — executor lane, UNCOMMITTED)
 
 - **Operator report:** call connects UI-wise, local PiP only, drops ~14s (watchdog firing = peer never CONNECTED). Root cause: ICE gathering starts at createPeerConnection but the room only exists after the Firestore round-trip — early (host, LAN-critical) candidates were silently dropped while `currentCallId == null`. Fix: stash + flush on room creation; reset clears stash.
