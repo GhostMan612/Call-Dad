@@ -48,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +66,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.calldad.ui.components.VideoRenderer
 import com.calldad.ui.permissions.rememberCallPermissionRequest
 import com.calldad.ui.theme.CallDadTheme
@@ -121,6 +123,10 @@ fun CallScreen(
         }
     }
 
+    // Local hangup/decline awaits the room delete BEFORE navigating:
+    // popping the screen clears the VM and would cancel a fire-and-forget
+    // teardown, stranding the peer (device-proven). 3s cap inside.
+    val scope = rememberCoroutineScope()
     CallContent(
         state = state,
         elapsedSeconds = elapsed,
@@ -132,12 +138,16 @@ fun CallScreen(
         onRetry = viewModel::clearError,
         onAnswer = { viewModel.answerCall() },
         onDecline = {
-            viewModel.endCall()
-            onFinished()
+            scope.launch {
+                viewModel.endCallAndAwait()
+                onFinished()
+            }
         },
         onHangUp = {
-            viewModel.endCall()
-            onFinished()
+            scope.launch {
+                viewModel.endCallAndAwait()
+                onFinished()
+            }
         },
         modifier = modifier
     )

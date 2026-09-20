@@ -32,6 +32,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Earlier FAILED session explained:** simultaneous callers clobbered the single room (stale SDP pair) — choreography + wipe/poll fixes resolved it. Single-room clobbering still must go before real use (Phase 5 per-call rooms).
 - **Still unverified:** AUDIO both ways (operator ear-check needed); TURN/symmetric-NAT (K8); Firestore rules still dev-open; no call-history/ringtone.
 
+## Where we are (2026-09-19, one-sided hangup root-caused — fix committed, needs rebuild)
+
+- **Operator report:** hanging up one side strands the other (must hang up both). Root cause: `endCall` fired teardown into `viewModelScope` then navigated instantly — the pop clears the VM, cancels the scope, and the room delete usually dies with it, so the peer's room-deleted listener never fires. Fix: `endCallAndAwait()` (3s cap, offline-safe) awaited BEFORE navigation on local hangup/decline; fire-and-forget `endCall()` kept for the remote-triggered path.
+- **Test:** rebuild both → call → hang up ONE side → other should glide home ~1s later.
+
 ## Where we are (2026-09-19, remote hangup + QA retired — executor lane, UNCOMMITTED)
 
 - **Operator asked, executor built:** peer hangup/decline now mirrors home on both sides (`observeRoomDeleted` → `endCall`, auto-home on Idle-after-activity). Grey QA button REMOVED (auto-popup proven; route + `simulateIncomingCall` kept as Phase 5 FCM entry).

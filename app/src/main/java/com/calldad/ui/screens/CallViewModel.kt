@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 import java.util.Locale
@@ -193,14 +194,36 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * composition is gone.
      */
     fun endCall() {
+        cancelSessionJobs()
+        resetCallState()
+        viewModelScope.launch { signaling.teardown() }
+    }
+
+    /**
+     * Local user-initiated hangup/decline. Same reset, but the room delete is
+     * awaited (3s cap) BEFORE the caller navigates: navigating pops the
+     * screen, clears this VM, and cancels viewModelScope — a fire-and-forget
+     * teardown usually dies with it, leaving the room behind so the peer
+     * hangs forever (device-proven). Offline can't trap us: the timeout
+     * guarantees navigation proceeds.
+     */
+    suspend fun endCallAndAwait() {
+        cancelSessionJobs()
+        resetCallState()
+        withTimeoutOrNull(3_000) { signaling.teardown() }
+    }
+
+    private fun cancelSessionJobs() {
         remoteListenerJob?.cancel(); remoteListenerJob = null
         timerJob?.cancel(); timerJob = null
+    }
+
+    private fun resetCallState() {
         _elapsedSeconds.value = 0
         _remoteVideoTrack.value = null
         _eglContext.value = null
         _localVideoTrack.value = null
         _state.value = CallState.Idle
-        viewModelScope.launch { signaling.teardown() }
     }
 
     fun onToggleCamera() {
