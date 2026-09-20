@@ -50,6 +50,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Two suspects, operator checks in order:** (1) Anonymous provider not enabled in console (Auth → Sign-in method) — most likely; (2) BLU Play Services broken (GMS broker SecurityException + Phenotype errors in same window) → update Play Services, reboot.
 - **Needed back:** console Anonymous status; BLU retest (`Anonymous auth: signed in`?); Moto auth line (run locally — lane wireless timed out).
 
+## Where we are (2026-09-20, both phones authed — Phase 5 call unblocked)
+
+- **Moto auth:** `already signed in` (fresh-buffer proof). Both phones authenticated; strict rules passable from both sides.
+- **Next:** CALLEE_UID swap-build confirm → first per-call-room call (green card → auto-popup → CONNECTED) → §L remainder (killed-app, rules proofs, TURN check).
+
 ## Where we are (2026-09-20, PTT durable on Moto — 8+ clean cycles, auth TBD)
 
 - **Moto (PID 28103, one long session):** SIX more press/release cycles, all textbook (granted→fallback→started→stopped→abandoned), zero errors, zero FATALs. Fallback line absent after the first swap (persistent engine instance — correct). Interlock/drag-off still untested.
