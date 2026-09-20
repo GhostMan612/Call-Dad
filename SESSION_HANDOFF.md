@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, two-device run: BOTH sides called, nobody answered — by design)
+
+- **Operator run (Moto + BLU):** both logs show caller leg only (`OFFER published` in <2s both — Firestore healthy), then hangup. No ANSWER anywhere: no incoming-call UI exists yet (carried Phase 4 gap), so `answerCall()` was never invoked on either side. Nothing failed; the callee path is simply unreachable from the UI.
+- **OFFER-overwrites-OFFER note:** single hardcoded room `dad_channel` + merge writes mean the second caller's OFFER clobbers the first — fine for one-channel testing, must go before multi-call (Phase 4: per-call rooms).
+- **Decision needed (operator):** (A) executor builds minimal incoming-call overlay now (OFFER listener → Answer/Decline → answerCall()); (B) aiortc desktop-callee experiment to prove media without app changes; (C) wait for Gemini Phase 4 instructions (already requested).
+
 ## Where we are (2026-09-19, Phase 3 caller leg GREEN on device — both fixes proven)
 
 - **Operator run (BLU, new build PID 17206, two sessions):** `OFFER publish started` → **`OFFER published`** (~3s, Firestore enabled) in BOTH sessions. No `Call failed: UNKNOWN`. No crash.
