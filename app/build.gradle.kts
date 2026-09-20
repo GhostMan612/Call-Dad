@@ -47,6 +47,9 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.kotlinx.coroutines.play.services)
 
+    // ---- Phase 3: Stream WebRTC fork (drop-in org.webrtc.*, ~20MB native) ----
+    implementation(libs.webrtc.android)
+
     // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
     testImplementation("junit:junit:4.13.2")
 }

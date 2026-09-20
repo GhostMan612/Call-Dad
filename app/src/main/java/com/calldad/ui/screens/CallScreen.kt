@@ -2,13 +2,15 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/CallScreen.kt — Phase 2 rewire
+// ui/screens/CallScreen.kt — Phase 3: permission-gated auto-start
 // Location: app/src/main/java/com/calldad/ui/screens/CallScreen.kt
 //
 // The composable hierarchy and dimensions from Phase 1 are preserved.
-// Only the state reads and the new Error branch are added.
+// Phase 3 deltas: VM factory (AndroidViewModel needs Application),
+// permission-gated startCall(), explicit Connecting branch. No renderers.
 package com.calldad.ui.screens
 
+import android.app.Application
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,19 +39,27 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.calldad.ui.permissions.rememberCallPermissionRequest
 import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.CallGreenDark
 import com.calldad.ui.theme.HangUpRed
@@ -58,11 +68,20 @@ import com.calldad.ui.theme.HangUpRed
 fun CallScreen(
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: CallViewModel = viewModel()
+    viewModel: CallViewModel = callViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val elapsed by viewModel.elapsedSeconds.collectAsStateWithLifecycle()
     val isCameraOn by viewModel.isCameraOn.collectAsStateWithLifecycle()
+
+    // Permission-gated auto-start: Home → Call Dad requests mic/camera once,
+    // then starts the caller path exactly once (tap-spam safe).
+    var started by remember { mutableStateOf(false) }
+    val requestPermissions = rememberCallPermissionRequest(
+        onGranted = { if (!started) { started = true; viewModel.startCall() } },
+        onDenied = { /* Phase 4: route to a parent-facing helper screen */ }
+    )
+    LaunchedEffect(Unit) { requestPermissions() }
 
     CallContent(
         state = state,
@@ -75,6 +94,24 @@ fun CallScreen(
             onFinished()
         },
         modifier = modifier
+    )
+}
+
+/**
+ * Executor fix (architect prompt missed this): CallViewModel is an
+ * AndroidViewModel (non-empty constructor), so the default viewModel()
+ * factory cannot build it — it would crash on navigation. Manual factory.
+ */
+@Composable
+private fun callViewModel(): CallViewModel {
+    val application = LocalContext.current.applicationContext as Application
+    return viewModel(
+        factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return CallViewModel(application) as T
+            }
+        }
     )
 }
 

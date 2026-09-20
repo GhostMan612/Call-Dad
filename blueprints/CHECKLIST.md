@@ -24,6 +24,12 @@
 - [ ] Human Studio run: `testDebugUnitTest` (Routes + SignalingModels) + `lintDebug`; place `google-services.json` in `app/` (gitignored) for device signaling test
 - [ ] Sovereign P2P ports (BP-02 original scope) deferred to BP-04 revisit
 
+## Phase 3 — Peer connection (architect prompt landed 2026-09-19, ADR-005)
+- [x] `webrtc/` (Config/Log/Client, Stream 1.1.0, trickle ICE, STUN-only) + `CallPermissions` + catalog dep + Manifest mic/camera (`required=false`)
+- [x] VM AndroidViewModel rewrite (callee fix) + `callViewModel()` factory fix + permission-gated auto-start
+- [ ] Human: `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `logcat -s WebRTC:D` state sequence (never paste SDP/ICE)
+- [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
+
 ## Phase 3 — Chat + remote (BP-03)
 - [ ] `SovereignCommsEngine` + receipts + voice memo
 - [ ] `RendezvousClient` + relay deploy; remote matrix proof (human)
