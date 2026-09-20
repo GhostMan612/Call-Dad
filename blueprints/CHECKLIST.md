@@ -24,12 +24,15 @@
 - [x] Human Studio run GREEN (same build); `google-services.json` confirmed on disk in `app/` (gitignored). Device signaling test pending.
 - [ ] Sovereign P2P ports (BP-02 original scope) deferred to BP-04 revisit
 
-## Phase 3 — Peer connection (architect prompt landed 2026-09-19, ADR-005)
+## Phase 3 — Peer connection (LANDED, caller leg GREEN on device)
 - [x] `webrtc/` (Config/Log/Client, stream-webrtc-android 1.3.10, trickle ICE, STUN-only) + `CallPermissions` + catalog dep + Manifest mic/camera (`required=false`)
 - [x] VM AndroidViewModel rewrite (callee fix) + `callViewModel()` factory fix + permission-gated auto-start
-- [x] Host gates GREEN in same build (unit + lint). Crash fix (idempotent dispose) + cancel-rethrow committed — needs rebuild
 - [x] OPERATOR CONSOLE done (Firestore enabled): rebuild → `OFFER published` ~3s BOTH sessions, no UNKNOWN, no crash (PID 17206, lane-verified). Caller leg GREEN.
-- [ ] Callee leg (ANSWER/CONNECTED) needs Moto G; then Phase 4: TURN provider, renderer wiring, incoming-call overlay
+
+## Phase 4 — Rendering + incoming overlay (architect prompt landed 2026-09-19, ADR-005/006)
+- [x] `CallState.Incoming` + `VideoRenderer` + TURN-sentinel config + client deltas (accessors, buildRtcConfig, dead renderers removed)
+- [x] VM EGL/track flows + `simulateIncomingCall()` + CallScreen overlay/answer + nav-arg + DEBUG QA hook (real-path, ADR-006) + `CallStateTest`
+- [ ] Human: rebuild + install BOTH phones → BLU calls, Moto QA-button → Answer → ANSWER published → CONNECTED + video both ways; report EGL/black-screen verbatim
 - [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
 
 ## Phase 3 — Chat + remote (BP-03)

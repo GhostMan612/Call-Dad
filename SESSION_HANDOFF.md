@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, Phase 4 landed — executor lane, UNCOMMITTED)
+
+- **Architect prompt executed (1 created, 5 modified, package `com.calldad`):** `CallState.Incoming`, `VideoRenderer` (composable-owned init/release, client EGL only, null = black placeholder), `WebRtcConfig.iceServers` (STUN + REPLACE_ME-gated TURN), WebRTCClient (ctor iceServers, `eglContext`/`localVideoTrack` accessors, `buildRtcConfig()`, attach*/detach* + fields DELETED), VM (EGL/track flows, `simulateIncomingCall()`, cancel-safe), CallScreen (Incoming overlay + Answer/No ≥160dp, InCall video Box with remote/PiP/timer/controls, `mode` param), nav-arg `call?mode={mode}`, DEBUG-only Home QA button (`buildConfig=true`), `CallStateTest`.
+- **Executor scope call (ADR-006):** QA hook drives the REAL `answerCall()` (not a fake overlay) so two-device E2E is actually testable; production route untouched; decline-wipes-room accepted; per-call rooms → Phase 5.
+- **Gates:** verify re-run next. Operator: rebuild, install both phones, BLU calls → Moto opens QA button → Answer → expect ANSWER published → both CONNECTED with video. Watch for EGL/black-screen issues (report exactly).
+
 ## Where we are (2026-09-19, two-device run: BOTH sides called, nobody answered — by design)
 
 - **Operator run (Moto + BLU):** both logs show caller leg only (`OFFER published` in <2s both — Firestore healthy), then hangup. No ANSWER anywhere: no incoming-call UI exists yet (carried Phase 4 gap), so `answerCall()` was never invoked on either side. Nothing failed; the callee path is simply unreachable from the UI.

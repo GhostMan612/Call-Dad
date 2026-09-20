@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 import java.util.Locale
 
@@ -60,6 +61,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
 
+    private val _eglContext = MutableStateFlow<EglBase.Context?>(null)
+    val eglContext: StateFlow<EglBase.Context?> = _eglContext.asStateFlow()
+
+    private val _localVideoTrack = MutableStateFlow<VideoTrack?>(null)
+    val localVideoTrack: StateFlow<VideoTrack?> = _localVideoTrack.asStateFlow()
+
     private var timerJob: Job? = null
     private var remoteListenerJob: Job? = null
 
@@ -74,6 +81,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 webrtc.initialize()
                 webrtc.createPeerConnection()
+                _eglContext.value = webrtc.eglContext
+                _localVideoTrack.value = webrtc.localVideoTrack
                 webrtc.startCapture()
 
                 val offer = webrtc.createOffer()
@@ -101,6 +110,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 webrtc.initialize()
                 webrtc.createPeerConnection()
+                _eglContext.value = webrtc.eglContext
+                _localVideoTrack.value = webrtc.localVideoTrack
                 webrtc.startCapture()
 
                 val offer = signaling.fetchOffer().getOrThrow()
@@ -133,11 +144,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Caller's hangup OR callee's decline. Also resets from Incoming. */
     fun endCall() {
         remoteListenerJob?.cancel(); remoteListenerJob = null
         timerJob?.cancel(); timerJob = null
         _elapsedSeconds.value = 0
         _remoteVideoTrack.value = null
+        _eglContext.value = null
+        _localVideoTrack.value = null
         _state.value = CallState.Idle
         webrtc.dispose()
         viewModelScope.launch { signaling.teardown() }
@@ -150,6 +164,16 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearError() {
         if (_state.value is CallState.Error) _state.value = CallState.Idle
+    }
+
+    /**
+     * QA-only. Drives the Incoming overlay without an FCM push.
+     * Phase 5 will replace this with a real FCM-triggered transition.
+     * Guard: only reachable when the current state is Idle.
+     */
+    fun simulateIncomingCall() {
+        if (_state.value !is CallState.Idle) return
+        _state.value = CallState.Incoming(fromDisplayName = "Dad")
     }
 
     override fun onCleared() {

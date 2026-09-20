@@ -9,9 +9,11 @@ package com.calldad.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.calldad.ui.screens.CallScreen
 import com.calldad.ui.screens.GameScreen
 import com.calldad.ui.screens.HelperScreen
@@ -39,8 +41,14 @@ fun AppNavHost(
         composable(Routes.HOME) {
             HomeScreen(onNavigate = navController::navigateGuarded)
         }
-        composable(Routes.CALL) {
-            CallScreen(onFinished = navController::returnHome)
+        composable(
+            route = "${Routes.CALL}?mode={mode}",
+            arguments = listOf(navArgument("mode") { type = NavType.StringType; defaultValue = "caller" })
+        ) { entry ->
+            CallScreen(
+                onFinished = navController::returnHome,
+                mode = entry.arguments?.getString("mode") ?: "caller"
+            )
         }
         composable(Routes.PTT) {
             PttScreen(onBackHome = navController::returnHome)

@@ -29,12 +29,12 @@ import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription as RtcSessionDescription
 import org.webrtc.SurfaceTextureHelper
-import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 
 class WebRTCClient(
     context: Context,
+    private val iceServers: List<IceServerConfig> = WebRtcConfig.iceServers,
     private val onLocalIceCandidate: (DomainIceCandidate) -> Unit,
     private val onRemoteVideoTrack: (VideoTrack) -> Unit,
     private val onConnectionStateChanged: (String) -> Unit
@@ -55,8 +55,16 @@ class WebRTCClient(
     private var micEnabled = true
     private var cameraEnabled = true
 
-    private var remoteRenderer: SurfaceViewRenderer? = null
-    private var pendingRemoteTrack: VideoTrack? = null
+    /**
+     * The EGL context the renderer MUST init with. Passed into
+     * VideoRenderer(eglContext = ...). Do not create a second EglBase.
+     */
+    val eglContext: EglBase.Context
+        get() = eglBase.eglBaseContext
+
+    /** Local camera track. Non-null after createPeerConnection(). */
+    val localVideoTrack: VideoTrack?
+        get() = videoTrack
 
     // -------- lifecycle --------
 
@@ -76,13 +84,14 @@ class WebRTCClient(
         WebRtcLog.transition("PeerConnectionFactory initialized")
     }
 
-    fun createPeerConnection() {
-        if (peerConnection != null) return
-        val f = factory ?: error("initialize() must be called first")
-        val iceServers = WebRtcConfig.ICE_SERVERS.map {
-            PeerConnection.IceServer.builder(it).createIceServer()
+    private fun buildRtcConfig(): PeerConnection.RTCConfiguration {
+        val rtcIceServers = iceServers.map { cfg ->
+            PeerConnection.IceServer.builder(cfg.url).apply {
+                cfg.username?.let { setUsername(it) }
+                cfg.credential?.let { setPassword(it) }
+            }.createIceServer()
         }
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+        return PeerConnection.RTCConfiguration(rtcIceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             iceTransportsType = PeerConnection.IceTransportsType.ALL
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
@@ -90,6 +99,12 @@ class WebRTCClient(
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
         }
+    }
+
+    fun createPeerConnection() {
+        if (peerConnection != null) return
+        val f = factory ?: error("initialize() must be called first")
+        val rtcConfig = buildRtcConfig()
         peerConnection = f.createPeerConnection(rtcConfig, observer)
             ?: error("createPeerConnection returned null")
         attachLocalTracks()
@@ -243,26 +258,6 @@ class WebRTCClient(
         WebRtcLog.transition("Camera switched")
     }
 
-    // -------- renderers (Phase 4 hooks; safe to leave unused) --------
-
-    fun attachLocalRenderer(renderer: SurfaceViewRenderer) {
-        renderer.init(eglBase.eglBaseContext, null)
-        renderer.setMirror(true)
-        videoTrack?.addSink(renderer)
-    }
-
-    fun attachRemoteRenderer(renderer: SurfaceViewRenderer) {
-        renderer.init(eglBase.eglBaseContext, null)
-        renderer.setMirror(false)
-        remoteRenderer = renderer
-        pendingRemoteTrack?.addSink(renderer)
-    }
-
-    fun detachRenderers() {
-        remoteRenderer?.let { pendingRemoteTrack?.removeSink(it) }
-        remoteRenderer = null
-    }
-
     // -------- teardown --------
 
     private var disposed = false
@@ -344,14 +339,11 @@ class WebRTCClient(
         }
     }
 
+    private var remoteTrackDelivered = false
     private fun handleRemoteTrack(track: VideoTrack) {
-        if (pendingRemoteTrack != null) return   // dedupe: onTrack + onAddTrack both fire
-        pendingRemoteTrack = track
+        if (remoteTrackDelivered) return
+        remoteTrackDelivered = true
         onRemoteVideoTrack(track)
-        remoteRenderer?.let {
-            track.addSink(it)
-            WebRtcLog.transition("Remote video attached to renderer")
-        }
     }
 }
 

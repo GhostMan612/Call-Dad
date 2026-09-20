@@ -32,6 +32,15 @@ sealed interface CallState {
         val startedAtMillis: Long
     ) : CallState
 
+    /**
+     * Callee-only. Rendered as a full-screen accept/decline overlay.
+     * Phase 4 populates this via CallViewModel.simulateIncomingCall() for QA.
+     * Phase 5 (FCM) will populate it from a real push payload.
+     */
+    data class Incoming(
+        val fromDisplayName: String = "Dad"
+    ) : CallState
+
     /** Recoverable failure surfaced to the child as a single big Retry button. */
     data class Error(
         val kind: com.calldad.data.signaling.SignalingErrorKind,

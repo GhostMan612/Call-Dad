@@ -103,6 +103,19 @@ private fun HomeContent(
                     if (rowItems.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
+
+            // QA-only incoming-call hook. DEBUG builds only — never ships.
+            // Opens the Call screen in incoming mode so simulateIncomingCall()
+            // drives the REAL answerCall() path (no fake overlay, no FCM yet).
+            if (com.calldad.BuildConfig.DEBUG) {
+                GiantActionCard(
+                    label = "QA: incoming call",
+                    icon = androidx.compose.material.icons.Icons.Filled.Call,
+                    containerColor = androidx.compose.ui.graphics.Color(0xFF616161),
+                    onClick = { onActionSelected("${com.calldad.navigation.Routes.CALL}?mode=incoming") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

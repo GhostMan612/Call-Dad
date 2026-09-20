@@ -17,7 +17,11 @@ android {
         versionName = "0.2.0"
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        // QA incoming-call hook is DEBUG-gated via BuildConfig.DEBUG.
+        buildConfig = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

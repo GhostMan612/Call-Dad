@@ -19,7 +19,8 @@ AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / 
 | `fixtures/` + `assets/` | PLACEHOLDERS | synthetic only |
 | `app/` | PHASE 1 LANDED 2026-09-19 (uncommitted) | `com.calldad`: MainActivity + Routes/AppNavHost + theme(3) + GiantComponents + 4 screens w/ ViewModels + Manifest + themes/colors + `RoutesTest` + module/root Gradle + catalog + wrapper props (no `gradlew` binaries — Studio generates) |
 | `app/.../data/signaling/` | PHASE 2 LANDED 2026-09-19 (uncommitted) | `SignalingModels` + `SignalingClient` (Firestore `calls/dad_channel`) + `CallState` + VM rewire + Screen Error/Retry + `SignalingModelsTest` + Firebase Gradle/Manifest |
-| `app/.../webrtc/` + `ui/permissions/` | PHASE 3 LANDED 2026-09-19 (uncommitted) | `WebRtcConfig` + `WebRtcLog` guardrail + `WebRTCClient` (Stream 1.1.0, trickle ICE, STUN-only) + `CallPermissions` + VM rewrite + factory fix + mic/camera perms |
+| `app/.../webrtc/` + `ui/permissions/` | PHASE 3 LANDED (caller leg GREEN on device) | `WebRtcConfig` + `WebRtcLog` guardrail + `WebRTCClient` (Stream 1.3.10, trickle ICE, STUN-only) + `CallPermissions` + VM rewrite + factory fix + mic/camera perms |
+| `app/.../ui/components/VideoRenderer.kt` + overlay | PHASE 4 LANDED 2026-09-19 (uncommitted) | `CallState.Incoming`, composable-owned renderers, TURN-sentinel config, nav-arg `call?mode=` + DEBUG QA hook (real-path answer), `CallStateTest` |
 | `SPEC_SHEET.json` | AMENDED | package `com.calldad` (Phase 1 truth); routes Home/Call/Ptt/Game/Helper supersede Chat/Photo/Log for Phase 1; v0.2.0 Firebase-signaling-active |
 | `C:\venv-hub\call-dad\` | CREATED (empty) | isolated lane |
 
