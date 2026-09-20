@@ -19,6 +19,13 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, FULL E2E VIDEO CALL GREEN — both phones, lane-witnessed)
+
+- **The call (21:40):** BLU caller → Moto QA-Answer → OFFER/ANSWER exchanged clean → **PeerConnectionState + ICE CONNECTED on BOTH**. No clobbering, no UNKNOWN, no crash.
+- **Lane-witnessed screenshots (in `C:\venv-hub\call-dad\`, NEVER repo):** BLU shows Moto's feed full-screen + own PiP + 00:25 timer; Moto shows own PiP + BLU feed (aimed at ceiling) + 00:55 timer. Video flows both ways; controls correct on both.
+- **Earlier FAILED session explained:** simultaneous callers clobbered the single room (stale SDP pair) — choreography + wipe/poll fixes resolved it. Single-room clobbering still must go before real use (Phase 5 per-call rooms).
+- **Still unverified:** AUDIO both ways (operator ear-check needed); TURN/symmetric-NAT (K8); Firestore rules still dev-open; no call-history/ringtone.
+
 ## Where we are (2026-09-19, OPERATOR VINDICATED — grid squeezed to zero by my QA card)
 
 - **Device screenshot proved it:** Home shows greeting + one full-screen grey QA card, zero grid. Cause: `GiantActionCard`'s inner `fillMaxSize` Column is safe only inside weighted rows; my unweighted QA card claimed the whole Column and squeezed both grid rows to zero height. Fix: fixed `.height(140.dp)` on the QA card (+ missing `height` import).

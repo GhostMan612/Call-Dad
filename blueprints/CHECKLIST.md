@@ -29,10 +29,10 @@
 - [x] VM AndroidViewModel rewrite (callee fix) + `callViewModel()` factory fix + permission-gated auto-start
 - [x] OPERATOR CONSOLE done (Firestore enabled): rebuild → `OFFER published` ~3s BOTH sessions, no UNKNOWN, no crash (PID 17206, lane-verified). Caller leg GREEN.
 
-## Phase 4 — Rendering + incoming overlay (architect prompt landed 2026-09-19, ADR-005/006)
-- [x] `CallState.Incoming` + `VideoRenderer` + TURN-sentinel config + client deltas (accessors, buildRtcConfig, dead renderers removed)
-- [x] VM EGL/track flows + `simulateIncomingCall()` + CallScreen overlay/answer + nav-arg + DEBUG QA hook (real-path, ADR-006) + `CallStateTest`
-- [ ] Human: rebuild + install BOTH phones → BLU calls, Moto QA-button → Answer → ANSWER published → CONNECTED + video both ways; report EGL/black-screen verbatim
+## Phase 4 — Rendering + incoming overlay (DEVICE-PROVEN 2026-09-19)
+- [x] `CallState.Incoming` + `VideoRenderer` + TURN-sentinel config + client deltas + VM + overlay + nav-arg QA hook + `CallStateTest`
+- [x] E2E on BLU + Moto: CONNECTED both, video both ways (screenshots lane-witnessed), clean hangup, zero crashes
+- [ ] Audio confirm (operator ears); then Phase 5: TURN, per-call rooms, FCM/wakeup, rules lockdown, history/ringtone
 - [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
 
 ## Phase 3 — Chat + remote (BP-03)
