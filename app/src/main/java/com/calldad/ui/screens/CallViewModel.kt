@@ -13,6 +13,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.calldad.data.signaling.IceCandidate
+import com.calldad.data.signaling.OwnOfferRegistry
 import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SessionDescription
 import com.calldad.data.signaling.SignalingClient
