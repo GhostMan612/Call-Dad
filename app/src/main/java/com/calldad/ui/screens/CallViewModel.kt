@@ -166,7 +166,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Caller's hangup OR callee's decline. Also resets from Incoming. */
+    /**
+     * Caller's hangup OR callee's decline. Also resets from Incoming.
+     *
+     * Does NOT dispose WebRTC here: the composables still hold native sinks
+     * until navigation pops (removeSink on a disposed track = SIGSEGV —
+     * device-proven). Disposal happens in onCleared, strictly after the
+     * composition is gone.
+     */
     fun endCall() {
         remoteListenerJob?.cancel(); remoteListenerJob = null
         timerJob?.cancel(); timerJob = null
@@ -175,7 +182,6 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         _eglContext.value = null
         _localVideoTrack.value = null
         _state.value = CallState.Idle
-        webrtc.dispose()
         viewModelScope.launch { signaling.teardown() }
     }
 

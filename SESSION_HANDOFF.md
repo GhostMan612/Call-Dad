@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, hangup SIGSEGV root-caused — fix committed, needs rebuild)
+
+- **Tombstone proof (BLU, every hangup):** `VideoTrack.removeSink` → libjingle SIGSEGV from `VideoRenderer onDispose`. Race: endCall() disposed native tracks while composables still held sinks; navigation-pop disposal then touched freed memory. Fix: endCall no longer disposes — disposal only in onCleared (composition gone first). No FATALs since fix exists yet — rebuild + hangup test PENDING.
+- **Lock-screen behavior (accepted, Phase 5 polish):** connection persists, camera pauses on lock, resumes after unlock. No action now.
+- **Audio:** operator-confirmed both ways. Quality: near-zero lag, not choppy. Phase 4 NOT closed until hangup-clean rebuild passes.
+
 ## Where we are (2026-09-19, FULL E2E VIDEO CALL GREEN — both phones, lane-witnessed)
 
 - **The call (21:40):** BLU caller → Moto QA-Answer → OFFER/ANSWER exchanged clean → **PeerConnectionState + ICE CONNECTED on BOTH**. No clobbering, no UNKNOWN, no crash.
