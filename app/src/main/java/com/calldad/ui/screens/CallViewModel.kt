@@ -204,9 +204,22 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * Incoming overlay only: if the room vanishes before Answer (caller hung
      * up fast), follow home instead of stranding on the overlay. Never
      * tears down here — the room is already gone (or never existed).
+     *
+     * Validates FIRST: the overlay opens on a snapshot that may already be
+     * stale (offer lived and died between the Home listener's read and this
+     * screen's arrival). A non-answerable room — missing, malformed, or our
+     * own ringback — bounces straight home instead of stranding.
      */
     fun watchIncomingRoom() {
         viewModelScope.launch {
+            val current = signaling.fetchOffer().getOrNull()
+            if (current == null || OwnOfferRegistry.isOwn(current.sdp)) {
+                if (_state.value is CallState.Incoming) {
+                    WebRtcLog.transition("No answerable offer — leaving")
+                    _state.value = CallState.Idle
+                }
+                return@launch
+            }
             signaling.observeRoomDeleted()
                 .catch { /* stay on overlay; Answer path reports properly */ }
                 .collect {

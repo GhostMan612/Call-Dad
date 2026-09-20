@@ -32,6 +32,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Earlier FAILED session explained:** simultaneous callers clobbered the single room (stale SDP pair) — choreography + wipe/poll fixes resolved it. Single-room clobbering still must go before real use (Phase 5 per-call rooms).
 - **Still unverified:** AUDIO both ways (operator ear-check needed); TURN/symmetric-NAT (K8); Firestore rules still dev-open; no call-history/ringtone.
 
+## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
+
+- **Operator report:** Incoming overlay hangs until another call+hangup cycle; both phones on v3 (lane-verified dumpsys) so NOT a stale build. Root cause: overlay opens on a possibly-stale snapshot and only watches for FUTURE deletions — an already-gone room strands it (nothing will ever fire). Fix: `watchIncomingRoom` validates entry (fetchOffer answerable? else bounce home at once) then watches. Covers stale-snapshot, own-ringback, and pre-hangup races.
+- **Retest:** rebuild both → BLU calls, hangs up BEFORE Moto answers → Moto's overlay should vanish by itself (or never wrongly appear).
+
 ## Where we are (2026-09-19, self-ring + ghost-InCall — executor lane, UNCOMMITTED)
 
 - **Operator bugs (both real, shared root):** (1) double-call + hangup → phone rings ITSELF (own OFFER heard by own Home listener); (2) answering own stale offer → InCall showing local video with no peer ("video without connecting" = local PiP renders immediately, remote black — by design). Fix: `OwnOfferRegistry` suppresses self-offers in listener + fetch; versionCode 3 fingerprints builds (dumpsys-checkable from lane, ends "which build is installed" confusion).
