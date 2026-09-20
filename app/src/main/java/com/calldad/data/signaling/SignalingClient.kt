@@ -89,6 +89,8 @@ class SignalingClient(
         ).await()
         // Ring pointer (bridge): presence only, so the app-open callee can
         // discover this callId. Best-effort — the FCM path doesn't need it.
+        // Failures are LOGGED (literal only): a silent ring-write failure
+        // looks exactly like "the other phone never rang" (device-proven).
         runCatching {
             ringDoc.set(
                 mapOf(
@@ -98,6 +100,8 @@ class SignalingClient(
                 ),
                 SetOptions.merge()
             ).await()
+        }.onFailure {
+            WebRtcLog.transition("Ring pointer write failed")
         }
         WebRtcLog.transition("Call room created")
         callId

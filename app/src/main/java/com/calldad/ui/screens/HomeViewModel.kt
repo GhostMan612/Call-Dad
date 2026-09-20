@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.calldad.data.signaling.SignalingClient
 import com.calldad.navigation.Routes
+import com.calldad.webrtc.WebRtcLog
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -54,6 +55,8 @@ class HomeViewModel(
                 .collect { ring ->
                     if (ring.callId != seenCallId) {
                         seenCallId = ring.callId
+                        // Literal only: proves receipt without leaking the id.
+                        WebRtcLog.transition("Ring observed")
                         _incomingCall.tryEmit(ring.callId)
                     }
                 }

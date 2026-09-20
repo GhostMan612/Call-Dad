@@ -19,11 +19,6 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
-## Where we are (2026-09-20, BLU caller leg GREEN on new rules — Moto side pending)
-
-- **BLU (2 calls):** `Call room created` + `OFFER published`, clean `Call ENDED` + teardown on user hangup, zero errors. New rules + per-call rooms + ring pointer all working caller-side.
-- **Missing:** Moto's tail — did it auto-popup + ring? If silent, suspects: ring write failing, Moto Home listener dead, or Moto not on Home screen.
-
 ## Where we are (2026-09-19, hangup SIGSEGV root-caused — fix committed, needs rebuild)
 
 - **Tombstone proof (BLU, every hangup):** `VideoTrack.removeSink` → libjingle SIGSEGV from `VideoRenderer onDispose`. Race: endCall() disposed native tracks while composables still held sinks; navigation-pop disposal then touched freed memory. Fix: endCall no longer disposes — disposal only in onCleared (composition gone first). No FATALs since fix exists yet — rebuild + hangup test PENDING.
@@ -85,6 +80,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Operator pasted deployed rules:** old dev-open `calls/dad_channel` only. My `firestore.rules` (per-call rooms + ring bridge) was NEVER deployed → every Phase 5 write default-denies (`OFFER publish started` → 0.4s → PERMISSION_DENIED, both phones). All prior theories (crossed/stale UIDs) were wrong; apologize for the runaround.
 - **Fix (no rebuild):** console → Firestore → Rules → replace ALL text with `C:\Call-Dad\firestore.rules` content → Publish. Retest call immediately.
 - **Process correction (operator's call, accepted):** stop whack-a-mole from the lane; route open research through Gemini/DeepSeek, lane verifies against device evidence. Verification-first questions before theories.
+
+## Where we are (2026-09-20, rules live — writes pass, popup path unproven)
+
+- **Operator runs (both phones, caller-only):** `Call room created` + `OFFER published` + clean `ENDED` teardown on both — Phase 5 write path FULLY GREEN under strict rules. No ANSWER/popup lines anywhere: either choreography (callee never parked on Home) or the ring pointer never lands/listens.
+- **Executor closed the evidence gap:** ring-write failures now log (`Ring pointer write failed`); ring receipt logs (`Ring observed`). Both literals, guardrail-clean. If the next test shows publish WITHOUT observed on the parked phone, the fault is isolated to ring-write/rules; if observed WITHOUT popup, it's navigation.
+- **Retest (strict):** rebuild both → park Moto on the 4-card screen untouched → BLU calls once, waits → expect `Ring observed` on Moto + auto-popup.
 
 ## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
 
