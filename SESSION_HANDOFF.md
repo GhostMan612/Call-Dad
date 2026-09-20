@@ -32,6 +32,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Earlier FAILED session explained:** simultaneous callers clobbered the single room (stale SDP pair) — choreography + wipe/poll fixes resolved it. Single-room clobbering still must go before real use (Phase 5 per-call rooms).
 - **Still unverified:** AUDIO both ways (operator ear-check needed); TURN/symmetric-NAT (K8); Firestore rules still dev-open; no call-history/ringtone.
 
+## Where we are (2026-09-19, auto-popup incoming call — executor lane, UNCOMMITTED)
+
+- **Operator asked, executor built:** Home listens for new OFFERs and jumps to the overlay itself (ringtone + buzz, silenced on leave). Grey QA button stays as fallback. Killed-app wakeup = Phase 5 FCM. Rebuild + test: BLU calls while Moto sits on the 4-card screen → overlay should pop WITH sound, no taps on Moto.
+- **Answer to the question:** yes, it should pop up — the grey button was scaffolding that overstayed. This fixes the app-open case now; FCM fixes the killed-app case later.
+
 ## Where we are (2026-09-19, OPERATOR VINDICATED — grid squeezed to zero by my QA card)
 
 - **Device screenshot proved it:** Home shows greeting + one full-screen grey QA card, zero grid. Cause: `GiantActionCard`'s inner `fillMaxSize` Column is safe only inside weighted rows; my unweighted QA card claimed the whole Column and squeezed both grid rows to zero height. Fix: fixed `.height(140.dp)` on the QA card (+ missing `height` import).

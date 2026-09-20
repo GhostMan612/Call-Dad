@@ -8,3 +8,4 @@
   3. Single hardcoded room `dad_channel` retained for Phase 4 testing (second OFFER clobbers first); per-call rooms deferred to Phase 5 with FCM.
   4. VideoRenderer ownership: composable owns init/release via AndroidView factory/onRelease; WebRTCClient exposes `eglContext`/`localVideoTrack` only (deleted attach*/detach* + fields). No second EglBase anywhere.
   5. TURN stays sentinel-off (STUN-only); no credentials in repo (K8 unchanged).
+  6. AUTO-POPUP (operator-asked, 2026-09-19): HomeViewModel listens for NEW OFFERs (deduped by SDP hash) and auto-navigates to the incoming overlay; overlay plays system ringtone + vibration via scoped DisposableEffect (silenced on leave). Home-scoped VM = listener dies off-Home (no drain, no yanking). QA button retained as fallback. Killed-app wakeup still Phase 5 (FCM). VIBRATE is a normal (auto-grant) permission.

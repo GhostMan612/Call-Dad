@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,6 +33,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.calldad.navigation.Routes
 import com.calldad.ui.components.GiantActionCard
 import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.CallGreen
@@ -46,6 +48,15 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel()
 ) {
     val destinations by viewModel.destinations.collectAsStateWithLifecycle()
+
+    // Auto-popup: a NEW offer while Home is visible jumps straight to the
+    // incoming overlay (with ringtone). navigateGuarded keeps it single-top.
+    LaunchedEffect(Unit) {
+        viewModel.incomingCall.collect {
+            onNavigate("${Routes.CALL}?mode=incoming")
+        }
+    }
+
     HomeContent(
         destinations = destinations,
         onActionSelected = onNavigate,
