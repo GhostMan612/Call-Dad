@@ -50,6 +50,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Two suspects, operator checks in order:** (1) Anonymous provider not enabled in console (Auth → Sign-in method) — most likely; (2) BLU Play Services broken (GMS broker SecurityException + Phenotype errors in same window) → update Play Services, reboot.
 - **Needed back:** console Anonymous status; BLU retest (`Anonymous auth: signed in`?); Moto auth line (run locally — lane wireless timed out).
 
+## Where we are (2026-09-20, PTT durable on Moto — 8+ clean cycles, auth TBD)
+
+- **Moto (PID 28103, one long session):** SIX more press/release cycles, all textbook (granted→fallback→started→stopped→abandoned), zero errors, zero FATALs. Fallback line absent after the first swap (persistent engine instance — correct). Interlock/drag-off still untested.
+- **Moto auth:** still no `Anonymous auth` line in any pasted window (buffer reaches 09-19, so absence is notable but not conclusive — line may predate rotation). One direct grep needed: `Select-String "Anonymous auth"` alone.
+- **Still open:** Moto auth confirm; CALLEE_UID swap-build status; first Phase 5 addressed call; full §L matrix.
+
 ## Where we are (2026-09-20, auth healed + PTT press/release GREEN on device)
 
 - **Auth:** `Anonymous auth: signed in` + `already signed in` on device 1 (console toggle or Play Services healed — operator-side fix worked). Moto auth line not yet seen.
