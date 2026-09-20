@@ -87,6 +87,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Executor closed the evidence gap:** ring-write failures now log (`Ring pointer write failed`); ring receipt logs (`Ring observed`). Both literals, guardrail-clean. If the next test shows publish WITHOUT observed on the parked phone, the fault is isolated to ring-write/rules; if observed WITHOUT popup, it's navigation.
 - **Retest (strict):** rebuild both → park Moto on the 4-card screen untouched → BLU calls once, waits → expect `Ring observed` on Moto + auto-popup.
 
+## Where we are (2026-09-20, back-button ghost path closed — executor lane, UNCOMMITTED)
+
+- **Lane read of both tails:** rings observed BOTH ways (`Ring observed` BLU ×2, Moto ×1), publishes clean, teardowns clean — popup path fully proven. But zero Answer taps anywhere: every overlay exit was silent (no DECLINED line) → system back button escaping without room cleanup → ghost rooms + the lingering both-caller chaos. Fix: BackHandler = Hang Up (Decline on overlay), same awaited path.
+- **Retest that matters:** rebuild both → BLU calls → Moto overlay → tap ANSWER (green, the one untested button) → expect CONNECTED both sides.
+
 ## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
 
 - **Operator report:** Incoming overlay hangs until another call+hangup cycle; both phones on v3 (lane-verified dumpsys) so NOT a stale build. Root cause: overlay opens on a possibly-stale snapshot and only watches for FUTURE deletions — an already-gone room strands it (nothing will ever fire). Fix: `watchIncomingRoom` validates entry (fetchOffer answerable? else bounce home at once) then watches. Covers stale-snapshot, own-ringback, and pre-hangup races.

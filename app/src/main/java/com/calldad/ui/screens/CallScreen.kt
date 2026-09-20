@@ -11,6 +11,7 @@
 package com.calldad.ui.screens
 
 import android.app.Application
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -159,10 +160,21 @@ fun CallScreen(
         }
     }
 
+    // System back = Hang Up (or Decline on the overlay). Without this the
+    // back gesture pops navigation silently: no room update, peer strands,
+    // ghost rings. Same awaited path as the buttons (3s cap inside).
+    val scope = rememberCoroutineScope()
+    BackHandler {
+        scope.launch {
+            if (state is CallState.Incoming) viewModel.declineAndAwait(callId)
+            else viewModel.endCallAndAwait()
+            onFinished()
+        }
+    }
+
     // Local hangup/decline awaits the room delete BEFORE navigating:
     // popping the screen clears the VM and would cancel a fire-and-forget
     // teardown, stranding the peer (device-proven). 3s cap inside.
-    val scope = rememberCoroutineScope()
     CallContent(
         state = state,
         elapsedSeconds = elapsed,
