@@ -14,7 +14,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Call Dad"
+        android:label="Call of Daddy"
         android:supportsRtl="true"
         android:theme="@style/Theme.CallDad">
 
