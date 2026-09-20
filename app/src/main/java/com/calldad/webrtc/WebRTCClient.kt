@@ -11,6 +11,10 @@ import com.calldad.data.signaling.IceCandidate as DomainIceCandidate
 import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SessionDescription as DomainSessionDescription
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -31,6 +35,7 @@ import org.webrtc.SessionDescription as RtcSessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import java.nio.ByteBuffer
 
 class WebRTCClient(
     context: Context,
@@ -51,6 +56,11 @@ class WebRTCClient(
     private var videoTrack: VideoTrack? = null
     private var videoCapturer: CameraVideoCapturer? = null
     private var surfaceHelper: SurfaceTextureHelper? = null
+    private var gameChannel: DataChannel? = null
+
+    private companion object {
+        const val MAX_GAME_MESSAGE_BYTES = 1024
+    }
 
     private var micEnabled = true
     private var cameraEnabled = true
@@ -65,6 +75,42 @@ class WebRTCClient(
     /** Local camera track. Non-null after createPeerConnection(). */
     val localVideoTrack: VideoTrack?
         get() = videoTrack
+
+    /**
+     * Hot flow of inbound game-sync messages, decoded to UTF-8 strings.
+     *
+     * Buffer is COPIED inside the DataChannel.Observer callback before
+     * emission — org.webrtc frees the ByteBuffer when onMessage returns,
+     * so passing the raw buffer through a Flow produces intermittent
+     * garbage. See the Observer reference.
+     */
+    private val _gameMessages = MutableSharedFlow<String>(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val gameSyncMessages: Flow<String> = _gameMessages.asSharedFlow()
+
+    /**
+     * Send a JSON string over the "game_sync" data channel.
+     * No-op if the channel is not open. Returns true if queued.
+     */
+    fun sendGameData(json: String): Boolean {
+        val channel = gameChannel ?: return false
+        if (channel.state() != DataChannel.State.OPEN) return false
+
+        // Guard against SCTP head-of-line blocking. WebRTC fragments at
+        // ~1200 bytes MTU; a single large message monopolizes the send
+        // queue and delays all subsequent control traffic.
+        val bytes = json.toByteArray(Charsets.UTF_8)
+        if (bytes.size > MAX_GAME_MESSAGE_BYTES) {
+            WebRtcLog.transition("Game message rejected: exceeds 1 KB cap")
+            return false
+        }
+
+        val buffer = DataChannel.Buffer(ByteBuffer.wrap(bytes), false)
+        return channel.send(buffer)
+    }
 
     // -------- lifecycle --------
 
@@ -107,8 +153,28 @@ class WebRTCClient(
         val rtcConfig = buildRtcConfig()
         peerConnection = f.createPeerConnection(rtcConfig, observer)
             ?: error("createPeerConnection returned null")
+        createGameDataChannel()
         attachLocalTracks()
         WebRtcLog.transition("PeerConnection created")
+    }
+
+    private fun createGameDataChannel() {
+        val pc = peerConnection ?: return
+        // Caller-side: this triggers onDataChannel on the remote peer.
+        // Callee-side: the channel arrives via onDataChannel (below),
+        // and this call is a no-op because gameChannel is already set.
+        if (gameChannel != null) return
+
+        val init = DataChannel.Init().apply {
+            ordered = true
+            maxRetransmits = -1       // reliable
+            maxRetransmitTimeMs = -1  // reliable
+            protocol = ""
+            negotiated = false        // let WebRTC negotiate the ID
+        }
+        gameChannel = pc.createDataChannel("game_sync", init)
+        gameChannel?.registerObserver(gameChannelObserver)
+        WebRtcLog.transition("DataChannel 'game_sync' created")
     }
 
     private fun attachLocalTracks() {
@@ -225,6 +291,27 @@ class WebRTCClient(
         return deferred.await()
     }
 
+    private val gameChannelObserver = object : DataChannel.Observer {
+
+        override fun onBufferedAmountChange(previousAmount: Long) {
+            // No-op. The Flow's DROP_OLDEST handles backpressure.
+        }
+
+        override fun onStateChange() {
+            val state = gameChannel?.state()
+            WebRtcLog.transition("DataChannel state: $state")
+        }
+
+        override fun onMessage(buffer: DataChannel.Buffer) {
+            // CRITICAL: copy before returning. The ByteBuffer is freed
+            // when this method returns.
+            val bytes = ByteArray(buffer.data.remaining())
+            buffer.data.get(bytes)
+            val json = String(bytes, Charsets.UTF_8)
+            _gameMessages.tryEmit(json)
+        }
+    }
+
     // -------- media controls --------
 
     fun startCapture() {
@@ -277,6 +364,9 @@ class WebRTCClient(
         videoTrack?.dispose(); videoTrack = null
         audioSource?.dispose(); audioSource = null
         audioTrack?.dispose(); audioTrack = null
+        gameChannel?.unregisterObserver()
+        gameChannel?.close()
+        gameChannel = null
         peerConnection?.close(); peerConnection = null
         factory?.dispose(); factory = null
         eglBase.release()
@@ -319,7 +409,18 @@ class WebRTCClient(
 
         override fun onRemoveStream(stream: MediaStream?) {}
 
-        override fun onDataChannel(channel: DataChannel?) {}
+        override fun onDataChannel(channel: DataChannel?) {
+            channel ?: return
+            if (channel.label() != "game_sync") return
+            if (gameChannel != null) {
+                // Already have a channel (caller side). Close the duplicate.
+                channel.close()
+                return
+            }
+            gameChannel = channel
+            channel.registerObserver(gameChannelObserver)
+            WebRtcLog.transition("DataChannel 'game_sync' accepted from peer")
+        }
 
         override fun onRenegotiationNeeded() {
             WebRtcLog.transition("Renegotiation needed")

@@ -2,124 +2,159 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/GameScreen.kt
+// ui/screens/GameScreen.kt — Phase 7: hardened WebView + data-channel sync
 // Location: app/src/main/java/com/calldad/ui/screens/GameScreen.kt
 package com.calldad.ui.screens
 
+import android.annotation.SuppressLint
+import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewAssetLoader
+import com.calldad.game.GameWebRtcBridge
 import com.calldad.ui.components.GiantButton
-import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.GameBlue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /**
- * Full-screen HTML5 game host — Phase 1 placeholder.
+ * Mini-game host with WebRTC data-channel sync.
  *
- * Two independent escape hatches (deliberate redundancy, because a child
- * WILL get stuck otherwise):
- *   1. The persistent floating "Home" button, pinned bottom-centre, above
- *      whatever the WebView will eventually render.
- *   2. [BackHandler] — the system back gesture also routes home instead of
- *      silently popping to an unexpected screen.
+ * WEBVIEW HARDENING (all four are load-bearing):
+ *   - WebViewAssetLoader serves assets over https://appassets.androidplatform.net
+ *     instead of file://. This eliminates the file-scheme cross-origin class
+ *     of vulnerabilities flagged by the setAllowFileAccessFromFileURLs
+ *     deprecation.
+ *   - allowFileAccess = false
+ *   - allowContentAccess = false
+ *   - mixedContentMode = MIXED_CONTENT_NEVER_ALLOW
  */
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun GameScreen(
     onBackHome: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: CallViewModel = callViewModel()
 ) {
     BackHandler(onBack = onBackHome)
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(GameBlue)
-    ) {
-        // ------------------------------------------------------------------
-        // PHASE 2 HOOK — replace this placeholder Column with the game host:
-        //
-        // AndroidView(
-        //     factory = { context ->
-        //         WebView(context).apply {
-        //             settings.javaScriptEnabled = true
-        //             settings.domStorageEnabled = true
-        //             settings.mediaPlaybackRequiresUserGesture = false
-        //             webViewClient = WebViewClient()
-        //             loadUrl(GAME_URL)
-        //         }
-        //     },
-        //     modifier = Modifier.fillMaxSize()
-        // )
-        //
-        // NOTE: keep `settings.setSupportZoom(false)` and disable overscroll
-        // so the child cannot pinch/scroll their way into a broken viewport.
-        // ------------------------------------------------------------------
-        Column(
-            modifier = Modifier.align(Alignment.Center),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                imageVector = Icons.Filled.SportsEsports,
-                contentDescription = null,
-                modifier = Modifier.size(140.dp),
-                tint = Color.White
-            )
-            Spacer(Modifier.height(24.dp))
-            Text(
-                text = "Game Time!",
-                style = MaterialTheme.typography.displaySmall,
-                color = Color.White,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "The game will appear here",
-                style = MaterialTheme.typography.titleLarge,
-                color = Color.White.copy(alpha = 0.85f),
-                textAlign = TextAlign.Center
-            )
-        }
+    val webrtc = viewModel.webrtcClientOrNull()
+    val currentOnBackHome by rememberUpdatedState(onBackHome)
 
-        // ---------- PERSISTENT ESCAPE HATCH ----------
+    // Asset loader is created once per composition. The domain MUST match
+    // the loadUrl host below.
+    val context = LocalContext.current
+    val assetLoader = remember {
+        WebViewAssetLoader.Builder()
+            .addPathHandler(
+                "/assets/",
+                WebViewAssetLoader.AssetsPathHandler(context)
+            )
+            .build()
+    }
+
+    val webViewRef = remember { mutableStateOf<WebView?>(null) }
+
+    // Inbound: WebRTC → JS. Copy is safe; JSONObject.quote is the canonical
+    // JS string literal encoder — do NOT use manual quote escaping.
+    DisposableEffect(webrtc) {
+        val wv = webViewRef.value
+        val client = webrtc
+        if (wv == null || client == null) return@DisposableEffect onDispose { }
+
+        val handle = CoroutineScope(Dispatchers.Main).launch {
+            client.gameSyncMessages.collect { json ->
+                val quoted = JSONObject.quote(json)
+                wv.evaluateJavascript(
+                    "window.receiveRemoteGameState($quoted)",
+                    null
+                )
+            }
+        }
+        onDispose { handle.cancel() }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        setSupportZoom(false)
+                        builtInZoomControls = false
+                        mediaPlaybackRequiresUserGesture = false
+                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): WebResourceResponse? =
+                            assetLoader.shouldInterceptRequest(request.url)
+
+                        // Block any navigation away from the asset host.
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): Boolean =
+                            request.url.host != "appassets.androidplatform.net"
+                    }
+                    webrtc?.let {
+                        addJavascriptInterface(GameWebRtcBridge(it), "AndroidRTC")
+                    }
+                    loadUrl("https://appassets.androidplatform.net/assets/game.html")
+                    webViewRef.value = this
+                }
+            },
+            onRelease = { view ->
+                view.removeJavascriptInterface("AndroidRTC")
+                view.destroy()
+                webViewRef.value = null
+            }
+        )
+
         GiantButton(
             label = "Back to Home",
             icon = Icons.Filled.Home,
             containerColor = Color.White,
             contentColor = GameBlue,
             minHeight = 120.dp,
-            onClick = onBackHome,
+            onClick = { currentOnBackHome() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 32.dp)
         )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 411, heightDp = 891)
-@Composable
-private fun GameScreenPreview() {
-    CallDadTheme {
-        GameScreen(onBackHome = {})
     }
 }

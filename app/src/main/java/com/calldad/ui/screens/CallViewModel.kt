@@ -223,6 +223,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         webrtc.toggleCamera()
     }
 
+    /** Exposes the WebRTCClient for the game bridge. Null before init. */
+    fun webrtcClientOrNull(): WebRTCClient? = webrtc
+
     /** Dismisses an [CallState.Error] back to Idle so the child can retry. */
     fun clearError() {
         if (_state.value is CallState.Error) _state.value = CallState.Idle

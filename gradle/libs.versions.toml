@@ -22,6 +22,10 @@ webrtc = "1.3.10"
 # play-services-auth is NOT BOM-managed: explicit pin per architect.
 play-services-auth = "21.3.0"
 
+# --- Phase 7 additions --------------------------------------------------
+# WebViewAssetLoader (replaces file:///android_asset).
+webkit = "1.12.1"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -52,6 +56,9 @@ webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", versi
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "play-services-auth" }
+
+# --- Phase 7 additions --------------------------------------------------
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

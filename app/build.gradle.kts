@@ -96,6 +96,9 @@ dependencies {
     implementation(libs.firebase.messaging)
     implementation(libs.play.services.auth)
 
+    // ---- Phase 7: WebViewAssetLoader (hardened asset serving) ----
+    implementation(libs.androidx.webkit)
+
     // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
     testImplementation("junit:junit:4.13.2")
     testImplementation(libs.kotlinx.coroutines.test)

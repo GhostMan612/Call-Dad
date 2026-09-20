@@ -46,4 +46,5 @@ AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / 
 - G4 rendering/device: GREEN same evidence (VideoRenderer both ways, overlay, auto-popup, ringtone).
 - G5 (Phase 5 code): LANDED 2026-09-19, UNPROVEN — needs Studio sync (auth/messaging/play-services-auth) + functions+rules deploy + Anonymous enable + CALLEE_UID swap-builds + killed-app test.
 - G6 (Phase 6 code): LANDED 2026-09-19, UNPROVEN — ptt/ + interlock + 4 host tests; needs Studio sync (code-only) + §K press/release/interlock/boundary matrix.
+- G7 (Phase 7 code): LANDED 2026-09-20, UNPROVEN — game_sync channel + bridge + hardened WebView + game.html; needs Studio sync (webkit) + TWO-device TAP sync + escaping test (no host coverage possible).
 - G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle).

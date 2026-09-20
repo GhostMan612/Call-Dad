@@ -45,6 +45,10 @@
 - [x] Host-test infra + 4 engine tests (no device needed)
 - [ ] Human: Studio sync (code-only, no new deps) → §K matrix (press/release, drag-off, in-call interlock, boundary grep for com.sovereign imports)
 
+## Phase 7 — Game sync over data channel (architect prompt landed 2026-09-20, ADR-009)
+- [x] game_sync channel (create/accept, copy-before-emit, 1KB cap, cleanup) + bridge + hardened WebView + game.html + shared VM accessor
+- [ ] Human: Studio sync (androidx.webkit) → build → TWO-device TAP sync + escaping test + guardrail log audit
+
 ## Phase 3 — Chat + remote (BP-03)
 - [ ] `SovereignCommsEngine` + receipts + voice memo
 - [ ] `RendezvousClient` + relay deploy; remote matrix proof (human)

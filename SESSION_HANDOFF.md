@@ -38,6 +38,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Fix:** offers carry `createdAt`; listener + fetch ignore anything >60s old or unstamped. Abandoned rings now die on their own instead of haunting the phones. Per-call rooms still the real answer (Phase 5).
 - **Retest choreography (strict one-caller-at-a-time):** hang up BOTH phones first (clears room) → BLU calls and waits → Moto answers within a minute. Simultaneous calling still clobbers — don't.
 
+## Where we are (2026-09-20, Phase 7 landed — executor lane, UNCOMMITTED)
+
+- **Architect prompt executed with 5 recorded deviations (ADR-009):** no-override fix (wouldn't compile), shared activity-scoped CallViewModel for the bridge, WebViewAssetLoader hardening + nav-lock, 1KB cap + buffer-copy, game.html TAP shell, `webrtcClientOrNull()` accessor. No new host tests possible (native + JS engines) — device matrix per prompt §G is the gate.
+- **Needs operator:** Studio sync (androidx.webkit) → build → TWO-device game sync (TAP → "Game state TX" + remote title "Remote taps: N") → quote/backslash escaping test → logcat guardrail audit (no JSON/SDP/ICE).
+
 ## Where we are (2026-09-19, Phase 6 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed with 5 recorded deviations (ADR-008):** ptt/ package (interface, simulated default, reflective adapter, focus+haptics, VM+factory+shared accessor), PttScreen replacement (tryAwaitRelease, 3 color states), CallScreen interlock, manifest mic-audio perms. Proprietary boundary holds: zero com.sovereign imports (reflection only), no Gradle dep, simulated default.

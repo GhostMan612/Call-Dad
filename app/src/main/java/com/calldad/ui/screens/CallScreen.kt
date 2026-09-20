@@ -206,12 +206,11 @@ fun CallScreen(
 }
 
 /**
- * Executor fix (carried from Phase 3): CallViewModel is an
- * AndroidViewModel (non-empty constructor), so the default viewModel()
- * factory cannot build it. Manual factory.
+ * Shared accessor (was private Phase 3 helper): GameScreen needs the same
+ * activity-scoped CallViewModel for the WebRTC data-channel bridge.
  */
 @Composable
-private fun callViewModel(): CallViewModel {
+fun callViewModel(): CallViewModel {
     val application = LocalContext.current.applicationContext as Application
     return viewModel(
         factory = object : ViewModelProvider.Factory {
