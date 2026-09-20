@@ -19,6 +19,11 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-20, BLU caller leg GREEN on new rules — Moto side pending)
+
+- **BLU (2 calls):** `Call room created` + `OFFER published`, clean `Call ENDED` + teardown on user hangup, zero errors. New rules + per-call rooms + ring pointer all working caller-side.
+- **Missing:** Moto's tail — did it auto-popup + ring? If silent, suspects: ring write failing, Moto Home listener dead, or Moto not on Home screen.
+
 ## Where we are (2026-09-19, hangup SIGSEGV root-caused — fix committed, needs rebuild)
 
 - **Tombstone proof (BLU, every hangup):** `VideoTrack.removeSink` → libjingle SIGSEGV from `VideoRenderer onDispose`. Race: endCall() disposed native tracks while composables still held sinks; navigation-pop disposal then touched freed memory. Fix: endCall no longer disposes — disposal only in onCleared (composition gone first). No FATALs since fix exists yet — rebuild + hangup test PENDING.
