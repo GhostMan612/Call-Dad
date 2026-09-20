@@ -19,11 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
-## Where we are (2026-09-19, host gates GREEN — human evidence, recorded by executor)
+## Where we are (2026-09-19, host gates GREEN — operator run, executor recorded)
 
-- **Human run: `testDebugUnitTest` + `lintDebug` → BUILD SUCCESSFUL in 2m17s (33 tasks: 31 executed, 2 from cache).** Covers `RoutesTest` + `SignalingModelsTest`. Only warnings: benign Kotlin analysis-API `KaSessionProvider`/`NoWriteActionInAnalyseCallChecker` noise + lint HTML report in `build/` (gitignored).
-- WebRTC coordinates fix (`stream-webrtc-android:1.3.10`) is therefore RESOLUTION-PROVEN (dependency graph solved). Compilation of `org.webrtc` imports proven when `assembleDebug` runs.
-- Still pending (operator): `:app:assembleDebug` + `adb logcat -s WebRTC:D` caller sequence per prompt §J. Then Phase 4 (TURN, renderers, incoming-call overlay).
+- **Evidence (operator pasted):** `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug` → **BUILD SUCCESSFUL in 2m17s, 33 tasks (31 executed, 2 cached)**. 8/8 host tests pass (Routes 3 + SignalingModels 5); lint clean apart from K2 Kotlin-analysis-API warnings (toolchain noise, pre-existing). Wrapper generation itself also BUILD SUCCESSFUL.
+- **Device seen from executor lane (read-only adb):** `7040016025040287 device` = **BLU View 5 (B160V, sdk 34)** — not the Moto G. Moto G remains truth device for sign-off.
+- **Gates flipped:** G1, G2-host, G3-host GREEN. Still pending: `:app:assembleDebug` + install + `WebRTC:D` call sequence on device.
+- **Answer to operator's question (standing orders):** read-only adb from this lane is YES and already proven above. Installs / `connected*` / instrumented runs stay behind an explicit per-order authorization per RULES §1.5 — and there is no `androidTest` source set in repo yet, so the only device work available is the manual `/smoke` walkthrough (operator taps, pastes observations).
 
 ## Where we are (2026-09-19, Phase 3 peer connection landed — executor lane, UNCOMMITTED)
 

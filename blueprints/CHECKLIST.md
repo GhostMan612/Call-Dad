@@ -13,21 +13,21 @@
 ## Phase 1 — Skeleton (BP-01, operator scaffold landed 2026-09-19)
 - [x] `app/` scaffold written (`com.calldad`, minSdk 26 per ADR-001-B, compile/target 35)
 - [x] Compose Nav (Home/Call/Ptt/Game/Helper) + theme + giant components + 4 ViewModels + Manifest + themes.xml
-- [x] First unit test written (`RoutesTest`, host-side, pure-JVM) — GREEN (2026-09-19 human run: BUILD SUCCESSFUL, 33 tasks, 2m17s)
-- [ ] Human Studio run: `testDebugUnitTest` + `lintDebug` + Moto G install proof (this lane never builds)
+- [x] First unit test written (`RoutesTest`, host-side, pure-JVM) — GREEN (operator run, see below)
+- [x] Human Studio run GREEN 2026-09-19: `:app:testDebugUnitTest` + `:app:lintDebug` → BUILD SUCCESSFUL, 33 tasks (K2 analysis-API warnings = toolchain noise only). Device install proof still pending.
 - [ ] Handoff + CURRENT_STATE updated
 
 ## Phase 2 — Signaling (operator directive landed 2026-09-19, ADR-002 DECIDED Firebase)
 - [x] `data/signaling/` (`SignalingModels` + `SignalingClient` Firestore `calls/dad_channel`) + `CallState` sealed interface + VM rewire + CallScreen Error/Retry
 - [x] Gradle: catalog is single source of truth (ADR-004: AGP 8.7.2 / Kotlin 2.0.21 adopted by operator); Firebase BOM 34.19.0 + google-services 4.5.0 + coroutines-play-services; KTX merged (`getInstance()`); Manifest INTERNET + ACCESS_NETWORK_STATE; versionName 0.2.0 / versionCode 2; package `com.calldad` held; junit restored
-- [x] `SignalingModelsTest` (pure-JVM: fromWire leniency, ICE defaults, error-kind contract) — GREEN (2026-09-19 human run: BUILD SUCCESSFUL, 33 tasks, 2m17s)
-- [ ] Human Studio run: `testDebugUnitTest` (Routes + SignalingModels) + `lintDebug`; place `google-services.json` in `app/` (gitignored) for device signaling test
+- [x] `SignalingModelsTest` (pure-JVM: fromWire leniency, ICE defaults, error-kind contract) — GREEN (same operator run: 8/8 host tests pass)
+- [x] Human Studio run GREEN (same build); `google-services.json` confirmed on disk in `app/` (gitignored). Device signaling test pending.
 - [ ] Sovereign P2P ports (BP-02 original scope) deferred to BP-04 revisit
 
 ## Phase 3 — Peer connection (architect prompt landed 2026-09-19, ADR-005)
-- [x] `webrtc/` (Config/Log/Client, Stream 1.1.0, trickle ICE, STUN-only) + `CallPermissions` + catalog dep + Manifest mic/camera (`required=false`)
+- [x] `webrtc/` (Config/Log/Client, stream-webrtc-android 1.3.10, trickle ICE, STUN-only) + `CallPermissions` + catalog dep + Manifest mic/camera (`required=false`)
 - [x] VM AndroidViewModel rewrite (callee fix) + `callViewModel()` factory fix + permission-gated auto-start
-- [x] Human unit/lint GREEN (same run as above). Still pending: `:app:assembleDebug` + `logcat -s WebRTC:D` state sequence (never paste SDP/ICE)
+- [x] Host gates GREEN in same build (unit + lint). Remaining human: `:app:assembleDebug` + `logcat -s WebRTC:D` state sequence (never paste SDP/ICE)
 - [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
 
 ## Phase 3 — Chat + remote (BP-03)

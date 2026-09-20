@@ -39,6 +39,7 @@ AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / 
 ## Last gates
 
 - G0 scaffold gate: GREEN (2026-09-19: VERIFY PASS 10 dirs + 28 files).
-- G1 skeleton: HOST GATES GREEN 2026-09-19 (human: `testDebugUnitTest` + `lintDebug`, BUILD SUCCESSFUL, 33 tasks / 2m17s). No Hilt/Room yet.
-- G2 signaling (Phase 2, operator directive): CODE LANDED 2026-09-19 — `SignalingClient` + `CallState` + VM/Screen rewire + Firebase Gradle + Manifest perms + `SignalingModelsTest`; HOST GATES GREEN in same human run (BUILD SUCCESSFUL). Still pending: operator-placed `google-services.json` device signaling proof (file confirmed present on disk, gitignored).
-- G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle). HOST unit/lint covered by the same GREEN run. Still pending: `:app:assembleDebug` + `adb logcat -s WebRTC:D`.
+- G1 skeleton: GREEN 2026-09-19 (operator run: BUILD SUCCESSFUL, 33 tasks; `RoutesTest` 3/3).
+- G2 signaling host: GREEN same build (`SignalingModelsTest` 5/5; lint 0 errors, K2 warnings only).
+- G3 peer host: GREEN same build (compile + unit + lint). Device leg PENDING: assemble + install + `WebRTC:D` sequence (BLU View 5 B160V/sdk34 on adb `7040016025040287` as seen from executor lane; Moto G still the truth device for sign-off).
+- G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle).
