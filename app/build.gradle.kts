@@ -48,6 +48,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    // JVM unit tests run against the unmocked android.jar stub, where every
+    // framework call (e.g. android.util.Log) throws. returnDefaultValues
+    // makes them no-op instead — donor-proven pattern that lets host tests
+    // exercise logging-touching pure logic (e.g. SimulatedPttEngine).
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -81,4 +91,6 @@ dependencies {
 
     // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
     testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.kotlinx.coroutines.test)
+}
 }

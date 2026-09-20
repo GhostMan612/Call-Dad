@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Normal permission (auto-granted): incoming-call buzz. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Phase 6: declared pre-emptively for background PTT (Phase 7).
+         MODIFY_AUDIO_SETTINGS is the second permission required by the
+         FOREGROUND_SERVICE_MICROPHONE service type on API 34+. No
+         microphone FGS is declared in this phase. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- Phase 5: killed-app wakeup path (FCM → FGS phoneCall → full-screen). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

@@ -40,6 +40,11 @@
 - [x] Signaling rewrite (CallDocument, status machine, ring bridge, own-call registry) + VM rewrite + nav callId routing + TURN BuildConfig + rules + functions
 - [ ] Human: Studio sync (new deps) → deploy functions+rules → enable Anonymous sign-in → CALLEE_UID swap-builds → §L matrix (killed-app wakeup, rules proofs, TURN presence-check)
 
+## Phase 6 — PTT subsystem (architect prompt landed 2026-09-19, ADR-008)
+- [x] ptt/ (engine contract, simulated default, reflective adapter, focus+haptics, VM+factory+shared accessor) + screen replacement + interlock + perms
+- [x] Host-test infra + 4 engine tests (no device needed)
+- [ ] Human: Studio sync (code-only, no new deps) → §K matrix (press/release, drag-off, in-call interlock, boundary grep for com.sovereign imports)
+
 ## Phase 3 — Chat + remote (BP-03)
 - [ ] `SovereignCommsEngine` + receipts + voice memo
 - [ ] `RendezvousClient` + relay deploy; remote matrix proof (human)

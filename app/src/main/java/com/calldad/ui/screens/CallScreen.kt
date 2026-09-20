@@ -135,6 +135,15 @@ fun CallScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // PTT interlock: WebRTC owns the mic during a call. Shared
+    // activity-scoped PTT VM (same instance PttScreen uses — see
+    // rememberPttViewModel; default viewModel() would be entry-scoped
+    // AND crash on the AndroidViewModel constructor).
+    val pttViewModel: PttViewModel = rememberPttViewModel()
+    LaunchedEffect(state) {
+        pttViewModel.onCallStateChanged(state is CallState.InCall)
+    }
+
     // Any return to Idle after real activity (ringing, incoming, in-call,
     // or failed-and-retried) follows home so neither side strands on a dead
     // screen — including a peer's decline while we were still ringing.

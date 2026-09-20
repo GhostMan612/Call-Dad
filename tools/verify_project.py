@@ -54,7 +54,14 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "app/src/main/java/com/calldad/fcm/CallForegroundService.kt",
                   "app/src/main/AndroidManifest.xml",
                   "firestore.rules", "firebase.json",
-                  "functions/index.js", "functions/package.json"]
+                  "functions/index.js", "functions/package.json",
+                  "blueprints/decisions/ADR-008-phase6-ptt.md",
+                  "app/src/main/java/com/calldad/ptt/PttEngine.kt",
+                  "app/src/main/java/com/calldad/ptt/SimulatedPttEngine.kt",
+                  "app/src/main/java/com/calldad/ptt/SovereignPttAdapter.kt",
+                  "app/src/main/java/com/calldad/ptt/PttAudioManager.kt",
+                  "app/src/main/java/com/calldad/ui/screens/PttViewModel.kt",
+                  "app/src/main/java/com/calldad/ui/screens/PttScreen.kt"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]

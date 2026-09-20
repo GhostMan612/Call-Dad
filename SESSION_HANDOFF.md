@@ -38,6 +38,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Fix:** offers carry `createdAt`; listener + fetch ignore anything >60s old or unstamped. Abandoned rings now die on their own instead of haunting the phones. Per-call rooms still the real answer (Phase 5).
 - **Retest choreography (strict one-caller-at-a-time):** hang up BOTH phones first (clears room) → BLU calls and waits → Moto answers within a minute. Simultaneous calling still clobbers — don't.
 
+## Where we are (2026-09-19, Phase 6 landed — executor lane, UNCOMMITTED)
+
+- **Architect prompt executed with 5 recorded deviations (ADR-008):** ptt/ package (interface, simulated default, reflective adapter, focus+haptics, VM+factory+shared accessor), PttScreen replacement (tryAwaitRelease, 3 color states), CallScreen interlock, manifest mic-audio perms. Proprietary boundary holds: zero com.sovereign imports (reflection only), no Gradle dep, simulated default.
+- **Prompt bugs fixed:** shared activity-scoped PTT VM (prompt's sharing claim was wrong twice — crash + silent non-sharing); no fake receiving pulse (template confirms Idle-forever accepted); host-test infra (returnDefaultValues + coroutines-test) + 4 engine tests.
+- **Needs operator:** Studio sync (no new deps — pure code) → §K matrix (press/release logcat, drag-off release, in-call interlock, boundary grep).
+
 ## Where we are (2026-09-19, Phase 5 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed with 7 recorded deviations (ADR-007):** no-KTX, BOM-managed versions, ring-pointer bridge (`ring/dad`, presence-only, strict-ish rules) so app-to-app stays testable pre-Phase-6, CALLEE_UID per-phone provisioning, POST_NOTIFICATIONS runtime ask, status-machine VM (45s ring timeout, 15s media watchdog, cancel-safe), FCM armed-but-untargeted (no tokens until Phase 6).
