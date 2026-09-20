@@ -44,6 +44,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Prompt bugs fixed:** shared activity-scoped PTT VM (prompt's sharing claim was wrong twice — crash + silent non-sharing); no fake receiving pulse (template confirms Idle-forever accepted); host-test infra (returnDefaultValues + coroutines-test) + 4 engine tests.
 - **Needs operator:** Studio sync (no new deps — pure code) → §K matrix (press/release logcat, drag-off release, in-call interlock, boundary grep).
 
+## Where we are (2026-09-20, Phase 5 console triage — rules live, auth failing on BLU)
+
+- **Lane-proven:** new strict rules ARE deployed (`ring/dad` listen → PERMISSION_DENIED for unauthenticated — correct). But BLU logs `Anonymous auth: FAILED`, so every Firestore call is denied and nothing works. Moto side unknown (wireless adb timed out from lane).
+- **Two suspects, operator checks in order:** (1) Anonymous provider not enabled in console (Auth → Sign-in method) — most likely; (2) BLU Play Services broken (GMS broker SecurityException + Phenotype errors in same window) → update Play Services, reboot.
+- **Needed back:** console Anonymous status; BLU retest (`Anonymous auth: signed in`?); Moto auth line (run locally — lane wireless timed out).
+
 ## Where we are (2026-09-19, Phase 5 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed with 7 recorded deviations (ADR-007):** no-KTX, BOM-managed versions, ring-pointer bridge (`ring/dad`, presence-only, strict-ish rules) so app-to-app stays testable pre-Phase-6, CALLEE_UID per-phone provisioning, POST_NOTIFICATIONS runtime ask, status-machine VM (45s ring timeout, 15s media watchdog, cancel-safe), FCM armed-but-untargeted (no tokens until Phase 6).
