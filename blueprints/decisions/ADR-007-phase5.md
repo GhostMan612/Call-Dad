@@ -10,3 +10,4 @@
 5. **POST_NOTIFICATIONS runtime request added** (not in prompt, required by it): killed-app path posts on API 33+; without the grant the FSI chain is dead on both our devices (SDK 34/36). One-shot, non-blocking.
 6. **Stable-previous behavior preserved:** 15s media watchdog, 45s ring timeout (new — FCM wakeup needs room on dozing phones), cancel-safe catches, idempotent dispose, `observeCallDeleted` backup, `OwnCallRegistry` (renamed from offers to callIds; file replaced).
 7. **`simulateIncomingCall` kept @VisibleForTesting** per prompt §I (test seam; production now uses callId routing).
+8. **Kotlin metadata gate skipped (device-proven need, 2026-09-19):** BOM 34.19.0 resolves `firebase-auth:24.2.0` (metadata 2.3.0); KGP 2.0.21 refuses it. Fix is `-Xskip-metadata-version-check` (touched auth surface is stable), NOT a Firebase downgrade and NOT a KGP 2.3 cascade. Revisit if a future Firebase uses new language features.

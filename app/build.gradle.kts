@@ -47,7 +47,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+    kotlinOptions {
+        jvmTarget = "17"
+        // Firebase 24.x ships Kotlin metadata 2.3.0; our KGP is 2.0.21.
+        // Skips the version gate — the auth surface we touch (getInstance,
+        // signInAnonymously, currentUser) is ancient and stable. Revisit
+        // with a KGP upgrade if a newer Firebase uses new language features.
+        freeCompilerArgs += "-Xskip-metadata-version-check"
+    }
 
     // JVM unit tests run against the unmocked android.jar stub, where every
     // framework call (e.g. android.util.Log) throws. returnDefaultValues
