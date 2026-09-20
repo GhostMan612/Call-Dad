@@ -92,6 +92,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Lane read of both tails:** rings observed BOTH ways (`Ring observed` BLU ×2, Moto ×1), publishes clean, teardowns clean — popup path fully proven. But zero Answer taps anywhere: every overlay exit was silent (no DECLINED line) → system back button escaping without room cleanup → ghost rooms + the lingering both-caller chaos. Fix: BackHandler = Hang Up (Decline on overlay), same awaited path.
 - **Retest that matters:** rebuild both → BLU calls → Moto overlay → tap ANSWER (green, the one untested button) → expect CONNECTED both sides.
 
+## Where we are (2026-09-20, no-remote-video root-caused — executor lane, UNCOMMITTED)
+
+- **Operator report:** call connects UI-wise, local PiP only, drops ~14s (watchdog firing = peer never CONNECTED). Root cause: ICE gathering starts at createPeerConnection but the room only exists after the Firestore round-trip — early (host, LAN-critical) candidates were silently dropped while `currentCallId == null`. Fix: stash + flush on room creation; reset clears stash.
+- **Retest:** rebuild both → call → expect CONNECTED + remote video (not just PiP), no 15s drop.
+
 ## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
 
 - **Operator report:** Incoming overlay hangs until another call+hangup cycle; both phones on v3 (lane-verified dumpsys) so NOT a stale build. Root cause: overlay opens on a possibly-stale snapshot and only watches for FUTURE deletions — an already-gone room strands it (nothing will ever fire). Fix: `watchIncomingRoom` validates entry (fetchOffer answerable? else bounce home at once) then watches. Covers stale-snapshot, own-ringback, and pre-hangup races.

@@ -49,6 +49,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 viewModelScope.launch {
                     signaling.addIceCandidate(id, candidate).onFailure(::reportError)
                 }
+            } else {
+                // Gathering starts at createPeerConnection(), but the room
+                // only exists after the Firestore round-trip (~0.5s). Stash
+                // early candidates instead of dropping them — on LAN these
+                // host candidates ARE the connection (device-proven outage).
+                synchronized(pendingLocalCandidates) {
+                    pendingLocalCandidates.add(candidate)
+                }
             }
         },
         onRemoteVideoTrack = { track -> _remoteVideoTrack.value = track },
@@ -80,6 +88,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val _peerConnected = MutableStateFlow(false)
 
     private var currentCallId: String? = null
+    private val pendingLocalCandidates = mutableListOf<IceCandidate>()
     private var timerJob: Job? = null
     private var sessionJob: Job? = null
 
@@ -115,6 +124,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 WebRtcLog.transition("OFFER publish started")
                 val callId = signaling.createCallRoom(callee, offer.sdp).getOrThrow()
                 currentCallId = callId
+                flushPendingCandidates(callId)
                 WebRtcLog.transition("OFFER published")
 
                 listenCall(callId)
@@ -156,6 +166,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 WebRtcLog.transition("ANSWER published")
 
                 currentCallId = callId
+                flushPendingCandidates(callId)
                 _state.value = CallState.InCall(
                     role = CallRole.CALLEE,
                     startedAtMillis = System.currentTimeMillis()
@@ -298,6 +309,17 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Sends candidates gathered before the room existed. */
+    private fun flushPendingCandidates(callId: String) {
+        val pending = synchronized(pendingLocalCandidates) {
+            if (pendingLocalCandidates.isEmpty()) return
+            pendingLocalCandidates.toList().also { pendingLocalCandidates.clear() }
+        }
+        viewModelScope.launch {
+            pending.forEach { signaling.addIceCandidate(callId, it) }
+        }
+    }
+
     private fun listenCandidates(callId: String) {
         viewModelScope.launch {
             signaling.observeIceCandidates(callId)
@@ -382,6 +404,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         _eglContext.value = null
         _localVideoTrack.value = null
         _peerConnected.value = false
+        synchronized(pendingLocalCandidates) { pendingLocalCandidates.clear() }
         _state.value = CallState.Idle
     }
 
