@@ -19,6 +19,14 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, first device run AUDITED — Firestore write never completed)
+
+- **Operator run (BLU, single device):** Home → Call Dad; logcat showed Factory→PC→capture→HAVE_LOCAL_OFFER→Local OFFER→GATHERING, then 26s silence, then user hangup (CLOSED cascade + dispose). **`OFFER published` NEVER appeared → per prompt §J, fault is in SignalingClient/Firestore, not WebRTC.**
+- **Executor probes (authorized, read-only adb):** BLU online (firestore.googleapis.com ping 0% loss); app installed, no crash, no Firebase exceptions in buffer (buffer rotated; `-s WebRTC:D` filter would have hidden non-WebRTC errors anyway).
+- **Ranked hypotheses:** (1) write HUNG (offline at 19:55? wrong-project json?) vs (2) failed fast into Error state with ZERO logging (observability gap — now fixed: `OFFER/ANSWER publish started` markers + `Call failed: <KIND>` in reportError, guardrail-compliant). UI state during the 26s UNKNOWN — operator to confirm (Calling vs Retry card).
+- **Single-device ceiling:** no callee exists (Moto G gaming) → ANSWER/CONNECTED impossible regardless; Firestore rules/DB provisioning still unverified.
+- **Fix committed next (pending):** observability markers above. Re-test needs UNFILTERED logcat.
+
 ## Where we are (2026-09-19, host gates GREEN — operator run, executor recorded)
 
 - **Evidence (operator pasted):** `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug` → **BUILD SUCCESSFUL in 2m17s, 33 tasks (31 executed, 2 cached)**. 8/8 host tests pass (Routes 3 + SignalingModels 5); lint clean apart from K2 Kotlin-analysis-API warnings (toolchain noise, pre-existing). Wrapper generation itself also BUILD SUCCESSFUL.

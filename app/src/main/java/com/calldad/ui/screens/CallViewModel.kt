@@ -76,6 +76,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 webrtc.startCapture()
 
                 val offer = webrtc.createOffer()
+                WebRtcLog.transition("OFFER publish started")
                 signaling.publishOffer(offer.sdp).getOrThrow()
                 WebRtcLog.transition("OFFER published")
 
@@ -103,6 +104,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 WebRtcLog.transition("Remote OFFER applied")
 
                 val answer = webrtc.createAnswer()
+                WebRtcLog.transition("ANSWER publish started")
                 signaling.publishAnswer(answer.sdp).getOrThrow()
                 WebRtcLog.transition("ANSWER published")
 
@@ -191,6 +193,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun reportError(t: Throwable) {
         val failure = t as? SignalingFailure
+        // Kind-name only: guardrail-compliant, distinguishes hang (no line)
+        // from failure (this line) in logcat.
+        WebRtcLog.transition("Call failed: ${failure?.kind?.name ?: "UNKNOWN"}")
         _state.value = CallState.Error(
             kind = failure?.kind ?: SignalingErrorKind.UNKNOWN,
             message = failure?.userMessage ?: t.message ?: "Something went wrong."
