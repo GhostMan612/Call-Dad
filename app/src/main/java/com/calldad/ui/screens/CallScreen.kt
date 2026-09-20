@@ -108,13 +108,11 @@ fun CallScreen(
     LaunchedEffect(Unit) {
         requestPermissions()
         if (mode == "incoming") {
-            if (!callId.isNullOrBlank()) {
-                // Real ring (popup or FSI): overlay + room watcher.
-                viewModel.watchIncomingCall(callId)
-            } else {
-                // Test seam only: overlay with no room behind it.
-                viewModel.simulateIncomingCall()
-            }
+            // Overlay FIRST (Idle-guarded, always safe), then the room
+            // watcher: without this the screen sits on "Ready" (device-proven
+            // miss — navigation arrived but state never left Idle).
+            viewModel.simulateIncomingCall()
+            if (!callId.isNullOrBlank()) viewModel.watchIncomingCall(callId)
         }
     }
 
