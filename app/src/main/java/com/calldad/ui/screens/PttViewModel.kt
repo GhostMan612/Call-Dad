@@ -7,8 +7,9 @@
 package com.calldad.ui.screens
 
 import android.app.Application
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
-import androidx.activity.compose.LocalActivity
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -165,7 +166,7 @@ class PttViewModelFactory(
  */
 @Composable
 fun rememberPttViewModel(): PttViewModel {
-    val activity = LocalActivity.current
+    val activity = LocalContext.current as ComponentActivity
     return viewModel(
         viewModelStoreOwner = activity,
         factory = PttViewModelFactory(activity.application)
