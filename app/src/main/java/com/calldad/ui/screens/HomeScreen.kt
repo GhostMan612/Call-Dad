@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
@@ -33,7 +32,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.calldad.navigation.Routes
 import com.calldad.ui.components.GiantActionCard
 import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.CallGreen
@@ -114,23 +112,6 @@ private fun HomeContent(
                     // Preserve the 2x2 rhythm if a row is ever short.
                     if (rowItems.size == 1) Spacer(Modifier.weight(1f))
                 }
-            }
-
-            // QA-only incoming-call hook. DEBUG builds only — never ships.
-            // Opens the Call screen in incoming mode so simulateIncomingCall()
-            // drives the REAL answerCall() path (no fake overlay, no FCM yet).
-            // FIXED height: GiantActionCard's inner fillMaxSize Column would
-            // otherwise claim the whole Column and squeeze the grid to zero.
-            if (com.calldad.BuildConfig.DEBUG) {
-                GiantActionCard(
-                    label = "QA: incoming call",
-                    icon = androidx.compose.material.icons.Icons.Filled.Call,
-                    containerColor = androidx.compose.ui.graphics.Color(0xFF616161),
-                    onClick = { onActionSelected("${com.calldad.navigation.Routes.CALL}?mode=incoming") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                )
             }
         }
     }

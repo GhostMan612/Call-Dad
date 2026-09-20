@@ -97,12 +97,29 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
                 listenForAnswer()
                 listenForRemoteCandidates()
+                listenForRemoteHangup()
             } catch (t: Throwable) {
                 // Scope cancellation (e.g. hangup popping the destination and
                 // clearing the VM) is not an error — never report it.
                 if (t is CancellationException) throw t
                 reportError(t)
             }
+        }
+    }
+
+    /**
+     * Peer hung up or declined (teardown deletes the room). Mirror it
+     * locally: reset to Idle so the screen auto-returns home. Our own
+     * teardown is idempotent, so calling endCall() here is safe.
+     */
+    private fun listenForRemoteHangup() {
+        viewModelScope.launch {
+            signaling.observeRoomDeleted()
+                .catch { reportError(it) }
+                .collect {
+                    WebRtcLog.transition("Remote hangup observed")
+                    endCall()
+                }
         }
     }
 
@@ -151,6 +168,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 startTimer()
                 listenForRemoteCandidates()
+                listenForRemoteHangup()
             } catch (t: Throwable) {
                 // Scope cancellation (e.g. hangup popping the destination and
                 // clearing the VM) is not an error — never report it.

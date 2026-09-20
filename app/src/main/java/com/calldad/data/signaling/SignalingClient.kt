@@ -165,6 +165,34 @@ class SignalingClient(
     }
 
     // ---------------------------------------------------------------------
+    // Remote hangup
+    // ---------------------------------------------------------------------
+
+    /**
+     * Emits once when the room document disappears (peer hung up or
+     * declined — teardown deletes it). Cold; removed on cancellation.
+     *
+     * Start collecting only AFTER our own publish: the room legitimately
+     * doesn't exist before that, and only a present-then-gone transition
+     * counts as a hangup.
+     */
+    fun observeRoomDeleted(): Flow<Unit> = callbackFlow {
+        var wasPresent = false
+        val registration: ListenerRegistration = roomRef.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                close(error)
+                return@addSnapshotListener
+            }
+            if (snapshot != null && snapshot.exists()) {
+                wasPresent = true
+            } else if (wasPresent) {
+                trySend(Unit)
+            }
+        }
+        awaitClose { registration.remove() }
+    }
+
+    // ---------------------------------------------------------------------
     // Teardown
     // ---------------------------------------------------------------------
 

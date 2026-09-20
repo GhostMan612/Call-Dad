@@ -104,6 +104,23 @@ fun CallScreen(
         if (mode == "incoming") viewModel.simulateIncomingCall()
     }
 
+    // Any return to Idle after real activity (ringing, incoming, in-call,
+    // or failed-and-retried) follows home so neither side strands on a dead
+    // screen — including a peer's decline while we were still ringing.
+    // Initial Idle never triggers (wasActive starts false).
+    var wasActive by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        if (state is CallState.Connecting ||
+            state is CallState.Incoming ||
+            state is CallState.InCall
+        ) {
+            wasActive = true
+        } else if (state is CallState.Idle && wasActive) {
+            wasActive = false
+            onFinished()
+        }
+    }
+
     CallContent(
         state = state,
         elapsedSeconds = elapsed,
