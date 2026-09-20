@@ -19,6 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-19, host gates GREEN — human evidence, recorded by executor)
+
+- **Human run: `testDebugUnitTest` + `lintDebug` → BUILD SUCCESSFUL in 2m17s (33 tasks: 31 executed, 2 from cache).** Covers `RoutesTest` + `SignalingModelsTest`. Only warnings: benign Kotlin analysis-API `KaSessionProvider`/`NoWriteActionInAnalyseCallChecker` noise + lint HTML report in `build/` (gitignored).
+- WebRTC coordinates fix (`stream-webrtc-android:1.3.10`) is therefore RESOLUTION-PROVEN (dependency graph solved). Compilation of `org.webrtc` imports proven when `assembleDebug` runs.
+- Still pending (operator): `:app:assembleDebug` + `adb logcat -s WebRTC:D` caller sequence per prompt §J. Then Phase 4 (TURN, renderers, incoming-call overlay).
+
 ## Where we are (2026-09-19, Phase 3 peer connection landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed (4 created, 5 modified, package `com.calldad`):** `webrtc/WebRtcConfig.kt` (Google STUN ×2, 640×480@24), `WebRtcLog.kt` guardrail (fixed-string/enum logging only — KDoc is a standing RULES-§2 exception per ADR-005), `WebRTCClient.kt` (trickle ICE, GATHER_CONTINUALLY, audio+front-camera tracks, Phase 4 renderer hooks), `ui/permissions/CallPermissions.kt`; catalog `webrtc 1.1.0`, module dep, Manifest mic/camera + `required=false` features.
