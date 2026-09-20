@@ -54,6 +54,8 @@ class SignalingClient(
     /** Caller writes the initial OFFER document. Idempotent via merge. */
     suspend fun publishOffer(localSdp: String): Result<Unit> = runCatchingFirestore {
         require(localSdp.isNotBlank()) { "Offer SDP must not be blank" }
+        // Mark BEFORE the write: our own ringback must never count as Dad.
+        OwnOfferRegistry.markPublished(localSdp)
         roomRef.set(
             mapOf(
                 FIELD_TYPE to SdpType.OFFER.name,
@@ -78,6 +80,10 @@ class SignalingClient(
         val sdp = snapshot.getString(FIELD_SDP)
         if (type != SdpType.OFFER || sdp.isNullOrBlank()) {
             throw SignalingFailure(SignalingErrorKind.MALFORMED, "Room does not contain a valid OFFER.")
+        }
+        if (OwnOfferRegistry.isOwn(sdp)) {
+            // Our own ringback (double-call/hangup races) — not answerable.
+            throw SignalingFailure(SignalingErrorKind.NOT_FOUND, "Call room does not exist yet.")
         }
         SessionDescription(type, sdp)
     }

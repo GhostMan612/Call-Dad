@@ -8,6 +8,7 @@ package com.calldad.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.calldad.data.signaling.OwnOfferRegistry
 import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SignalingClient
 import com.calldad.navigation.Routes
@@ -53,6 +54,9 @@ class HomeViewModel(
             signaling.observeRemoteDescription(SdpType.OFFER)
                 .catch { /* offline: stay silent, retry on next Home entry */ }
                 .collect { remote ->
+                    // Our own ringback (we called, hung up, called again):
+                    // never ring ourselves. See OwnOfferRegistry.
+                    if (OwnOfferRegistry.isOwn(remote.sdp)) return@collect
                     val hash = remote.sdp.hashCode()
                     if (hash != seenOfferHash) {
                         seenOfferHash = hash
