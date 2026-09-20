@@ -13,7 +13,9 @@ googleServices = "4.5.0"
 firebaseBom = "34.19.0"
 
 # --- Phase 3 additions --------------------------------------------------
-webrtc = "1.1.0"
+# CORRECTED 2026-09-19: real artifact is stream-webrtc-android (Maven Central,
+# latest stable 1.3.10); architect's webrtc-android:1.1.0 does not exist.
+webrtc = "1.3.10"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -38,7 +40,7 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 
 # --- Phase 3 additions (Stream WebRTC fork; same org.webrtc.* package names) --
-webrtc-android = { group = "io.getstream", name = "webrtc-android", version.ref = "webrtc" }
+webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtc" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
