@@ -38,6 +38,13 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Fix:** offers carry `createdAt`; listener + fetch ignore anything >60s old or unstamped. Abandoned rings now die on their own instead of haunting the phones. Per-call rooms still the real answer (Phase 5).
 - **Retest choreography (strict one-caller-at-a-time):** hang up BOTH phones first (clears room) → BLU calls and waits → Moto answers within a minute. Simultaneous calling still clobbers — don't.
 
+## Where we are (2026-09-19, Phase 5 landed — executor lane, UNCOMMITTED)
+
+- **Architect prompt executed with 7 recorded deviations (ADR-007):** no-KTX, BOM-managed versions, ring-pointer bridge (`ring/dad`, presence-only, strict-ish rules) so app-to-app stays testable pre-Phase-6, CALLEE_UID per-phone provisioning, POST_NOTIFICATIONS runtime ask, status-machine VM (45s ring timeout, 15s media watchdog, cancel-safe), FCM armed-but-untargeted (no tokens until Phase 6).
+- **New files:** CallDadApplication, CallDocument, OwnCallRegistry (replaces OwnOfferRegistry), fcm/×2, ic_call, functions/×3, firebase.json, firestore.rules. Deleted: OwnOfferRegistry.kt.
+- **NOT yet proven:** everything needs a Studio sync (new deps: auth/messaging/play-services-auth) + `firebase deploy --only functions,firestore:rules` + CALLEE_UID provisioning + killed-app test. Handoff §M boxes filled from operator pastes only — nothing fabricated.
+- **Operator console steps (in order):** enable Anonymous sign-in (Auth → Sign-in method) → `firebase deploy --only functions,firestore:rules` → read both phones' uids (Auth → Users) → CALLEE_UID swap-builds → test matrix in prompt §L.
+
 ## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
 
 - **Operator report:** Incoming overlay hangs until another call+hangup cycle; both phones on v3 (lane-verified dumpsys) so NOT a stale build. Root cause: overlay opens on a possibly-stale snapshot and only watches for FUTURE deletions — an already-gone room strands it (nothing will ever fire). Fix: `watchIncomingRoom` validates entry (fetchOffer answerable? else bounce home at once) then watches. Covers stale-snapshot, own-ringback, and pre-hangup races.

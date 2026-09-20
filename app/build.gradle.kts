@@ -1,3 +1,7 @@
+// Call-Dad app module. Phase 5 — BuildConfig fields injected from local.properties (gitignored).
+// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.0.
+import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -16,6 +20,21 @@ android {
         // versionCode 3: build fingerprint (lane-checkable via dumpsys).
         versionCode = 3
         versionName = "0.2.0"
+
+        // Phase 5 provisioned secrets. Read from local.properties (gitignored,
+        // operator-placed per local.properties.template). Empty defaults so a
+        // machine without credentials still builds (STUN-only, no callee).
+        // NEVER commit real values — verify_project.py + .gitignore enforce.
+        val localProps = gradleLocalProperties(rootDir, providers)
+        val turnUrl = localProps.getProperty("TURN_URL") ?: ""
+        val turnUser = localProps.getProperty("TURN_USER") ?: ""
+        val turnPass = localProps.getProperty("TURN_PASS") ?: ""
+        val calleeUid = localProps.getProperty("CALLEE_UID") ?: ""
+
+        buildConfigField("String", "TURN_URL", "\"$turnUrl\"")
+        buildConfigField("String", "TURN_USER", "\"$turnUser\"")
+        buildConfigField("String", "TURN_PASS", "\"$turnPass\"")
+        buildConfigField("String", "CALLEE_UID", "\"$calleeUid\"")
     }
 
     buildFeatures {
@@ -54,6 +73,11 @@ dependencies {
 
     // ---- Phase 3: Stream WebRTC fork (drop-in org.webrtc.*, ~20MB native) ----
     implementation(libs.webrtc.android)
+
+    // ---- Phase 5: auth + messaging (+play-services-auth per architect) ----
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.messaging)
+    implementation(libs.play.services.auth)
 
     // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
     testImplementation("junit:junit:4.13.2")

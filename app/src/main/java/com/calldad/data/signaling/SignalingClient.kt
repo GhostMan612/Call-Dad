@@ -2,11 +2,14 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// data/signaling/SignalingClient.kt
+// data/signaling/SignalingClient.kt — Phase 5: per-call rooms + ring bridge
 // Location: app/src/main/java/com/calldad/data/signaling/SignalingClient.kt
 package com.calldad.data.signaling
 
+import com.calldad.webrtc.WebRtcLog
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
@@ -15,96 +18,155 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 /**
- * Pure data-layer client for the WebRTC signaling channel.
+ * Pure data-layer client for WebRTC signaling over per-call rooms.
  *
- * Firestore shape it owns (per Phase 2 spec):
+ * Firestore shape (Phase 5):
  *
- *   calls/{callRoomId}
- *       type      : "OFFER" | "ANSWER"
- *       sdp       : String
- *       candidates/{autoId}
- *           serverUrl     : String?
- *           sdpMid        : String?
- *           sdpMLineIndex : Int?
- *           sdpCandidate  : String
+ *   calls/{callId}
+ *       callerUid : String | calleeUid : String
+ *       status    : RINGING | CONNECTED | DECLINED | ENDED
+ *       offer     : String  | answer : String?
+ *       createdAt : ServerTimestamp
+ *       candidates/{autoId}: serverUrl?/sdpMid?/sdpMLineIndex?/sdpCandidate
  *
- * Lifecycle contract:
- *   - Caller:  publishOffer() -> observeRemoteDescription(ANSWER) + observeIceCandidates()
- *   - Callee:  fetchOffer()  -> publishAnswer()                 + observeIceCandidates()
- *   - Either:  addIceCandidate() for locally-gathered candidates.
- *   - Either:  teardown() on hang-up.
+ *   ring/dad (executor bridge, ADR-007 — presence ONLY, no SDP):
+ *       callId | callerUid | createdAt(client millis)
  *
- * This class deliberately has no knowledge of WebRTC, no Hilt, and no
- * Android context. It exposes suspend functions and cold Flows only.
+ * Lifecycle: createCallRoom → observeCall/status → publishAnswer →
+ * Connected; declineCall/endCall flip status. Ring pointer lets the
+ * app-open callee discover callIds before Phase 6 token plumbing.
+ *
+ * No WebRTC knowledge, no Hilt, no Android context. Suspend + cold Flows.
  */
 class SignalingClient(
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
-    private val roomId: String = DEFAULT_ROOM_ID
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
 
-    private val roomRef = firestore.collection(COLLECTION_CALLS).document(roomId)
-    private val candidatesRef = roomRef.collection(COLLECTION_CANDIDATES)
+    private val callsCollection = firestore.collection(COLLECTION_CALLS)
+    private val ringDoc = firestore.collection(COLLECTION_RING).document(RING_DOC_ID)
+
+    private fun candidatesRef(callId: String) =
+        callsCollection.document(callId).collection(COLLECTION_CANDIDATES)
+
+    /** Current uid, or throws if anonymous auth hasn't completed yet. */
+    private fun currentUid(): String =
+        auth.currentUser?.uid
+            ?: throw SignalingFailure(
+                SignalingErrorKind.UNKNOWN,
+                "Not signed in yet. Please wait a moment and try again."
+            )
 
     // ---------------------------------------------------------------------
     // Caller path
     // ---------------------------------------------------------------------
 
-    /** Caller writes the initial OFFER document. Idempotent via merge. */
-    suspend fun publishOffer(localSdp: String): Result<Unit> = runCatchingFirestore {
-        require(localSdp.isNotBlank()) { "Offer SDP must not be blank" }
-        // Mark BEFORE the write: our own ringback must never count as Dad.
-        OwnOfferRegistry.markPublished(localSdp)
-        roomRef.set(
+    /**
+     * Caller: create a NEW call room with a fresh UUID.
+     * Returns the generated callId so the VM can listen on it.
+     */
+    suspend fun createCallRoom(
+        calleeUid: String,
+        offerSdp: String
+    ): Result<String> = runCatchingFirestore {
+        require(calleeUid.isNotBlank()) { "calleeUid must not be blank" }
+        require(offerSdp.isNotBlank()) { "Offer SDP must not be blank" }
+
+        val callId = UUID.randomUUID().toString()
+        OwnCallRegistry.markPublished(callId)
+        callsCollection.document(callId).set(
             mapOf(
-                FIELD_TYPE to SdpType.OFFER.name,
-                FIELD_SDP to localSdp,
-                FIELD_CREATED_AT to System.currentTimeMillis()
-            ),
-            SetOptions.merge()
+                FIELD_CALLER_UID to currentUid(),
+                FIELD_CALLEE_UID to calleeUid,
+                FIELD_STATUS to CallStatus.RINGING.name,
+                FIELD_OFFER to offerSdp,
+                FIELD_ANSWER to null,
+                FIELD_CREATED_AT to FieldValue.serverTimestamp()
+            )
         ).await()
-        Unit
+        // Ring pointer (bridge): presence only, so the app-open callee can
+        // discover this callId. Best-effort — the FCM path doesn't need it.
+        runCatching {
+            ringDoc.set(
+                mapOf(
+                    FIELD_CALL_ID to callId,
+                    FIELD_CALLER_UID to currentUid(),
+                    FIELD_CREATED_AT to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            ).await()
+        }
+        WebRtcLog.transition("Call room created")
+        callId
     }
 
     // ---------------------------------------------------------------------
     // Callee path
     // ---------------------------------------------------------------------
 
-    /** Callee reads the pending OFFER before constructing an ANSWER. */
-    suspend fun fetchOffer(): Result<SessionDescription> = runCatchingFirestore {
-        val snapshot = roomRef.get().await()
-        if (!snapshot.exists()) {
-            throw SignalingFailure(SignalingErrorKind.NOT_FOUND, "Call room does not exist yet.")
-        }
-        val type = SdpType.fromWire(snapshot.getString(FIELD_TYPE))
-        val sdp = snapshot.getString(FIELD_SDP)
-        if (type != SdpType.OFFER || sdp.isNullOrBlank()) {
-            throw SignalingFailure(SignalingErrorKind.MALFORMED, "Room does not contain a valid OFFER.")
-        }
-        if (OwnOfferRegistry.isOwn(sdp)) {
-            // Our own ringback (double-call/hangup races) — not answerable.
-            throw SignalingFailure(SignalingErrorKind.NOT_FOUND, "Call room does not exist yet.")
-        }
-        val description = SessionDescription(type, sdp, snapshot.getLong(FIELD_CREATED_AT))
-        if (description.isStale()) {
-            // Abandoned ring (caller vanished without teardown) — not answerable.
-            throw SignalingFailure(SignalingErrorKind.NOT_FOUND, "Call room does not exist yet.")
-        }
-        description
+    /** Callee: write the ANSWER and flip status to CONNECTED. */
+    suspend fun publishAnswer(
+        callId: String,
+        answerSdp: String
+    ): Result<Unit> = runCatchingFirestore {
+        require(answerSdp.isNotBlank()) { "Answer SDP must not be blank" }
+        callsCollection.document(callId).update(
+            mapOf(
+                FIELD_ANSWER to answerSdp,
+                FIELD_STATUS to CallStatus.CONNECTED.name
+            )
+        ).await()
+        WebRtcLog.transition("ANSWER published, status CONNECTED")
     }
 
-    /** Callee writes the ANSWER document. Idempotent via merge. */
-    suspend fun publishAnswer(localSdp: String): Result<Unit> = runCatchingFirestore {
-        require(localSdp.isNotBlank()) { "Answer SDP must not be blank" }
-        roomRef.set(
-            mapOf(
-                FIELD_TYPE to SdpType.ANSWER.name,
-                FIELD_SDP to localSdp
-            ),
-            SetOptions.merge()
+    /** Fetch a call document once. */
+    suspend fun fetchCall(callId: String): Result<CallDocument> =
+        runCatchingFirestore {
+            val snap = callsCollection.document(callId).get().await()
+            if (!snap.exists()) throw SignalingFailure(
+                SignalingErrorKind.NOT_FOUND, "Call not found."
+            )
+            snap.toCallDocumentOrNull(callId) ?: throw SignalingFailure(
+                SignalingErrorKind.MALFORMED, "Call document malformed."
+            )
+        }
+
+    // ---------------------------------------------------------------------
+    // Either side: decline / hangup
+    // ---------------------------------------------------------------------
+
+    /** Either side: flip status to DECLINED (doc kept for the peer to see). */
+    suspend fun declineCall(callId: String): Result<Unit> = runCatchingFirestore {
+        callsCollection.document(callId).update(
+            mapOf(FIELD_STATUS to CallStatus.DECLINED.name)
         ).await()
-        Unit
+        clearRingIfOurs(callId)
+        WebRtcLog.transition("Call DECLINED")
+    }
+
+    /** Either side: flip status to ENDED. Used by hang-up. */
+    suspend fun endCall(callId: String): Result<Unit> = runCatchingFirestore {
+        callsCollection.document(callId).update(
+            mapOf(FIELD_STATUS to CallStatus.ENDED.name)
+        ).await()
+        clearRingIfOurs(callId)
+        WebRtcLog.transition("Call ENDED")
+    }
+
+    /**
+     * Delete our own ring pointer if it still points at this call.
+     * Read-then-delete so we never clear someone else's ring.
+     */
+    private suspend fun clearRingIfOurs(callId: String) {
+        runCatching {
+            val snap = ringDoc.get().await()
+            if (snap.exists() && snap.getString(FIELD_CALL_ID) == callId) {
+                ringDoc.delete().await()
+            }
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -112,38 +174,80 @@ class SignalingClient(
     // ---------------------------------------------------------------------
 
     /**
-     * Emits every time the room document's type matches [expectedType].
-     * Caller passes ANSWER; a callee that arrived late passes OFFER.
-     *
-     * Cold: one Firestore listener per collector, removed on cancellation.
+     * Listen to the whole call document. Emits the parsed status + sdp
+     * on every change. The VM decides what each transition means.
      */
-    fun observeRemoteDescription(expectedType: SdpType): Flow<SessionDescription> = callbackFlow {
-        val registration: ListenerRegistration = roomRef.addSnapshotListener { snapshot, error ->
+    fun observeCall(callId: String): Flow<CallDocument> = callbackFlow {
+        val reg = callsCollection.document(callId)
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snap == null || !snap.exists()) return@addSnapshotListener
+                val doc = snap.toCallDocumentOrNull(callId) ?: return@addSnapshotListener
+                trySend(doc)
+            }
+        awaitClose { reg.remove() }
+    }
+
+    /**
+     * Ring pointer observer (bridge, ADR-007): emits live rings from OTHER
+     * devices. Skips our own rings and anything stale (>60s). Cold.
+     */
+    fun observeRing(): Flow<RingAnnouncement> = callbackFlow {
+        val reg: ListenerRegistration = ringDoc.addSnapshotListener { snap, error ->
             if (error != null) {
                 close(error)
                 return@addSnapshotListener
             }
-            if (snapshot == null || !snapshot.exists()) return@addSnapshotListener
-
-            val type = SdpType.fromWire(snapshot.getString(FIELD_TYPE))
-            val sdp = snapshot.getString(FIELD_SDP)
-            if (type == expectedType && !sdp.isNullOrBlank()) {
-                trySend(SessionDescription(type, sdp, snapshot.getLong(FIELD_CREATED_AT)))
+            if (snap == null || !snap.exists()) return@addSnapshotListener
+            val callId = snap.getString(FIELD_CALL_ID) ?: return@addSnapshotListener
+            if (OwnCallRegistry.isOwn(callId)) return@addSnapshotListener
+            val createdAt = snap.getLong(FIELD_CREATED_AT) ?: 0L
+            if (System.currentTimeMillis() - createdAt > OFFER_STALE_MS) {
+                return@addSnapshotListener
             }
+            trySend(
+                RingAnnouncement(
+                    callId = callId,
+                    callerUid = snap.getString(FIELD_CALLER_UID) ?: "",
+                    createdAtMillis = createdAt
+                )
+            )
         }
-        awaitClose { registration.remove() }
+        awaitClose { reg.remove() }
     }
 
     /**
-     * Emits only NEW ICE candidates written to the sub-collection.
-     *
-     * Uses [DocumentChange.Type.ADDED] rather than raw document iteration
-     * because a Firestore snapshot listener always replays the full result
-     * set on first attach — we would otherwise re-feed historical candidates
-     * into the peer connection on every screen rotation.
+     * Deletion backup for a specific call: docs are status-driven and
+     * nothing deletes them in the happy path, but a present-then-gone
+     * transition must never strand a watcher. Cold.
      */
-    fun observeIceCandidates(): Flow<IceCandidate> = callbackFlow {
-        val registration = candidatesRef.addSnapshotListener { snapshot, error ->
+    fun observeCallDeleted(callId: String): Flow<Unit> = callbackFlow {
+        var wasPresent = false
+        val reg: ListenerRegistration = callsCollection.document(callId)
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snap != null && snap.exists()) {
+                    wasPresent = true
+                } else if (wasPresent) {
+                    trySend(Unit)
+                }
+            }
+        awaitClose { reg.remove() }
+    }
+
+    /**
+     * Emits only NEW ICE candidates in calls/{callId}/candidates.
+     * ADDED-only: listeners replay the full set on attach, and we must not
+     * re-feed history on every rotation.
+     */
+    fun observeIceCandidates(callId: String): Flow<IceCandidate> = callbackFlow {
+        val registration = candidatesRef(callId).addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(error)
                 return@addSnapshotListener
@@ -163,66 +267,19 @@ class SignalingClient(
     // ---------------------------------------------------------------------
 
     /** Trickle a locally-gathered candidate to the peer. */
-    suspend fun addIceCandidate(candidate: IceCandidate): Result<Unit> = runCatchingFirestore {
-        require(candidate.sdpCandidate.isNotBlank()) { "Candidate payload must not be blank" }
-        val payload = mutableMapOf<String, Any?>(
-            FIELD_SDP_CANDIDATE to candidate.sdpCandidate
-        )
-        candidate.serverUrl?.let { payload[FIELD_SERVER_URL] = it }
-        candidate.sdpMid?.let { payload[FIELD_SDP_MID] = it }
-        candidate.sdpMLineIndex?.let { payload[FIELD_SDP_MLINE_INDEX] = it }
+    suspend fun addIceCandidate(callId: String, candidate: IceCandidate): Result<Unit> =
+        runCatchingFirestore {
+            require(candidate.sdpCandidate.isNotBlank()) { "Candidate payload must not be blank" }
+            val payload = mutableMapOf<String, Any?>(
+                FIELD_SDP_CANDIDATE to candidate.sdpCandidate
+            )
+            candidate.serverUrl?.let { payload[FIELD_SERVER_URL] = it }
+            candidate.sdpMid?.let { payload[FIELD_SDP_MID] = it }
+            candidate.sdpMLineIndex?.let { payload[FIELD_SDP_MLINE_INDEX] = it }
 
-        candidatesRef.add(payload).await()
-        Unit
-    }
-
-    // ---------------------------------------------------------------------
-    // Remote hangup
-    // ---------------------------------------------------------------------
-
-    /**
-     * Emits once when the room document disappears (peer hung up or
-     * declined — teardown deletes it). Cold; removed on cancellation.
-     *
-     * Start collecting only AFTER our own publish: the room legitimately
-     * doesn't exist before that, and only a present-then-gone transition
-     * counts as a hangup.
-     */
-    fun observeRoomDeleted(): Flow<Unit> = callbackFlow {
-        var wasPresent = false
-        val registration: ListenerRegistration = roomRef.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                close(error)
-                return@addSnapshotListener
-            }
-            if (snapshot != null && snapshot.exists()) {
-                wasPresent = true
-            } else if (wasPresent) {
-                trySend(Unit)
-            }
+            candidatesRef(callId).add(payload).await()
+            Unit
         }
-        awaitClose { registration.remove() }
-    }
-
-    // ---------------------------------------------------------------------
-    // Teardown
-    // ---------------------------------------------------------------------
-
-    /**
-     * Removes the room document and its candidate sub-collection.
-     * Candidates are deleted in one batched commit; the room doc is removed
-     * last so a racing observer never sees an empty parent with stale kids.
-     */
-    suspend fun teardown(): Result<Unit> = runCatchingFirestore {
-        val candidates = candidatesRef.get().await()
-        if (!candidates.isEmpty) {
-            val batch = firestore.batch()
-            candidates.documents.forEach { batch.delete(it.reference) }
-            batch.commit().await()
-        }
-        roomRef.delete().await()
-        Unit
-    }
 
     // ---------------------------------------------------------------------
     // Internals
@@ -288,15 +345,18 @@ class SignalingClient(
     }
 
     companion object {
-        /** Phase 2 hardcodes a single channel; Phase 4 will parameterise this. */
-        const val DEFAULT_ROOM_ID = "dad_channel"
-
         private const val COLLECTION_CALLS = "calls"
         private const val COLLECTION_CANDIDATES = "candidates"
+        private const val COLLECTION_RING = "ring"
+        private const val RING_DOC_ID = "dad"
 
-        private const val FIELD_TYPE = "type"
-        private const val FIELD_SDP = "sdp"
+        private const val FIELD_CALLER_UID = "callerUid"
+        private const val FIELD_CALLEE_UID = "calleeUid"
+        private const val FIELD_STATUS = "status"
+        private const val FIELD_OFFER = "offer"
+        private const val FIELD_ANSWER = "answer"
         private const val FIELD_CREATED_AT = "createdAt"
+        private const val FIELD_CALL_ID = "callId"
         private const val FIELD_SERVER_URL = "serverUrl"
         private const val FIELD_SDP_MID = "sdpMid"
         private const val FIELD_SDP_MLINE_INDEX = "sdpMLineIndex"

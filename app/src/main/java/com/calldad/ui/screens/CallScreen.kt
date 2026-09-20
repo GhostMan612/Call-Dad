@@ -62,8 +62,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -80,6 +83,7 @@ fun CallScreen(
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
     mode: String = "caller",
+    callId: String? = null,
     viewModel: CallViewModel = callViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -104,9 +108,31 @@ fun CallScreen(
     LaunchedEffect(Unit) {
         requestPermissions()
         if (mode == "incoming") {
-            viewModel.simulateIncomingCall()
-            viewModel.watchIncomingRoom()
+            if (!callId.isNullOrBlank()) {
+                // Real ring (popup or FSI): overlay + room watcher.
+                viewModel.watchIncomingCall(callId)
+            } else {
+                // Test seam only: overlay with no room behind it.
+                viewModel.simulateIncomingCall()
+            }
         }
+    }
+
+    // Lock-screen polish: camera track follows the foreground. Disabling
+    // (not disposing) lets the HAL re-open cleanly on resume; the peer
+    // connection — and the call — survive the lock.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, localVideoTrack) {
+        val track = localVideoTrack ?: return@DisposableEffect onDispose { }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> track.setEnabled(false)
+                Lifecycle.Event.ON_RESUME -> track.setEnabled(true)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Any return to Idle after real activity (ringing, incoming, in-call,
@@ -139,10 +165,14 @@ fun CallScreen(
         eglContext = eglContext,
         onToggleCamera = viewModel::onToggleCamera,
         onRetry = viewModel::clearError,
-        onAnswer = { viewModel.answerCall() },
+        onAnswer = {
+            val id = callId
+            if (!id.isNullOrBlank()) viewModel.answerCall(id)
+            else viewModel.simulateIncomingCall()
+        },
         onDecline = {
             scope.launch {
-                viewModel.endCallAndAwait()
+                viewModel.declineAndAwait(callId)
                 onFinished()
             }
         },

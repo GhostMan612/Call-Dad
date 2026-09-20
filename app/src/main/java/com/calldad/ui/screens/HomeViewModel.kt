@@ -2,14 +2,12 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/HomeViewModel.kt — Phase 4: incoming-call auto-popup
+// ui/screens/HomeViewModel.kt — Phase 5: ring-pointer auto-popup
 // Location: app/src/main/java/com/calldad/ui/screens/HomeViewModel.kt
 package com.calldad.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.calldad.data.signaling.OwnOfferRegistry
-import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SignalingClient
 import com.calldad.navigation.Routes
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -37,33 +35,26 @@ class HomeViewModel(
     val destinations: StateFlow<List<HomeDestination>> = _destinations.asStateFlow()
 
     /**
-     * Fires once per NEW incoming OFFER while Home is visible.
+     * Fires once per NEW ring while Home is visible, carrying its callId.
      *
      * Home-scoped by construction: this VM dies when Home is left, so the
-     * Firestore listener stops off-Home (no background drain, no yanking the
-     * child out of another screen). Killed-app wakeup is Phase 5 (FCM).
-     * Deduped by SDP hash so rotations/re-subscribes don't double-ring.
+     * listener stops off-Home (no background drain, no yanking the child
+     * out of another screen). Killed-app wakeup is FCM (Phase 5 core).
+     * Deduped by callId; own + stale rings filtered inside the client.
      */
-    private val _incomingCall = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val incomingCall: SharedFlow<Unit> = _incomingCall.asSharedFlow()
+    private val _incomingCall = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val incomingCall: SharedFlow<String> = _incomingCall.asSharedFlow()
 
-    private var seenOfferHash: Int? = null
+    private var seenCallId: String? = null
 
     init {
         viewModelScope.launch {
-            signaling.observeRemoteDescription(SdpType.OFFER)
+            signaling.observeRing()
                 .catch { /* offline: stay silent, retry on next Home entry */ }
-                .collect { remote ->
-                    // Our own ringback (we called, hung up, called again):
-                    // never ring ourselves. See OwnOfferRegistry.
-                    if (OwnOfferRegistry.isOwn(remote.sdp)) return@collect
-                    // Abandoned ring (caller vanished without teardown):
-                    // never ring for the dead. See OFFER_STALE_MS.
-                    if (remote.isStale()) return@collect
-                    val hash = remote.sdp.hashCode()
-                    if (hash != seenOfferHash) {
-                        seenOfferHash = hash
-                        _incomingCall.tryEmit(Unit)
+                .collect { ring ->
+                    if (ring.callId != seenCallId) {
+                        seenCallId = ring.callId
+                        _incomingCall.tryEmit(ring.callId)
                     }
                 }
         }

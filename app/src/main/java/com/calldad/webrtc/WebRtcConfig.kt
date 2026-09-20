@@ -6,6 +6,8 @@
 // Location: app/src/main/java/com/calldad/webrtc/WebRtcConfig.kt
 package com.calldad.webrtc
 
+import com.calldad.BuildConfig
+
 data class IceServerConfig(
     val url: String,
     val username: String? = null,
@@ -22,31 +24,27 @@ object WebRtcConfig {
     const val VIDEO_FPS = 24
 
     /**
-     * ICE servers. STUN-only by default.
+     * ICE servers. STUN-only unless TURN was provisioned locally.
      *
-     * TODO(Phase 4 / GhostMan612):
-     *   Replace TURN_USERNAME / TURN_CREDENTIAL with real values locally.
-     *   DO NOT commit real TURN credentials to this file — move them to
-     *   local.properties and surface them via BuildConfig before doing so.
-     *
-     * The TURN entry is only included when its username is no longer the
-     * REPLACE_ME sentinel. An unconfigured build therefore falls back to
-     * STUN-only with no dead TURN requests and no log noise.
+     * TURN credentials arrive via local.properties → BuildConfig (never
+     * committed). Only included when all three are non-blank.
+     * DO NOT log these values anywhere, ever (guardrail §G).
      */
-    private const val TURN_URL = "turn:k8-turn.example.com:3478"
-    private const val TURN_USERNAME = "REPLACE_ME"
-    private const val TURN_CREDENTIAL = "REPLACE_ME"
-    private const val REPLACE_SENTINEL = "REPLACE_ME"
-
     val iceServers: List<IceServerConfig>
         get() = buildList {
             add(IceServerConfig(url = "stun:stun.l.google.com:19302"))
             add(IceServerConfig(url = "stun:stun1.l.google.com:19302"))
-            if (TURN_USERNAME != REPLACE_SENTINEL) {
+
+            val turnUrl = BuildConfig.TURN_URL
+            val turnUser = BuildConfig.TURN_USER
+            val turnPass = BuildConfig.TURN_PASS
+
+            // Only include TURN if all three were provisioned locally.
+            if (turnUrl.isNotBlank() && turnUser.isNotBlank() && turnPass.isNotBlank()) {
                 add(IceServerConfig(
-                    url = TURN_URL,
-                    username = TURN_USERNAME,
-                    credential = TURN_CREDENTIAL
+                    url = turnUrl,
+                    username = turnUser,
+                    credential = turnPass
                 ))
             }
         }

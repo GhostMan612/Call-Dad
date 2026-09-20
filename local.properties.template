@@ -1,6 +1,17 @@
 # local.properties template — copy to local.properties (GITIGNORED, never commit)
 # sdk.dir=C\:\\android\\sdk
-# Optional later: CARTO-style keys, Firebase-adjacent flags, release signing.
+#
+# Phase 5 provisioned values (operator places REAL values in local.properties only):
+# - CALLEE_UID: the OTHER phone's anonymous-auth uid (Firebase console → Authentication → Users).
+#   Each phone needs the other's uid, so build/install twice with swapped values.
+#   Empty = caller path shows "ask a parent to set up calling".
+# - TURN_URL/USER/PASS: TURN server for mobile-data calls (Phase 5/K8).
+#   Empty = STUN-only (Wi-Fi/LAN works, symmetric NAT fails).
+# CALLEE_UID=
+# TURN_URL=
+# TURN_USER=
+# TURN_PASS=
+#
 # Release signing (only when operator provisions a call-dad keystore):
 # RELEASE_STORE_PASSWORD=
 # RELEASE_KEY_ALIAS=

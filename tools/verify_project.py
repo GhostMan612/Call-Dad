@@ -37,7 +37,24 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "blueprints/decisions/ADR-003-sqlcipher.md",
                   "docs/setup-android-studio.md", "docs/device-profiles.md",
                   "docs/firebase-firestore-plan.md", "docs/kid-safe-ux.md",
-                  "docs/sovereign-comms-reuse-map.md"]
+                  "docs/sovereign-comms-reuse-map.md",
+                  "blueprints/decisions/ADR-004-toolchain.md",
+                  "blueprints/decisions/ADR-005-webrtc.md",
+                  "blueprints/decisions/ADR-006-phase4-qa.md",
+                  "blueprints/decisions/ADR-007-phase5.md",
+                  "blueprints/GEMINI_HANDOFF.md",
+                  "app/src/main/java/com/calldad/data/signaling/CallDocument.kt",
+                  "app/src/main/java/com/calldad/data/signaling/OwnCallRegistry.kt",
+                  "app/src/main/java/com/calldad/data/signaling/SignalingClient.kt",
+                  "app/src/main/java/com/calldad/webrtc/WebRTCClient.kt",
+                  "app/src/main/java/com/calldad/ui/screens/CallViewModel.kt",
+                  "app/src/main/java/com/calldad/ui/screens/CallScreen.kt",
+                  "app/src/main/java/com/calldad/CallDadApplication.kt",
+                  "app/src/main/java/com/calldad/fcm/CallMessagingService.kt",
+                  "app/src/main/java/com/calldad/fcm/CallForegroundService.kt",
+                  "app/src/main/AndroidManifest.xml",
+                  "firestore.rules", "firebase.json",
+                  "functions/index.js", "functions/package.json"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]

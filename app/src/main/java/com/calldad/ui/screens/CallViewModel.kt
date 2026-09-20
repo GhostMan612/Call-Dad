@@ -2,18 +2,18 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/CallViewModel.kt — Phase 3: WebRTC peer integration
+// ui/screens/CallViewModel.kt — Phase 5: per-call rooms + status machine
 // Location: app/src/main/java/com/calldad/ui/screens/CallViewModel.kt
-//
-// Fixes Phase 2 latent callee bug: description-observation is now scoped to
-// the caller only (callee already applied the OFFER in answerCall()).
 package com.calldad.ui.screens
 
 import android.app.Application
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.calldad.BuildConfig
+import com.calldad.data.signaling.CallDocument
+import com.calldad.data.signaling.CallStatus
 import com.calldad.data.signaling.IceCandidate
-import com.calldad.data.signaling.OwnOfferRegistry
 import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SessionDescription
 import com.calldad.data.signaling.SignalingClient
@@ -44,7 +44,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val webrtc: WebRTCClient = WebRTCClient(
         context = application.applicationContext,
         onLocalIceCandidate = { candidate ->
-            viewModelScope.launch { signaling.addIceCandidate(candidate) }
+            val id = currentCallId
+            if (id != null) {
+                viewModelScope.launch {
+                    signaling.addIceCandidate(id, candidate).onFailure(::reportError)
+                }
+            }
         },
         onRemoteVideoTrack = { track -> _remoteVideoTrack.value = track },
         onConnectionStateChanged = { state ->
@@ -74,22 +79,32 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     /** True once the peer connection reaches CONNECTED. Drives the watchdog. */
     private val _peerConnected = MutableStateFlow(false)
 
+    private var currentCallId: String? = null
     private var timerJob: Job? = null
-    private var remoteListenerJob: Job? = null
+    private var sessionJob: Job? = null
 
     // -------- public API --------
 
+    /**
+     * Caller path. Callee address comes from local.properties (CALLEE_UID,
+     * operator-provisioned per phone). Blank = not provisioned → kid-safe
+     * error card, never a crash.
+     */
     fun startCall() {
         val current = _state.value
         if (current is CallState.Connecting || current is CallState.InCall) return
+        val callee = BuildConfig.CALLEE_UID
+        if (callee.isBlank()) {
+            _state.value = CallState.Error(
+                kind = SignalingErrorKind.UNKNOWN,
+                message = "Calling isn't set up yet. Ask a parent for help."
+            )
+            return
+        }
         _state.value = CallState.Connecting
 
-        viewModelScope.launch {
+        sessionJob = viewModelScope.launch {
             try {
-                // Fresh room: wipe stale OFFER/ANSWER/candidates left by prior
-                // QA runs or crashes. Failures ignored (room may not exist).
-                // Caller-only: the callee must NEVER wipe a live OFFER.
-                runCatching { signaling.teardown() }
                 webrtc.initialize()
                 webrtc.createPeerConnection()
                 _eglContext.value = webrtc.eglContext
@@ -98,15 +113,15 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
                 val offer = webrtc.createOffer()
                 WebRtcLog.transition("OFFER publish started")
-                signaling.publishOffer(offer.sdp).getOrThrow()
+                val callId = signaling.createCallRoom(callee, offer.sdp).getOrThrow()
+                currentCallId = callId
                 WebRtcLog.transition("OFFER published")
 
-                listenForAnswer()
-                listenForRemoteCandidates()
-                listenForRemoteHangup()
+                listenCall(callId)
+                listenCandidates(callId)
+                listenHangup(callId)
+                watchRinging(callId)
             } catch (t: Throwable) {
-                // Scope cancellation (e.g. hangup popping the destination and
-                // clearing the VM) is not an error — never report it.
                 if (t is CancellationException) throw t
                 reportError(t)
             }
@@ -114,27 +129,15 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Peer hung up or declined (teardown deletes the room). Mirror it
-     * locally: reset to Idle so the screen auto-returns home. Our own
-     * teardown is idempotent, so calling endCall() here is safe.
+     * Callee path. callId arrives via the ring pointer (app-open) or the
+     * FCM full-screen intent (killed-app).
      */
-    private fun listenForRemoteHangup() {
-        viewModelScope.launch {
-            signaling.observeRoomDeleted()
-                .catch { reportError(it) }
-                .collect {
-                    WebRtcLog.transition("Remote hangup observed")
-                    endCall()
-                }
-        }
-    }
-
-    fun answerCall() {
+    fun answerCall(callId: String) {
         val current = _state.value
         if (current is CallState.Connecting || current is CallState.InCall) return
         _state.value = CallState.Connecting
 
-        viewModelScope.launch {
+        sessionJob = viewModelScope.launch {
             try {
                 webrtc.initialize()
                 webrtc.createPeerConnection()
@@ -142,54 +145,203 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 _localVideoTrack.value = webrtc.localVideoTrack
                 webrtc.startCapture()
 
-                // Two humans never tap in sync: poll for the OFFER up to
-                // ~15s (NOT_FOUND only — other failures throw immediately).
-                // Covers caller-taps-second as well as caller-taps-first.
-                var offer: SessionDescription? = null
-                repeat(15) {
-                    val attempt = signaling.fetchOffer()
-                    offer = attempt.getOrNull()
-                    if (offer != null) return@repeat
-                    val failure = attempt.exceptionOrNull() as? SignalingFailure
-                    if (failure != null && failure.kind != SignalingErrorKind.NOT_FOUND) {
-                        throw failure
-                    }
-                    delay(1_000)
-                }
-                val validOffer = offer ?: throw SignalingFailure(
-                    SignalingErrorKind.NOT_FOUND,
-                    "Call room does not exist yet."
-                )
-                webrtc.setRemoteDescription(validOffer)
+                val doc = signaling.fetchCall(callId).getOrThrow()
+                validateRinging(doc)
+                webrtc.setRemoteDescription(SessionDescription(SdpType.OFFER, doc.offer!!))
                 WebRtcLog.transition("Remote OFFER applied")
 
                 val answer = webrtc.createAnswer()
                 WebRtcLog.transition("ANSWER publish started")
-                signaling.publishAnswer(answer.sdp).getOrThrow()
+                signaling.publishAnswer(callId, answer.sdp).getOrThrow()
                 WebRtcLog.transition("ANSWER published")
 
+                currentCallId = callId
                 _state.value = CallState.InCall(
                     role = CallRole.CALLEE,
                     startedAtMillis = System.currentTimeMillis()
                 )
                 startTimer()
                 watchConnection()
-                listenForRemoteCandidates()
-                listenForRemoteHangup()
+                listenCandidates(callId)
+                listenHangup(callId)
             } catch (t: Throwable) {
-                // Scope cancellation (e.g. hangup popping the destination and
-                // clearing the VM) is not an error — never report it.
                 if (t is CancellationException) throw t
                 reportError(t)
             }
         }
     }
 
+    /** Callee decline: status flip so the caller sees it, then reset + home. */
+    suspend fun declineAndAwait(callId: String?) {
+        if (!callId.isNullOrBlank()) {
+            withTimeoutOrNull(3_000) { signaling.declineCall(callId) }
+        }
+        cancelSessionJobs()
+        resetCallState()
+        currentCallId = null
+    }
+
+    /** Local hangup: reset now; room ENDED best-effort in the background. */
+    fun endCall() {
+        val id = currentCallId
+        cancelSessionJobs()
+        resetCallState()
+        currentCallId = null
+        viewModelScope.launch {
+            if (id != null) withTimeoutOrNull(3_000) { signaling.endCall(id) }
+        }
+    }
+
     /**
-     * Zombie-call guard: answered a room whose peer already vanished (quick
-     * hangup race) → media never connects. Give it 15s (LAN connects in
-     * ~1-3s proven), then leave silently — auto-home follows, no scary card
-     * for a kid whose dad hung up first. Revisit the timeout with TURN.
+     * Local user-initiated hangup with guaranteed room update. Await the
+     * ENDED write BEFORE the caller navigates: popping the screen clears
+     * this VM and would cancel a fire-and-forget write, stranding the peer
+     * (device-proven). Offline can't trap us — the timeout guarantees
+     * navigation proceeds.
+     */
+    suspend fun endCallAndAwait() {
+        val id = currentCallId
+        cancelSessionJobs()
+        resetCallState()
+        currentCallId = null
+        if (id != null) withTimeoutOrNull(3_000) { signaling.endCall(id) }
+    }
+
+    fun onToggleCamera() {
+        _isCameraOn.update { !it }
+        webrtc.toggleCamera()
+    }
+
+    /** Dismisses an [CallState.Error] back to Idle so the child can retry. */
+    fun clearError() {
+        if (_state.value is CallState.Error) _state.value = CallState.Idle
+    }
+
+    /**
+     * QA-only. Drives the Incoming overlay without a ring or push.
+     * FCM is the real trigger; kept for tests.
+     */
+    @VisibleForTesting
+    fun simulateIncomingCall() {
+        if (_state.value !is CallState.Idle) return
+        _state.value = CallState.Incoming(fromDisplayName = "Dad")
+    }
+
+    /**
+     * Incoming overlay only: follow a specific call room home when it stops
+     * ringing (declined/ended/deleted) before Answer.
+     */
+    fun watchIncomingCall(callId: String) {
+        viewModelScope.launch {
+            signaling.observeCall(callId)
+                .catch { /* stay; Answer path reports properly */ }
+                .collect { doc ->
+                    if (_state.value is CallState.Incoming && doc.status != CallStatus.RINGING) {
+                        WebRtcLog.transition("Ring ended before answer — leaving")
+                        resetCallState()
+                    }
+                }
+        }
+        viewModelScope.launch {
+            signaling.observeCallDeleted(callId)
+                .catch { /* stay; Answer path reports properly */ }
+                .collect {
+                    if (_state.value is CallState.Incoming) {
+                        WebRtcLog.transition("Room gone before answer — leaving")
+                        resetCallState()
+                    }
+                }
+        }
+    }
+
+    override fun onCleared() {
+        sessionJob?.cancel()
+        timerJob?.cancel()
+        webrtc.dispose()
+        super.onCleared()
+    }
+
+    // -------- listeners --------
+
+    /** Caller: ANSWER → remote → InCall; DECLINED/ENDED → silent home. */
+    private fun listenCall(callId: String) {
+        viewModelScope.launch {
+            signaling.observeCall(callId)
+                .catch { reportError(it) }
+                .collect { doc ->
+                    when (doc.status) {
+                        CallStatus.CONNECTED -> {
+                            val ans = doc.answer
+                            if (!ans.isNullOrBlank() && _state.value is CallState.Connecting) {
+                                webrtc.setRemoteDescription(
+                                    SessionDescription(SdpType.ANSWER, ans)
+                                )
+                                WebRtcLog.transition("Remote ANSWER applied")
+                                _state.value = CallState.InCall(
+                                    role = CallRole.CALLER,
+                                    startedAtMillis = System.currentTimeMillis()
+                                )
+                                startTimer()
+                                watchConnection()
+                            }
+                        }
+                        CallStatus.DECLINED, CallStatus.ENDED -> {
+                            if (_state.value !is CallState.Idle) {
+                                WebRtcLog.transition("Peer ended — leaving")
+                                cancelSessionJobs()
+                                resetCallState()
+                            }
+                        }
+                        CallStatus.RINGING -> Unit
+                    }
+                }
+        }
+    }
+
+    private fun listenCandidates(callId: String) {
+        viewModelScope.launch {
+            signaling.observeIceCandidates(callId)
+                .catch { reportError(it) }
+                .collect { webrtc.addRemoteIceCandidate(it) }
+        }
+    }
+
+    /** Deletion backup: docs are status-driven, but never strand on vanish. */
+    private fun listenHangup(callId: String) {
+        viewModelScope.launch {
+            signaling.observeCallDeleted(callId)
+                .catch { reportError(it) }
+                .collect {
+                    WebRtcLog.transition("Remote hangup observed")
+                    cancelSessionJobs()
+                    resetCallState()
+                }
+        }
+    }
+
+    /**
+     * Caller ringing with no answer: FCM wakeup can take tens of seconds on
+     * a dozing phone. Give it 45s, then an honest error card (never silent —
+     * the child should know Dad didn't pick up).
+     */
+    private fun watchRinging(callId: String) {
+        viewModelScope.launch {
+            delay(45_000)
+            if (_state.value is CallState.Connecting) {
+                WebRtcLog.transition("Ring unanswered — leaving")
+                cancelSessionJobs()
+                resetCallState()
+                _state.value = CallState.Error(
+                    kind = SignalingErrorKind.TIMEOUT,
+                    message = "Dad didn't answer. Try again later."
+                )
+            }
+        }
+    }
+
+    /**
+     * Zombie-call guard: media never connects (peer vanished mid-handshake).
+     * LAN connects in ~1-3s proven; 15s then silent home. Revisit with TURN.
      */
     private fun watchConnection() {
         viewModelScope.launch {
@@ -201,138 +353,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Incoming overlay only: if the room vanishes before Answer (caller hung
-     * up fast), follow home instead of stranding on the overlay. Never
-     * tears down here — the room is already gone (or never existed).
-     *
-     * Validates FIRST: the overlay opens on a snapshot that may already be
-     * stale (offer lived and died between the Home listener's read and this
-     * screen's arrival). A non-answerable room — missing, malformed, or our
-     * own ringback — bounces straight home instead of stranding.
-     */
-    fun watchIncomingRoom() {
-        viewModelScope.launch {
-            val current = signaling.fetchOffer().getOrNull()
-            if (current == null || OwnOfferRegistry.isOwn(current.sdp)) {
-                if (_state.value is CallState.Incoming) {
-                    WebRtcLog.transition("No answerable offer — leaving")
-                    _state.value = CallState.Idle
-                }
-                return@launch
-            }
-            signaling.observeRoomDeleted()
-                .catch { /* stay on overlay; Answer path reports properly */ }
-                .collect {
-                    if (_state.value is CallState.Incoming) {
-                        WebRtcLog.transition("Room gone before answer — leaving")
-                        _state.value = CallState.Idle
-                    }
-                }
-        }
-    }
-
-    fun onLocalIceCandidate(candidate: IceCandidate) {
-        viewModelScope.launch {
-            signaling.addIceCandidate(candidate).onFailure(::reportError)
-        }
-    }
-
-    /**
-     * Caller's hangup OR callee's decline. Also resets from Incoming.
-     *
-     * Does NOT dispose WebRTC here: the composables still hold native sinks
-     * until navigation pops (removeSink on a disposed track = SIGSEGV —
-     * device-proven). Disposal happens in onCleared, strictly after the
-     * composition is gone.
-     */
-    fun endCall() {
-        cancelSessionJobs()
-        resetCallState()
-        viewModelScope.launch { signaling.teardown() }
-    }
-
-    /**
-     * Local user-initiated hangup/decline. Same reset, but the room delete is
-     * awaited (3s cap) BEFORE the caller navigates: navigating pops the
-     * screen, clears this VM, and cancels viewModelScope — a fire-and-forget
-     * teardown usually dies with it, leaving the room behind so the peer
-     * hangs forever (device-proven). Offline can't trap us: the timeout
-     * guarantees navigation proceeds.
-     */
-    suspend fun endCallAndAwait() {
-        cancelSessionJobs()
-        resetCallState()
-        withTimeoutOrNull(3_000) { signaling.teardown() }
-    }
-
-    private fun cancelSessionJobs() {
-        remoteListenerJob?.cancel(); remoteListenerJob = null
-        timerJob?.cancel(); timerJob = null
-    }
-
-    private fun resetCallState() {
-        _elapsedSeconds.value = 0
-        _remoteVideoTrack.value = null
-        _eglContext.value = null
-        _localVideoTrack.value = null
-        _peerConnected.value = false
-        _state.value = CallState.Idle
-    }
-
-    fun onToggleCamera() {
-        _isCameraOn.update { !it }
-        webrtc.toggleCamera()
-    }
-
-    fun clearError() {
-        if (_state.value is CallState.Error) _state.value = CallState.Idle
-    }
-
-    /**
-     * QA-only. Drives the Incoming overlay without an FCM push.
-     * Phase 5 will replace this with a real FCM-triggered transition.
-     * Guard: only reachable when the current state is Idle.
-     */
-    fun simulateIncomingCall() {
-        if (_state.value !is CallState.Idle) return
-        _state.value = CallState.Incoming(fromDisplayName = "Dad")
-    }
-
-    override fun onCleared() {
-        remoteListenerJob?.cancel()
-        timerJob?.cancel()
-        webrtc.dispose()
-        super.onCleared()
-    }
-
-    // -------- listeners --------
-
-    /** Caller-only. Callee already applied the OFFER in answerCall(). */
-    private fun listenForAnswer() {
-        remoteListenerJob = viewModelScope.launch {
-            signaling.observeRemoteDescription(SdpType.ANSWER)
-                .catch { reportError(it) }
-                .collect { remote ->
-                    webrtc.setRemoteDescription(remote)
-                    WebRtcLog.transition("Remote ANSWER applied")
-                    if (_state.value is CallState.Connecting) {
-                        _state.value = CallState.InCall(
-                            role = CallRole.CALLER,
-                            startedAtMillis = System.currentTimeMillis()
-                        )
-                        startTimer()
-                        watchConnection()
-                    }
-                }
-        }
-    }
-
-    private fun listenForRemoteCandidates() {
-        viewModelScope.launch {
-            signaling.observeIceCandidates()
-                .catch { reportError(it) }
-                .collect { webrtc.addRemoteIceCandidate(it) }
+    private fun validateRinging(doc: CallDocument) {
+        if (doc.status != CallStatus.RINGING || doc.offer.isNullOrBlank() || doc.isStale()) {
+            throw SignalingFailure(
+                SignalingErrorKind.NOT_FOUND, "Call room does not exist yet."
+            )
         }
     }
 
@@ -346,6 +371,20 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun cancelSessionJobs() {
+        sessionJob?.cancel(); sessionJob = null
+        timerJob?.cancel(); timerJob = null
+    }
+
+    private fun resetCallState() {
+        _elapsedSeconds.value = 0
+        _remoteVideoTrack.value = null
+        _eglContext.value = null
+        _localVideoTrack.value = null
+        _peerConnected.value = false
+        _state.value = CallState.Idle
+    }
+
     private fun reportError(t: Throwable) {
         val failure = t as? SignalingFailure
         // Kind-name only: guardrail-compliant, distinguishes hang (no line)
@@ -353,11 +392,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         WebRtcLog.transition("Call failed: ${failure?.kind?.name ?: "UNKNOWN"}")
         _state.value = CallState.Error(
             kind = failure?.kind ?: SignalingErrorKind.UNKNOWN,
-            message = failure?.userMessage ?: t.message ?: "Something went wrong."
+            message = failure?.userMessage
+                ?: t.message
+                ?: "Something went wrong."
         )
     }
 }
 
+/** Formats elapsed seconds as mm:ss for the CallScreen timer. */
 fun formatElapsed(totalSeconds: Int): String = String.format(
     Locale.US, "%02d:%02d", totalSeconds / 60, totalSeconds % 60
 )

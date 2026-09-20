@@ -42,5 +42,7 @@ AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / 
 - G0 scaffold gate: GREEN (2026-09-19: VERIFY PASS 10 dirs + 28 files).
 - G1 skeleton: GREEN 2026-09-19 (operator run: BUILD SUCCESSFUL, 33 tasks; `RoutesTest` 3/3).
 - G2 signaling host: GREEN same build (`SignalingModelsTest` 5/5; lint 0 errors, K2 warnings only).
-- G3-device FULL: GREEN 2026-09-19 (BLU + Moto: CONNECTED both, video both ways lane-witnessed, clean hangup, zero crashes). Audio + TURN + rules → Phase 5.
+- G3-device FULL: GREEN 2026-09-19 (BLU + Moto: CONNECTED both, video + audio both ways lane-witnessed, clean hangup, zero crashes).
+- G4 rendering/device: GREEN same evidence (VideoRenderer both ways, overlay, auto-popup, ringtone).
+- G5 (Phase 5 code): LANDED 2026-09-19, UNPROVEN — needs Studio sync (auth/messaging/play-services-auth) + functions+rules deploy + Anonymous enable + CALLEE_UID swap-builds + killed-app test.
 - G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle).

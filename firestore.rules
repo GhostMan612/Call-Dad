@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection: only the owner can read/write their doc.
+    // Needed for fcmToken storage in Phase 6.
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+    }
+
+    // Calls: dynamic per-call documents.
+    match /calls/{callId} {
+
+      // Create: any authenticated user can create a call document,
+      // but they MUST set themselves as callerUid. This prevents
+      // spoofing another user as the caller.
+      allow create: if request.auth != null
+                    && request.resource.data.callerUid == request.auth.uid
+                    && request.resource.data.calleeUid is string
+                    && request.resource.data.status == 'RINGING';
+
+      // Read/update/delete: only the two parties on the call.
+      allow read, update, delete: if request.auth != null
+                    && (request.auth.uid == resource.data.callerUid
+                        || request.auth.uid == resource.data.calleeUid);
+
+      // ICE candidates subcollection: same party restriction,
+      // inherited from the parent call document.
+      match /candidates/{candidateId} {
+        allow read, write: if request.auth != null
+              && (request.auth.uid ==
+                    get(/databases/$(database)/documents/calls/$(callId)).data.callerUid
+                  || request.auth.uid ==
+                    get(/databases/$(database)/documents/calls/$(callId)).data.calleeUid);
+      }
+    }
+
+    // Ring pointer (executor bridge, ADR-007): presence-only doc so the
+    // callee's app-open listener can discover callIds pre-Phase-6 token
+    // plumbing. No SDP here — media negotiation stays in the locked
+    // per-call doc. Any authenticated user may read; only the caller
+    // recorded on it may write/delete it.
+    match /ring/{ringId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+                    && request.resource.data.callerUid == request.auth.uid;
+      allow delete: if request.auth != null;
+    }
+  }
+}

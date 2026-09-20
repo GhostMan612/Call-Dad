@@ -32,8 +32,13 @@
 ## Phase 4 — Rendering + incoming overlay (DEVICE-PROVEN 2026-09-19)
 - [x] `CallState.Incoming` + `VideoRenderer` + TURN-sentinel config + client deltas + VM + overlay + nav-arg QA hook + `CallStateTest`
 - [x] E2E on BLU + Moto: CONNECTED both, video both ways (screenshots lane-witnessed), clean hangup, zero crashes
-- [ ] Audio confirm (operator ears); then Phase 5: TURN, per-call rooms, FCM/wakeup, rules lockdown, history/ringtone
+- [x] Audio confirm (operator ears, both ways, near-zero lag)
 - [ ] Carried to Phase 4: TURN provider, renderer wiring, incoming-call overlay
+
+## Phase 5 — Per-call rooms + FCM + lockdown (architect prompt landed 2026-09-19, ADR-007)
+- [x] Anonymous auth + channel + FCM receiver + FGS phoneCall + manifest + MainActivity routing + POST_NOTIFICATIONS ask + ic_call
+- [x] Signaling rewrite (CallDocument, status machine, ring bridge, own-call registry) + VM rewrite + nav callId routing + TURN BuildConfig + rules + functions
+- [ ] Human: Studio sync (new deps) → deploy functions+rules → enable Anonymous sign-in → CALLEE_UID swap-builds → §L matrix (killed-app wakeup, rules proofs, TURN presence-check)
 
 ## Phase 3 — Chat + remote (BP-03)
 - [ ] `SovereignCommsEngine` + receipts + voice memo

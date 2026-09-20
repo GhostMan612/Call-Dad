@@ -7,6 +7,7 @@
 package com.calldad.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -31,8 +32,18 @@ import com.calldad.ui.screens.PttScreen
 @Composable
 fun AppNavHost(
     modifier: Modifier = Modifier,
-    navController: NavHostController = rememberNavController()
+    navController: NavHostController = rememberNavController(),
+    incomingCallId: String? = null
 ) {
+    // Killed-app entry (FCM full-screen intent): drop straight into the
+    // incoming overlay for that call. Single-shot per cold start.
+    LaunchedEffect(incomingCallId) {
+        if (!incomingCallId.isNullOrBlank()) {
+            navController.navigate("${Routes.CALL}?mode=incoming&callId=$incomingCallId") {
+                launchSingleTop = true
+            }
+        }
+    }
     NavHost(
         navController = navController,
         startDestination = Routes.HOME,
@@ -42,12 +53,16 @@ fun AppNavHost(
             HomeScreen(onNavigate = navController::navigateGuarded)
         }
         composable(
-            route = "${Routes.CALL}?mode={mode}",
-            arguments = listOf(navArgument("mode") { type = NavType.StringType; defaultValue = "caller" })
+            route = "${Routes.CALL}?mode={mode}&callId={callId}",
+            arguments = listOf(
+                navArgument("mode") { type = NavType.StringType; defaultValue = "caller" },
+                navArgument("callId") { type = NavType.StringType; defaultValue = "" }
+            )
         ) { entry ->
             CallScreen(
                 onFinished = navController::returnHome,
-                mode = entry.arguments?.getString("mode") ?: "caller"
+                mode = entry.arguments?.getString("mode") ?: "caller",
+                callId = entry.arguments?.getString("callId")?.ifBlank { null }
             )
         }
         composable(Routes.PTT) {

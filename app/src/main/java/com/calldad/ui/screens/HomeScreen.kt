@@ -48,11 +48,11 @@ fun HomeScreen(
 ) {
     val destinations by viewModel.destinations.collectAsStateWithLifecycle()
 
-    // Auto-popup: a NEW offer while Home is visible jumps straight to the
-    // incoming overlay (with ringtone). navigateGuarded keeps it single-top.
+    // Auto-popup: a NEW ring while Home is visible jumps straight to the
+    // incoming overlay for that callId (with ringtone). Single-top guarded.
     LaunchedEffect(Unit) {
-        viewModel.incomingCall.collect {
-            onNavigate("${Routes.CALL}?mode=incoming")
+        viewModel.incomingCall.collect { callId ->
+            onNavigate("${Routes.CALL}?mode=incoming&callId=$callId")
         }
     }
 

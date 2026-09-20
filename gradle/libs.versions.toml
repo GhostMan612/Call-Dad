@@ -17,6 +17,11 @@ firebaseBom = "34.19.0"
 # latest stable 1.3.10); architect's webrtc-android:1.1.0 does not exist.
 webrtc = "1.3.10"
 
+# --- Phase 5 additions --------------------------------------------------
+# firebase-auth/messaging are BOM-managed (no pins — BOM 34.19.0 decides).
+# play-services-auth is NOT BOM-managed: explicit pin per architect.
+play-services-auth = "21.3.0"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -41,6 +46,11 @@ firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore
 
 # --- Phase 3 additions (Stream WebRTC fork; same org.webrtc.* package names) --
 webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtc" }
+
+# --- Phase 5 additions (BOM-managed auth/messaging; pinned play-services-auth)
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
+firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "play-services-auth" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
