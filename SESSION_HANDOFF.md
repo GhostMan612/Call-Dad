@@ -19,7 +19,12 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
-## Where we are (2026-09-19, NOT_FOUND explained + two robustness fixes)
+## Where we are (2026-09-19, operator UX confusion — "no home", grid unseen)
+
+- **Operator report:** only ever sees grey QA card → overlay → Answer → 15s → NOT_FOUND error → Retry ("Ready") / Hang-up (back). Never mentions the 4 colored Home cards — UNCONFIRMED whether the 2x2 grid renders on their build. "Home" jargon retired; describing screens by visible text from now on.
+- **Lane observation (screenshots):** BLU showed only the pulled-down Quick Settings shade (airplane mode ON, WiFi on Dayton House — network OK); then BLU left USB. Moto G present on wireless adb (`adb-ZT4222BMWN-…`), screen ASLEEP (black capture). App Home screen never visually confirmed.
+- **Standing question for operator:** on the app's first screen, are there 4 colored cards above the grey one? If no green "Call Dad" card is visible, that's a layout bug on the executor — say so and it gets fixed, no choreography will work until it exists.
+- **Choreography (once green card confirmed):** phone A taps GREEN card and waits; phone B taps GREY card → Answer within ~15s.
 
 - **Operator run (both phones, QA overlay):** `Call failed: NOT_FOUND` on both = CORRECT behavior — QA overlay is Firestore-blind; both sides opened it with no live OFFER in the room (caller must ring FIRST and stay on-screen; any hangup/decline teardown-deletes the room). Not a bug.
 - **Executor robustness fixes (committed next):** (1) caller wipes the room before publishing (stale ANSWER/candidates from prior QA runs or crashes no longer poison new calls — callee side never wipes); (2) callee polls `fetchOffer` ~15s on NOT_FOUND only (absorbs two-human tap timing; other failures still throw immediately).
