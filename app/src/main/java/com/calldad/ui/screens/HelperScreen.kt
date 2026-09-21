@@ -36,9 +36,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -189,7 +189,7 @@ private fun TapToSpeakButton(
         a
     } else 0f
 
-    val icon = if (isSpeaking) Icons.Filled.VolumeUp else Icons.Filled.Mic
+    val icon = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeUp else Icons.Filled.Mic
     val contentColor = when {
         isListening -> Color(0xFF1B5E20)
         isSpeaking  -> HelperPurple

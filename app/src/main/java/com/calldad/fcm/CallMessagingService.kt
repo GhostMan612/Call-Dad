@@ -39,6 +39,7 @@ class CallMessagingService : FirebaseMessagingService() {
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun onNewToken(token: String) {
         // TODO(Phase 6): write this to users/{uid}.fcmToken via
         // SignalingClient. For Phase 5, log only.
