@@ -2,12 +2,11 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// fcm/CallForegroundService.kt — Phase 5: ringing foreground service
+// fcm/CallForegroundService.kt — Phase 11: topic-driven ringing service
 // Location: app/src/main/java/com/calldad/fcm/CallForegroundService.kt
 package com.calldad.fcm
 
 import android.app.Notification
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -18,34 +17,39 @@ import androidx.core.app.NotificationCompat
 import com.calldad.CallDadApplication
 import com.calldad.MainActivity
 import com.calldad.R
+import com.calldad.data.signaling.CallStatus
 import com.calldad.webrtc.WebRtcLog
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 /**
- * Foreground service of type `phoneCall`.
+ * Foreground service of type `phoneCall`, started by the topic receiver.
+ *
+ * ORDER MATTERS: startForeground() runs FIRST with a static notification
+ * (the FGS-start timeout is strict — no network on that path), and only
+ * then is the static room checked. Not RINGING (or unreadable) →
+ * stopSelf(): a stale push evaporates instead of stranding a phantom
+ * ring. The full-screen intent carries the ACTION only — MainActivity
+ * routes to the overlay, which validates the room itself.
  *
  * REQUIRES in the manifest:
  *   android:foregroundServiceType="phoneCall"
  *   FOREGROUND_SERVICE_PHONE_CALL
- *   MANAGE_OWN_CALLS          <- one of these two is mandatory
- *                                 on API 34+, or startForeground()
- *                                 throws SecurityException.
- *
- * The full-screen intent, not the notification body, is what wakes the
- * screen. `setFullScreenIntent(intent, true)` where the second arg is
- * `true` means "launch immediately even if the screen is locked".
+ *   MANAGE_OWN_CALLS
  */
 class CallForegroundService : Service() {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val callId = intent?.getStringExtra(EXTRA_CALL_ID)
-        if (callId.isNullOrBlank()) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        val notification = buildIncomingCallNotification(callId)
+        val notification = buildIncomingCallNotification()
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -61,14 +65,38 @@ class CallForegroundService : Service() {
         } catch (t: Throwable) {
             WebRtcLog.transition("FGS startForeground rejected")
             stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // Async room check: stale push (caller hung up already) → stop.
+        scope.launch {
+            val ringing = try {
+                val snap = FirebaseFirestore.getInstance()
+                    .collection("calls")
+                    .document("family_channel")
+                    .get()
+                    .await()
+                snap.exists() &&
+                    CallStatus.fromWire(snap.getString("status")) == CallStatus.RINGING
+            } catch (t: Throwable) {
+                false
+            }
+            if (!ringing) {
+                WebRtcLog.transition("Stale push — no live ring")
+                stopSelf()
+            }
         }
         return START_NOT_STICKY
     }
 
-    private fun buildIncomingCallNotification(callId: String): Notification {
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private fun buildIncomingCallNotification(): Notification {
         val fullScreenIntent = Intent(this, MainActivity::class.java).apply {
             action = ACTION_INCOMING_CALL
-            putExtra(EXTRA_CALL_ID, callId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -91,14 +119,11 @@ class CallForegroundService : Service() {
 
     companion object {
         const val ACTION_INCOMING_CALL = "com.calldad.INCOMING_CALL"
-        const val EXTRA_CALL_ID = "callId"
         private const val NOTIFICATION_ID = 1001
         private const val REQUEST_CODE_FSI = 2001
 
-        fun startIncomingCall(context: Context, callId: String) {
-            val intent = Intent(context, CallForegroundService::class.java).apply {
-                putExtra(EXTRA_CALL_ID, callId)
-            }
+        fun startIncomingCall(context: Context) {
+            val intent = Intent(context, CallForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {

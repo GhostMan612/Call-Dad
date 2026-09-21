@@ -44,14 +44,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestNotificationPermission()
         checkFullScreenIntentAccess()
-        val incomingCallId = intent?.getStringExtra(CallForegroundService.EXTRA_CALL_ID)
+        // Killed-app entry: FSI carries the action only (no callId anywhere
+        // in Phase 11 — the static room ID is the route). The overlay
+        // validates the room itself and bounces home if nothing is ringing.
+        val incomingCall = intent?.action == CallForegroundService.ACTION_INCOMING_CALL
         setContent {
             CallDadTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppNavHost(incomingCallId = incomingCallId)
+                    AppNavHost(incomingCall = incomingCall)
                 }
             }
         }

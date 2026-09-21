@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// fcm/CallMessagingService.kt — Phase 5: killed-app wakeup receiver
+// fcm/CallMessagingService.kt — Phase 11: topic receiver (no routing in payload)
 // Location: app/src/main/java/com/calldad/fcm/CallMessagingService.kt
 package com.calldad.fcm
 
@@ -13,23 +13,18 @@ import com.google.firebase.messaging.RemoteMessage
 class CallMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val data = message.data
-        val type = data["type"]
-        val callId = data["callId"]
+        val type = message.data["type"]
 
-        // Never log the callId or the token. State transitions only.
+        // Never log payload values beyond the type. No callId exists.
         WebRtcLog.transition("FCM received: type=$type")
 
-        if (type != "incoming_call" || callId.isNullOrBlank()) {
+        if (type != "incoming_call") {
             WebRtcLog.transition("FCM ignored: not an incoming call")
             return
         }
 
         try {
-            CallForegroundService.startIncomingCall(
-                context = applicationContext,
-                callId = callId
-            )
+            CallForegroundService.startIncomingCall(applicationContext)
             WebRtcLog.transition("Foreground service start requested")
         } catch (t: Throwable) {
             // Android 14 can reject FGS starts even with high-priority
@@ -39,10 +34,9 @@ class CallMessagingService : FirebaseMessagingService() {
         }
     }
 
-    @Suppress("DEPRECATION")
     override fun onNewToken(token: String) {
-        // TODO(Phase 6): write this to users/{uid}.fcmToken via
-        // SignalingClient. For Phase 5, log only.
+        // TODO: persist when per-device targeting returns (topic needs no
+        // token today). For now, log only — never the token itself.
         WebRtcLog.transition("FCM token refreshed")
     }
 }

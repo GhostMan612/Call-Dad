@@ -44,7 +44,7 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "blueprints/decisions/ADR-007-phase5.md",
                   "blueprints/GEMINI_HANDOFF.md",
                   "app/src/main/java/com/calldad/data/signaling/CallDocument.kt",
-                  "app/src/main/java/com/calldad/data/signaling/OwnCallRegistry.kt",
+                  "app/src/main/java/com/calldad/data/signaling/OwnSdpRegistry.kt",
                   "app/src/main/java/com/calldad/data/signaling/SignalingClient.kt",
                   "app/src/main/java/com/calldad/webrtc/WebRTCClient.kt",
                   "app/src/main/java/com/calldad/ui/screens/CallViewModel.kt",
@@ -73,7 +73,8 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "app/src/main/java/com/calldad/helper/KeywordBot.kt",
                   "app/src/main/java/com/calldad/ui/screens/HelperViewModel.kt",
                   "app/src/main/java/com/calldad/ui/screens/HelperScreen.kt",
-                  "blueprints/decisions/ADR-012-phase10-flavors.md"]
+                  "blueprints/decisions/ADR-012-phase10-flavors.md",
+                  "blueprints/decisions/ADR-013-phase11-rooms.md"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]

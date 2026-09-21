@@ -35,6 +35,12 @@ data class SessionDescription(
         createdAtMillis == null || nowMillis - createdAtMillis > OFFER_STALE_MS
 }
 
+/** SDP paired with the static room's monotonic sequence (Phase 11). */
+data class SequencedDescription(
+    val description: SessionDescription,
+    val seq: Int
+)
+
 /**
  * A single trickled ICE candidate.
  * `serverUrl` may be null for host candidates; `sdpMid` / `sdpMLineIndex`

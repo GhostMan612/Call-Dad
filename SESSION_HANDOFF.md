@@ -49,6 +49,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **BLOCKER before ANY Phase 10 verification:** suffixed IDs match no Firebase client → register `com.calldad.parent` + `com.calldad.child` in console, replace gitignored `google-services.json` with merged download. Builds fail until then (not a code bug).
 - **Also recorded:** Phase 9's game-hub replacement never landed (executor miss, superseded — no recovery needed).
 
+## Where we are (2026-09-20, Phase 11 landed — executor lane, UNCOMMITTED)
+
+- **Architect prompt executed with 6 recorded deviations (ADR-013):** static room + seq + status machine + structured rules + topic FCM (no callId) + FGS foreground-first. REJECTED twice, loudly: flavor role gates (would brick both directions — no differentiated UI exists) and child-only subscription (product direction is child→parent). Callee observes docs (prompt left it blind). Stale-snapshot guard restored.
+- **Needs operator:** Studio sync (no new deps) → `firebase deploy --only firestore:rules,functions` (rules REPLACED — old per-call paths deny by default) → §G matrix: rules proofs, 3× calls with seq check, restart recovery, clean logcat. NOTE: old `ring/dad` doc and per-call rooms orphaned in Firestore (dead data, nobody reads them).
+
 ## Where we are (2026-09-20, Phase 8 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed with 6 recorded deviations (ADR-010):** debounce machine + `restartIce` (IceRestart constraint), `updateOffer` + callee offer-watcher (prompt's Phase 2 API is gone), role derived from state, auto-reconnect trigger + banner (prompt expects the logs, never wires the cause), callee `listenCall` (was blind post-answer), game.html + PiP card + media-overlay fix.

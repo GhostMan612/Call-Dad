@@ -53,6 +53,10 @@
 - [x] Debounce machine + restartIce + updateOffer + callee offer-watcher + auto-reconnect + banner + full game + PiP card + media-overlay
 - [ ] Human: Studio sync (no new deps) → build → §H matrix (game both ways, simultaneous-tap race, PiP visible, Wi-Fi toggle recovery, clean logcat)
 
+## Phase 11 — Static rooms + topic wakeup (architect prompt landed 2026-09-20, ADR-013)
+- [x] Static family_channel + seq + status + structured rules + topic FCM + foreground-first FGS + callee observation (role gates + child-only sub REJECTED)
+- [ ] Human: Studio sync (no new deps) → deploy rules+functions (REPLACES old rules) → §G matrix (rules proofs, 3× calls, restart recovery, clean logcat)
+
 ## Phase 10 — Flavors + games hub + hardening (architect prompt landed 2026-09-20, ADR-012)
 - [x] parent/child flavors (blue/pink, APP_THEME, dynamic off) + full game hub (c4 bounds guard) + camera toggle verified
 - [ ] BLOCKER FIRST: console — register com.calldad.parent + com.calldad.child, merged google-services.json (builds fail until then)

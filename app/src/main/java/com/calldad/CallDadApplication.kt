@@ -13,6 +13,7 @@ import android.os.Build
 import com.calldad.webrtc.WebRtcLog
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.messaging.FirebaseMessaging
 
 class CallDadApplication : Application() {
 
@@ -21,6 +22,7 @@ class CallDadApplication : Application() {
         FirebaseApp.initializeApp(this)
         createIncomingCallChannel()
         signInAnonymously()
+        subscribeToRingTopic()
     }
 
     /**
@@ -68,5 +70,25 @@ class CallDadApplication : Application() {
 
     companion object {
         const val CHANNEL_INCOMING_CALL = "incoming_call"
+        const val RING_TOPIC = "incoming_calls"
+    }
+
+    /**
+     * Topic wakeup subscription — BOTH flavors (executor deviation from the
+     * prompt, ADR-013). The prompt subscribes the child only, but our
+     * product direction is child→parent: Dad's phone must wake when the kid
+     * rings. The topic carries no routing (by design), so over-delivery is
+     * harmless: a phone that isn't being rung bounces home on room check.
+     * Killed-app wakeup still needs a launched-once app (FCM limitation).
+     */
+    private fun subscribeToRingTopic() {
+        FirebaseMessaging.getInstance()
+            .subscribeToTopic(RING_TOPIC)
+            .addOnSuccessListener {
+                WebRtcLog.transition("FCM topic subscribed")
+            }
+            .addOnFailureListener {
+                WebRtcLog.transition("FCM topic subscription failed")
+            }
     }
 }

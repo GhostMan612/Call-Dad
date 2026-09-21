@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// Phase 5 host-side tests: per-call room model (dependency-free parts).
+// Phase 11 host-side tests: static-room model (dependency-free parts).
 package com.calldad
 
 import com.calldad.data.signaling.CallDocument
@@ -21,6 +21,7 @@ class CallDocumentTest {
         assertEquals(CallStatus.CONNECTED, CallStatus.fromWire("connected"))
         assertEquals(CallStatus.DECLINED, CallStatus.fromWire("Declined"))
         assertEquals(CallStatus.ENDED, CallStatus.fromWire("ended"))
+        assertEquals(CallStatus.IDLE, CallStatus.fromWire("idle"))
     }
 
     @Test
@@ -33,10 +34,10 @@ class CallDocumentTest {
     @Test
     fun stale_onlyAppliesToRinging() {
         val now = System.currentTimeMillis()
-        val ringingOld = CallDocument("c", "a", "b", CallStatus.RINGING, "o", null, now - 61_000)
-        val ringingFresh = CallDocument("c", "a", "b", CallStatus.RINGING, "o", null, now)
-        val ringingPending = CallDocument("c", "a", "b", CallStatus.RINGING, "o", null, null)
-        val connectedOld = CallDocument("c", "a", "b", CallStatus.CONNECTED, "o", "a", now - 61_000)
+        val ringingOld = CallDocument(CallStatus.RINGING, "o", null, 7, now - 61_000)
+        val ringingFresh = CallDocument(CallStatus.RINGING, "o", null, 8, now)
+        val ringingPending = CallDocument(CallStatus.RINGING, "o", null, 9, null)
+        val connectedOld = CallDocument(CallStatus.CONNECTED, "o", "a", 10, now - 61_000)
         assertTrue(ringingOld.isStale(now))
         assertFalse(ringingFresh.isStale(now))
         assertFalse(ringingPending.isStale(now))

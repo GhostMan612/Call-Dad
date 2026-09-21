@@ -2,8 +2,8 @@
 # sdk.dir=C\:\\android\\sdk
 #
 # Phase 5 provisioned values (operator places REAL values in local.properties only):
-# - CALLEE_UID: the OTHER phone's anonymous-auth uid (Firebase console → Authentication → Users).
-#   Each phone needs the other's uid, so build/install twice with swapped values.
+# - CALLEE_UID: SUPERSEDED in Phase 11 (static family room needs no per-phone
+#   addressing). Kept as a documented no-op; safe to delete the line.
 #   Empty = caller path shows "ask a parent to set up calling".
 # - TURN_URLS: comma-separated TURN servers for mobile-data calls (Phase 9/K8).
 #   Example: TURN_URLS=turn:turn1.example.com:3478,turn:turn2.example.com:3478

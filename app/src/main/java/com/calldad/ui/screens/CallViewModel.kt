@@ -2,17 +2,21 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/CallViewModel.kt — Phase 5: per-call rooms + status machine
+// ui/screens/CallViewModel.kt — Phase 11: static room + status machine
 // Location: app/src/main/java/com/calldad/ui/screens/CallViewModel.kt
+//
+// NO role gates: both flavors/products call AND answer. A previous prompt
+// revision gated startCall/answerCall by flavor — that would brick the
+// product in both directions (no flavor-differentiated UI exists to
+// compensate). See ADR-013. There is exactly one user story: either side
+// may ring, either side may answer.
 package com.calldad.ui.screens
 
 import android.app.Application
 import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.calldad.BuildConfig
 import com.calldad.audio.CallAudioManager
-import com.calldad.data.signaling.CallDocument
 import com.calldad.data.signaling.CallStatus
 import com.calldad.data.signaling.IceCandidate
 import com.calldad.data.signaling.SdpType
@@ -49,22 +53,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     private val webrtc: WebRTCClient = WebRTCClient(
         context = application.applicationContext,
-        onLocalIceCandidate = { candidate ->
-            val id = currentCallId
-            if (id != null) {
-                viewModelScope.launch {
-                    signaling.addIceCandidate(id, candidate).onFailure(::reportError)
-                }
-            } else {
-                // Gathering starts at createPeerConnection(), but the room
-                // only exists after the Firestore round-trip (~0.5s). Stash
-                // early candidates instead of dropping them — on LAN these
-                // host candidates ARE the connection (device-proven outage).
-                synchronized(pendingLocalCandidates) {
-                    pendingLocalCandidates.add(candidate)
-                }
-            }
-        },
+        onLocalIceCandidate = { candidate -> onLocalIceCandidate(candidate) },
         onRemoteVideoTrack = { track -> _remoteVideoTrack.value = track },
         onConnectionStateChanged = { state ->
             _peerConnected.value = (state == "CONNECTED")
@@ -96,33 +85,19 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     /** Connection health for the UI banner + auto-reconnect trigger. */
     val connectionHealth: StateFlow<ConnectionHealth> = webrtc.connectionHealth
 
-    /** Last remote OFFER applied (initial or renegotiation). Loop guard. */
-    private var appliedRemoteOffer: String? = null
+    /** Last applied ANSWER/OFFER seq. Stale generations are ignored. */
+    private var lastAppliedSeq: Int = -1
 
-    private var currentCallId: String? = null
-    private val pendingLocalCandidates = mutableListOf<IceCandidate>()
     private var timerJob: Job? = null
     private var sessionJob: Job? = null
 
     // -------- public API --------
 
-    /**
-     * Caller path. Callee address comes from local.properties (CALLEE_UID,
-     * operator-provisioned per phone). Blank = not provisioned → kid-safe
-     * error card, never a crash.
-     */
+    /** Caller path. Either side may ring. */
     fun startCall() {
         callAudio.stop()
         val current = _state.value
         if (current is CallState.Connecting || current is CallState.InCall) return
-        val callee = BuildConfig.CALLEE_UID
-        if (callee.isBlank()) {
-            _state.value = CallState.Error(
-                kind = SignalingErrorKind.UNKNOWN,
-                message = "Calling isn't set up yet. Ask a parent for help."
-            )
-            return
-        }
         _state.value = CallState.Connecting
 
         sessionJob = viewModelScope.launch {
@@ -135,15 +110,13 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
                 val offer = webrtc.createOffer()
                 WebRtcLog.transition("OFFER publish started")
-                val callId = signaling.createCallRoom(callee, offer.sdp).getOrThrow()
-                currentCallId = callId
-                flushPendingCandidates(callId)
+                signaling.publishOffer(offer.sdp).getOrThrow()
                 WebRtcLog.transition("OFFER published")
 
-                listenCall(callId)
-                listenCandidates(callId)
-                listenHangup(callId)
-                watchRinging(callId)
+                listenAnswerSeq()
+                listenCandidates()
+                listenStatus()
+                watchRinging()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 reportError(t)
@@ -151,11 +124,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Callee path. callId arrives via the ring pointer (app-open) or the
-     * FCM full-screen intent (killed-app).
-     */
-    fun answerCall(callId: String) {
+    /** Callee path. Either side may answer. */
+    fun answerCall() {
         callAudio.stop()
         val current = _state.value
         if (current is CallState.Connecting || current is CallState.InCall) return
@@ -169,28 +139,25 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 _localVideoTrack.value = webrtc.localVideoTrack
                 webrtc.startCapture()
 
-                val doc = signaling.fetchCall(callId).getOrThrow()
-                validateRinging(doc)
-                appliedRemoteOffer = doc.offer
-                webrtc.setRemoteDescription(SessionDescription(SdpType.OFFER, doc.offer!!))
+                val sequenced = signaling.fetchOffer().getOrThrow()
+                lastAppliedSeq = sequenced.seq
+                webrtc.setRemoteDescription(sequenced.description)
                 WebRtcLog.transition("Remote OFFER applied")
 
                 val answer = webrtc.createAnswer()
                 WebRtcLog.transition("ANSWER publish started")
-                signaling.publishAnswer(callId, answer.sdp).getOrThrow()
+                signaling.publishAnswer(answer.sdp).getOrThrow()
                 WebRtcLog.transition("ANSWER published")
 
-                currentCallId = callId
-                flushPendingCandidates(callId)
                 _state.value = CallState.InCall(
                     role = CallRole.CALLEE,
                     startedAtMillis = System.currentTimeMillis()
                 )
                 startTimer()
                 watchConnection()
-                listenCall(callId)
-                listenCandidates(callId)
-                listenHangup(callId)
+                listenAnswerSeq()
+                listenCandidates()
+                listenStatus()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 reportError(t)
@@ -198,26 +165,31 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Incoming overlay only: is there a live, answerable ring right now?
+     * True → caller sets the Incoming state. False → caller navigates back.
+     * Own ringback and stale generations answer false (never strand).
+     */
+    suspend fun checkIncomingCall(): Boolean {
+        val result = signaling.fetchOffer()
+        return result.isSuccess
+    }
+
     /** Callee decline: status flip so the caller sees it, then reset + home. */
-    suspend fun declineAndAwait(callId: String?) {
+    suspend fun declineAndAwait() {
         callAudio.stop()
-        if (!callId.isNullOrBlank()) {
-            withTimeoutOrNull(3_000) { signaling.declineCall(callId) }
-        }
+        withTimeoutOrNull(3_000) { signaling.declineCall() }
         cancelSessionJobs()
         resetCallState()
-        currentCallId = null
     }
 
     /** Local hangup: reset now; room ENDED best-effort in the background. */
     fun endCall() {
         callAudio.stop()
-        val id = currentCallId
         cancelSessionJobs()
         resetCallState()
-        currentCallId = null
         viewModelScope.launch {
-            if (id != null) withTimeoutOrNull(3_000) { signaling.endCall(id) }
+            withTimeoutOrNull(3_000) { signaling.endCall() }
         }
     }
 
@@ -230,16 +202,21 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      */
     suspend fun endCallAndAwait() {
         callAudio.stop()
-        val id = currentCallId
         cancelSessionJobs()
         resetCallState()
-        currentCallId = null
-        if (id != null) withTimeoutOrNull(3_000) { signaling.endCall(id) }
+        withTimeoutOrNull(3_000) { signaling.endCall() }
     }
 
     fun onToggleCamera() {
         _isCameraOn.update { !it }
         webrtc.toggleCamera()
+    }
+
+    /** Writes a locally-gathered ICE candidate to the static room. */
+    fun onLocalIceCandidate(candidate: IceCandidate) {
+        viewModelScope.launch {
+            signaling.addIceCandidate(candidate).onFailure(::reportError)
+        }
     }
 
     /** Exposes the WebRTCClient for the game bridge. Null before init. */
@@ -248,19 +225,18 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Called from the UI when ConnectionHealth.LOST is observed.
      * Caller-only: the callee never initiates ICE restarts (it answers
-     * them via the offer-watcher above). Role derives from state — no
-     * extra field to clear (executor simplification of the prompt).
+     * them via the offer-watcher below). Role derives from state — no
+     * extra field to clear.
      */
     fun onReconnectRequested() {
         val s = _state.value
         if (s !is CallState.InCall || s.role != CallRole.CALLER) return
-        val id = currentCallId ?: return
         viewModelScope.launch {
             val newOffer = webrtc.restartIce() ?: run {
                 WebRtcLog.transition("ICE restart produced no offer")
                 return@launch
             }
-            signaling.updateOffer(id, newOffer.sdp).onFailure(::reportError)
+            signaling.updateOffer(newOffer.sdp).onFailure(::reportError)
             WebRtcLog.transition("ICE restart offer published")
         }
     }
@@ -282,33 +258,6 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         callAudio.start()
     }
 
-    /**
-     * Incoming overlay only: follow a specific call room home when it stops
-     * ringing (declined/ended/deleted) before Answer.
-     */
-    fun watchIncomingCall(callId: String) {
-        viewModelScope.launch {
-            signaling.observeCall(callId)
-                .catch { /* stay; Answer path reports properly */ }
-                .collect { doc ->
-                    if (_state.value is CallState.Incoming && doc.status != CallStatus.RINGING) {
-                        WebRtcLog.transition("Ring ended before answer — leaving")
-                        resetCallState()
-                    }
-                }
-        }
-        viewModelScope.launch {
-            signaling.observeCallDeleted(callId)
-                .catch { /* stay; Answer path reports properly */ }
-                .collect {
-                    if (_state.value is CallState.Incoming) {
-                        WebRtcLog.transition("Room gone before answer — leaving")
-                        resetCallState()
-                    }
-                }
-        }
-    }
-
     override fun onCleared() {
         callAudio.stop()
         sessionJob?.cancel()
@@ -319,84 +268,73 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     // -------- listeners --------
 
-    /** Caller: ANSWER → remote → InCall; DECLINED/ENDED → silent home. */
-    private fun listenCall(callId: String) {
+    /**
+     * Caller: sequenced ANSWER → remote → InCall (stale generations
+     * ignored via lastAppliedSeq). Callee: sequenced re-OFFER mid-call
+     * (caller ICE restart) → apply + answer. One collector serves both.
+     */
+    private fun listenAnswerSeq() {
         viewModelScope.launch {
-            signaling.observeCall(callId)
+            signaling.observeRemoteDescriptionWithSeq(SdpType.ANSWER)
                 .catch { reportError(it) }
-                .collect { doc ->
-                    when (doc.status) {
-                        CallStatus.CONNECTED -> {
-                            val s = _state.value
-                            val ans = doc.answer
-                            if (!ans.isNullOrBlank() && s is CallState.Connecting) {
-                                webrtc.setRemoteDescription(
-                                    SessionDescription(SdpType.ANSWER, ans)
-                                )
-                                WebRtcLog.transition("Remote ANSWER applied")
-                                _state.value = CallState.InCall(
-                                    role = CallRole.CALLER,
-                                    startedAtMillis = System.currentTimeMillis()
-                                )
-                                startTimer()
-                                watchConnection()
-                            } else if (s is CallState.InCall && s.role == CallRole.CALLEE) {
-                                // Renegotiation (caller ICE restart): new OFFER
-                                // mid-call. Answer it like the first one.
-                                val offer = doc.offer
-                                if (!offer.isNullOrBlank() && offer != appliedRemoteOffer) {
-                                    appliedRemoteOffer = offer
-                                    webrtc.setRemoteDescription(
-                                        SessionDescription(SdpType.OFFER, offer)
-                                    )
-                                    WebRtcLog.transition("Remote re-OFFER applied")
-                                    val reAnswer = webrtc.createAnswer()
-                                    signaling.publishAnswer(callId, reAnswer.sdp)
-                                    WebRtcLog.transition("Renegotiation ANSWER published")
-                                }
-                            }
-                        }
-                        CallStatus.DECLINED, CallStatus.ENDED -> {
-                            if (_state.value !is CallState.Idle) {
-                                WebRtcLog.transition("Peer ended — leaving")
-                                cancelSessionJobs()
-                                resetCallState()
-                            }
-                        }
-                        CallStatus.RINGING -> Unit
+                .collect { sequenced ->
+                    if (sequenced.seq <= lastAppliedSeq) {
+                        WebRtcLog.transition("Stale answer ignored")
+                        return@collect
+                    }
+                    lastAppliedSeq = sequenced.seq
+                    webrtc.setRemoteDescription(sequenced.description)
+                    WebRtcLog.transition("Remote ANSWER applied")
+                    if (_state.value is CallState.Connecting) {
+                        _state.value = CallState.InCall(
+                            role = CallRole.CALLER,
+                            startedAtMillis = System.currentTimeMillis()
+                        )
+                        startTimer()
+                        watchConnection()
+                    }
+                }
+        }
+        viewModelScope.launch {
+            signaling.observeRemoteDescriptionWithSeq(SdpType.OFFER)
+                .catch { reportError(it) }
+                .collect { sequenced ->
+                    val s = _state.value
+                    if (s is CallState.InCall && s.role == CallRole.CALLEE &&
+                        sequenced.seq > lastAppliedSeq
+                    ) {
+                        lastAppliedSeq = sequenced.seq
+                        webrtc.setRemoteDescription(sequenced.description)
+                        WebRtcLog.transition("Remote re-OFFER applied")
+                        val reAnswer = webrtc.createAnswer()
+                        signaling.publishAnswer(reAnswer.sdp)
+                        WebRtcLog.transition("Renegotiation ANSWER published")
                     }
                 }
         }
     }
 
-    /** Sends candidates gathered before the room existed. */
-    private fun flushPendingCandidates(callId: String) {
-        val pending = synchronized(pendingLocalCandidates) {
-            if (pendingLocalCandidates.isEmpty()) return
-            pendingLocalCandidates.toList().also { pendingLocalCandidates.clear() }
-        }
+    private fun listenCandidates() {
         viewModelScope.launch {
-            pending.forEach { signaling.addIceCandidate(callId, it) }
-        }
-    }
-
-    private fun listenCandidates(callId: String) {
-        viewModelScope.launch {
-            signaling.observeIceCandidates(callId)
+            signaling.observeIceCandidates()
                 .catch { reportError(it) }
                 .collect { webrtc.addRemoteIceCandidate(it) }
         }
     }
 
-    /** Deletion backup: docs are status-driven, but never strand on vanish. */
-    private fun listenHangup(callId: String) {
+    /** Status mirror: peer DECLINED/ENDED → silent home (both roles). */
+    private fun listenStatus() {
         viewModelScope.launch {
-            signaling.observeCallDeleted(callId)
+            signaling.observeStatus()
                 .catch { reportError(it) }
-                .collect {
-                    WebRtcLog.transition("Remote hangup observed")
-                    cancelSessionJobs()
-                    resetCallState()
+                .collect { status ->
+                    if ((status == CallStatus.DECLINED || status == CallStatus.ENDED) &&
+                        _state.value !is CallState.Idle
+                    ) {
+                        WebRtcLog.transition("Peer ended — leaving")
+                        cancelSessionJobs()
+                        resetCallState()
+                    }
                 }
         }
     }
@@ -406,7 +344,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * a dozing phone. Give it 45s, then an honest error card (never silent —
      * the child should know Dad didn't pick up).
      */
-    private fun watchRinging(callId: String) {
+    private fun watchRinging() {
         viewModelScope.launch {
             delay(45_000)
             if (_state.value is CallState.Connecting) {
@@ -435,14 +373,6 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun validateRinging(doc: CallDocument) {
-        if (doc.status != CallStatus.RINGING || doc.offer.isNullOrBlank() || doc.isStale()) {
-            throw SignalingFailure(
-                SignalingErrorKind.NOT_FOUND, "Call room does not exist yet."
-            )
-        }
-    }
-
     private fun startTimer() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
@@ -464,8 +394,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         _eglContext.value = null
         _localVideoTrack.value = null
         _peerConnected.value = false
-        appliedRemoteOffer = null
-        synchronized(pendingLocalCandidates) { pendingLocalCandidates.clear() }
+        lastAppliedSeq = -1
         _state.value = CallState.Idle
     }
 

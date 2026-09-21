@@ -2,15 +2,16 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/HomeViewModel.kt — Phase 5: ring-pointer auto-popup
+// ui/screens/HomeViewModel.kt — Phase 11: static-room auto-popup
 // Location: app/src/main/java/com/calldad/ui/screens/HomeViewModel.kt
 package com.calldad.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.calldad.data.signaling.OwnSdpRegistry
+import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SignalingClient
 import com.calldad.navigation.Routes
-import com.calldad.webrtc.WebRtcLog
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -36,29 +37,30 @@ class HomeViewModel(
     val destinations: StateFlow<List<HomeDestination>> = _destinations.asStateFlow()
 
     /**
-     * Fires once per NEW ring while Home is visible, carrying its callId.
+     * Fires once per NEW live ring while Home is visible.
      *
      * Home-scoped by construction: this VM dies when Home is left, so the
-     * listener stops off-Home (no background drain, no yanking the child
-     * out of another screen). Killed-app wakeup is FCM (Phase 5 core).
-     * Deduped by callId; own + stale rings filtered inside the client.
+     * listener stops off-Home. Own ringback and stale generations are
+     * skipped (never ring ourselves, never ring for the dead).
+     * Killed-app wakeup is FCM.
      */
-    private val _incomingCall = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val incomingCall: SharedFlow<String> = _incomingCall.asSharedFlow()
+    private val _incomingCall = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val incomingCall: SharedFlow<Unit> = _incomingCall.asSharedFlow()
 
-    private var seenCallId: String? = null
+    private var seenSeq: Int = -1
 
     init {
         viewModelScope.launch {
-            signaling.observeRing()
+            signaling.observeRemoteDescriptionWithSeq(SdpType.OFFER)
                 .catch { /* offline: stay silent, retry on next Home entry */ }
-                .collect { ring ->
-                    if (ring.callId != seenCallId) {
-                        seenCallId = ring.callId
-                        // Literal only: proves receipt without leaking the id.
-                        WebRtcLog.transition("Ring observed")
-                        _incomingCall.tryEmit(ring.callId)
-                    }
+                .collect { sequenced ->
+                    if (OwnSdpRegistry.isOwn(sequenced.description.sdp)) return@collect
+                    if (sequenced.seq <= seenSeq) return@collect
+                    // Abandoned ring (caller vanished without teardown):
+                    // never ring for the dead.
+                    if (sequenced.description.isStale()) return@collect
+                    seenSeq = sequenced.seq
+                    _incomingCall.tryEmit(Unit)
                 }
         }
     }

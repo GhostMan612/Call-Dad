@@ -82,7 +82,6 @@ fun CallScreen(
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
     mode: String = "caller",
-    callId: String? = null,
     viewModel: CallViewModel = callViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -108,11 +107,10 @@ fun CallScreen(
     LaunchedEffect(Unit) {
         requestPermissions()
         if (mode == "incoming") {
-            // Overlay FIRST (Idle-guarded, always safe), then the room
-            // watcher: without this the screen sits on "Ready" (device-proven
-            // miss — navigation arrived but state never left Idle).
-            viewModel.simulateIncomingCall()
-            if (!callId.isNullOrBlank()) viewModel.watchIncomingCall(callId)
+            // Real ring check: live answerable offer → overlay; anything
+            // else (stale snapshot, own echo, dead room) → straight home.
+            // No overlay without a room behind it (device-proven strandings).
+            if (!viewModel.checkIncomingCall()) onFinished()
         }
     }
 
@@ -173,7 +171,7 @@ fun CallScreen(
     val scope = rememberCoroutineScope()
     BackHandler {
         scope.launch {
-            if (state is CallState.Incoming) viewModel.declineAndAwait(callId)
+            if (state is CallState.Incoming) viewModel.declineAndAwait()
             else viewModel.endCallAndAwait()
             onFinished()
         }
@@ -192,14 +190,10 @@ fun CallScreen(
         health = health,
         onToggleCamera = viewModel::onToggleCamera,
         onRetry = viewModel::clearError,
-        onAnswer = {
-            val id = callId
-            if (!id.isNullOrBlank()) viewModel.answerCall(id)
-            else viewModel.simulateIncomingCall()
-        },
+        onAnswer = { viewModel.answerCall() },
         onDecline = {
             scope.launch {
-                viewModel.declineAndAwait(callId)
+                viewModel.declineAndAwait()
                 onFinished()
             }
         },

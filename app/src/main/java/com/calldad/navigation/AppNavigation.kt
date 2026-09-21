@@ -33,13 +33,14 @@ import com.calldad.ui.screens.PttScreen
 fun AppNavHost(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
-    incomingCallId: String? = null
+    incomingCall: Boolean = false
 ) {
     // Killed-app entry (FCM full-screen intent): drop straight into the
-    // incoming overlay for that call. Single-shot per cold start.
-    LaunchedEffect(incomingCallId) {
-        if (!incomingCallId.isNullOrBlank()) {
-            navController.navigate("${Routes.CALL}?mode=incoming&callId=$incomingCallId") {
+    // incoming overlay. The overlay itself validates the static room —
+    // a stale push bounces home instead of stranding. Single-shot.
+    LaunchedEffect(incomingCall) {
+        if (incomingCall) {
+            navController.navigate("${Routes.CALL}?mode=incoming") {
                 launchSingleTop = true
             }
         }
@@ -53,16 +54,14 @@ fun AppNavHost(
             HomeScreen(onNavigate = navController::navigateGuarded)
         }
         composable(
-            route = "${Routes.CALL}?mode={mode}&callId={callId}",
+            route = "${Routes.CALL}?mode={mode}",
             arguments = listOf(
-                navArgument("mode") { type = NavType.StringType; defaultValue = "caller" },
-                navArgument("callId") { type = NavType.StringType; defaultValue = "" }
+                navArgument("mode") { type = NavType.StringType; defaultValue = "caller" }
             )
         ) { entry ->
             CallScreen(
                 onFinished = navController::returnHome,
-                mode = entry.arguments?.getString("mode") ?: "caller",
-                callId = entry.arguments?.getString("callId")?.ifBlank { null }
+                mode = entry.arguments?.getString("mode") ?: "caller"
             )
         }
         composable(Routes.PTT) {
