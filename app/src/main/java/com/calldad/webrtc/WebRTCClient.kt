@@ -395,7 +395,7 @@ class WebRTCClient(
                     override fun onSetSuccess() {
                         val local = pc.localDescription ?: created
                         WebRtcLog.transition("ICE restart offer created")
-                        deferred.complete(local.toDomain(SdpType.OFFER))
+                        deferred.complete(local.toDomain(RtcSessionDescription.Type.OFFER))
                     }
                     override fun onSetFailure(err: String?) {
                         deferred.completeExceptionally(
