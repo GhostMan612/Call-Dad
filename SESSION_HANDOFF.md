@@ -43,6 +43,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Architect prompt executed with 6 recorded deviations (ADR-011):** TURN_URLS multi-URL + alias, audio-mode set/reset, single-ringer doctrine (overlay player removed), answer-stops-ring, shared Helper VM (same crash class as 3/6), keyword order fix. KeywordBot host-tested (6 tests).
 - **Needs operator:** Studio sync (no new deps) → provision TURN_URLS or leave empty → §K matrix: ringtone loops post-call, vibration repeats, keyword jokes, airplane-mode STT (API 31+), multi-game sync, guardrail audit.
 
+## Where we are (2026-09-20, Phase 10 landed — BLOCKED on console step, UNCOMMITTED)
+
+- **Architect prompt executed (ADR-012):** parent/child flavors (blue/pink, APP_THEME-gated, dynamicColor never on), feature colors preserved, child keeps "Call of Daddy", full 3-game hub with c4 bounds guard, camera toggle verified present.
+- **BLOCKER before ANY Phase 10 verification:** suffixed IDs match no Firebase client → register `com.calldad.parent` + `com.calldad.child` in console, replace gitignored `google-services.json` with merged download. Builds fail until then (not a code bug).
+- **Also recorded:** Phase 9's game-hub replacement never landed (executor miss, superseded — no recovery needed).
+
 ## Where we are (2026-09-20, Phase 8 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed with 6 recorded deviations (ADR-010):** debounce machine + `restartIce` (IceRestart constraint), `updateOffer` + callee offer-watcher (prompt's Phase 2 API is gone), role derived from state, auto-reconnect trigger + banner (prompt expects the logs, never wires the cause), callee `listenCall` (was blind post-answer), game.html + PiP card + media-overlay fix.

@@ -31,3 +31,23 @@ val HangUpRed = Color(0xFFC62828)
 // ---- Neutrals ------------------------------------------------------------
 val WarmCream = Color(0xFFFDF7F0)
 val InkBlack = Color(0xFF1B1B1B)
+
+// ---- Flavor palettes ----------------------------------------------------
+// These route the app's background and primary surface colors based on
+// the build flavor. Feature-identity colors (CallGreen, GameBlue, etc.)
+// remain constant across flavors — a child who learned "green means
+// call Dad" must not lose that cue when the flavor changes.
+
+// Parent (Dad) — Light Blue.
+val DadBluePrimary       = Color(0xFF1565C0)
+val DadBluePrimaryDark   = Color(0xFF0D47A1)
+val DadBlueContainer     = Color(0xFFE3F2FD)
+val DadBlueOnContainer   = Color(0xFF0D47A1)
+val DadBlueBackground    = Color(0xFFF5F9FF)
+
+// Child (Daughter) — Light Pink.
+val ChildPinkPrimary       = Color(0xFFD81B60)
+val ChildPinkPrimaryDark   = Color(0xFFAD1457)
+val ChildPinkContainer     = Color(0xFFFCE4EC)
+val ChildPinkOnContainer   = Color(0xFF880E4F)
+val ChildPinkBackground    = Color(0xFFFFF5F8)

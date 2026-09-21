@@ -41,6 +41,28 @@ android {
         buildConfigField("String", "CALLEE_UID", "\"$calleeUid\"")
     }
 
+    // Phase 10: audience flavors. BOTH APKs install side-by-side
+    // (applicationIdSuffix), enabling two-device testing on one phone.
+    // THEME names are operator-ordered: child keeps "Call of Daddy".
+    flavorDimensions += "audience"
+
+    productFlavors {
+        create("parent") {
+            dimension = "audience"
+            applicationIdSuffix = ".parent"
+            versionNameSuffix = "-parent"
+            buildConfigField("String", "APP_THEME", "\"blue\"")
+            resValue("string", "app_name", "Call of Daddy (Parent)")
+        }
+        create("child") {
+            dimension = "audience"
+            applicationIdSuffix = ".child"
+            versionNameSuffix = "-child"
+            buildConfigField("String", "APP_THEME", "\"pink\"")
+            resValue("string", "app_name", "Call of Daddy")
+        }
+    }
+
     buildFeatures {
         compose = true
         // QA incoming-call hook is DEBUG-gated via BuildConfig.DEBUG.

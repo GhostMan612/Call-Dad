@@ -4,272 +4,426 @@
 <meta charset="utf-8">
 <meta name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Call Dad — Tic Tac Toe</title>
+<title>Call Dad — Games</title>
 <style>
-  :root {
-    --blue:  #1565C0;
-    --green: #2E7D32;
-    --red:   #C62828;
-    --amber: #E65100;
-  }
-  html, body {
-    margin: 0; padding: 0; height: 100%;
-    background: var(--blue); color: #fff;
-    font-family: system-ui, sans-serif;
-    overflow: hidden;
-    touch-action: manipulation;
-    -webkit-user-select: none; user-select: none;
-  }
-  #wrap {
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    height: 100%; padding: 16px; box-sizing: border-box;
-  }
-  #status {
-    font-size: 6vmin; font-weight: 900;
-    margin-bottom: 3vmin; text-align: center;
-    min-height: 8vmin;
-  }
-  #board {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(3, 1fr);
-    gap: 2vmin;
-    width: min(80vw, 80vh);
-    height: min(80vw, 80vh);
-  }
-  .cell {
-    background: rgba(255,255,255,0.15);
-    border-radius: 3vmin;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14vmin; font-weight: 900;
-    color: #fff;
-    cursor: pointer;
-    transition: background 120ms ease;
-  }
-  .cell:active { background: rgba(255,255,255,0.3); }
-  .cell[data-v="X"] { color: #FFEB3B; }
-  .cell[data-v="O"] { color: #80DEEA; }
-  .cell.disabled { pointer-events: none; }
-  #reset {
-    margin-top: 3vmin; padding: 2vmin 5vmin;
-    font-size: 5vmin; font-weight: 900;
-    border: 0; border-radius: 3vmin;
-    background: #fff; color: var(--blue);
-    cursor: pointer;
-  }
-  #reset.hidden { display: none; }
+  :root{--blue:#1565C0;--green:#2E7D32;--red:#C62828;--amber:#E65100}
+  html,body{margin:0;padding:0;height:100%;background:var(--blue);color:#fff;
+    font-family:system-ui,sans-serif;overflow:hidden;
+    touch-action:manipulation;-webkit-user-select:none;user-select:none}
+  #menu,#game{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+  #menu.hidden,#game.hidden{display:none}
+  #menu h1{font-size:8vmin;margin:0 0 4vmin}
+  .gameBtn{width:min(70vw,400px);padding:4vmin;margin:2vmin 0;
+    font-size:6vmin;font-weight:900;border:0;border-radius:4vmin;
+    background:#fff;color:var(--blue);cursor:pointer}
+  #status{font-size:5vmin;font-weight:900;margin-bottom:2vmin;
+    text-align:center;min-height:7vmin}
+  #board{display:grid;gap:2vmin;width:min(80vw,80vh);height:min(80vw,80vh)}
+  #board.ttt{grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)}
+  #board.c4{grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(6,1fr)}
+  #board.mem{grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr)}
+  .cell{background:rgba(255,255,255,.15);border-radius:2vmin;
+    display:flex;align-items:center;justify-content:center;
+    font-size:10vmin;font-weight:900;color:#fff;cursor:pointer;
+    transition:background 120ms ease}
+  .cell:active{background:rgba(255,255,255,.3)}
+  .cell[data-v="X"]{color:#FFEB3B}
+  .cell[data-v="O"]{color:#80DEEA}
+  .cell.mem{font-size:14vmin}
+  .cell.hidden{color:transparent}
+  .cell.disabled{pointer-events:none}
+  #back{margin-top:2vmin;padding:2vmin 4vmin;font-size:4vmin;font-weight:900;
+    border:0;border-radius:2vmin;background:#fff;color:var(--blue);cursor:pointer}
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="status">Connecting…</div>
-  <div id="board"></div>
-  <button id="reset" class="hidden">Play Again</button>
+<div id="menu">
+  <h1>Pick a game!</h1>
+  <button class="gameBtn" data-game="ttt">Tic Tac Toe</button>
+  <button class="gameBtn" data-game="c4">Connect 4</button>
+  <button class="gameBtn" data-game="mem">Memory Match</button>
+</div>
+<div id="game" class="hidden">
+  <div id="status"></div>
+  <div id="board" class="ttt"></div>
+  <button id="back">Back</button>
 </div>
 
 <script>
 (function () {
   "use strict";
 
-  // -------------------------------------------------------------------
-  // AUTHORITY MODEL — CALLER-AUTHORITATIVE
-  //
-  // The caller ("Dad") is the authority. The callee ("Child") sends
-  // { type: "move", index: N } only. The caller validates, mutates the
-  // board, and broadcasts { type: "state", board, turn, winner } to
-  // both ends. This eliminates the simultaneous-tap divergence race.
-  //
-  // Role is assigned by the native layer via window.setGameRole(role)
-  // before the first move. Default is 'callee' until told otherwise.
-  // -------------------------------------------------------------------
+  // ----- AUTHORITY MODEL (carried from Phase 8) -----
+  // Caller is authoritative for ALL games. Callee sends moves only.
+  // Caller validates, mutates, and broadcasts full state.
+  let role = "callee";
+  let currentGame = null;   // 'ttt' | 'c4' | 'mem'
 
-  let role = "callee";           // 'caller' | 'callee'
-  let myMark = "O";              // caller is X, callee is O
-  let board = ["","","","","","","","",""];
-  let turn = "X";                // 'X' always goes first
-  let winner = null;             // null | 'X' | 'O' | 'draw'
-  let gameActive = true;
-
-  const WIN_LINES = [
-    [0,1,2],[3,4,5],[6,7,8],
-    [0,3,6],[1,4,7],[2,5,8],
-    [0,4,8],[2,4,6]
-  ];
-
+  const $menu = document.getElementById("menu");
+  const $game = document.getElementById("game");
   const $board = document.getElementById("board");
   const $status = document.getElementById("status");
-  const $reset = document.getElementById("reset");
+  const $back = document.getElementById("back");
 
-  // ---------- DOM setup ----------
-  for (let i = 0; i < 9; i++) {
-    const cell = document.createElement("div");
-    cell.className = "cell";
-    cell.dataset.index = String(i);
-    $board.appendChild(cell);
-  }
-
-  // ---------- touch handling ----------
-  // Explicit { passive: false } — some Android WebView builds
-  // (Xiaomi/HyperOS) default to passive listeners and the game freezes.
-  function bindTap(el, handler) {
-    el.addEventListener("touchstart", function (ev) {
-      ev.preventDefault();
-      handler(ev);
+  function bindTap(el, fn) {
+    el.addEventListener("touchstart", function (e) {
+      e.preventDefault(); fn(e);
     }, { passive: false });
-    el.addEventListener("click", handler);
+    el.addEventListener("click", fn);
   }
 
-  $board.querySelectorAll(".cell").forEach(function (cell) {
-    bindTap(cell, function () { onCellTap(parseInt(cell.dataset.index, 10)); });
+  document.querySelectorAll(".gameBtn").forEach(function (b) {
+    bindTap(b, function () { selectGame(b.dataset.game); });
   });
-  bindTap($reset, onResetTap);
-
-  // ---------- game logic ----------
-  function checkWinner(b) {
-    for (let i = 0; i < WIN_LINES.length; i++) {
-      const [a, c, d] = WIN_LINES[i];
-      if (b[a] && b[a] === b[c] && b[a] === b[d]) return b[a];
-    }
-    return b.every(function (v) { return v; }) ? "draw" : null;
-  }
-
-  function render() {
-    const cells = $board.querySelectorAll(".cell");
-    cells.forEach(function (cell, i) {
-      const v = board[i];
-      cell.textContent = v;
-      cell.dataset.v = v;
-      const isMyTurn = gameActive && turn === myMark;
-      if (v || winner || !isMyTurn) {
-        cell.classList.add("disabled");
-      } else {
-        cell.classList.remove("disabled");
-      }
-    });
-
-    if (winner === "draw") {
-      $status.textContent = "It's a tie!";
-      $reset.classList.remove("hidden");
-    } else if (winner) {
-      $status.textContent = (winner === myMark ? "You win! 🎉" : "Dad wins!");
-      $reset.classList.remove("hidden");
-    } else {
-      $status.textContent = (turn === myMark) ? "Your turn" : "Waiting…";
-      $reset.classList.add("hidden");
-    }
-  }
-
-  function onCellTap(index) {
-    if (!gameActive || winner) return;
-    if (turn !== myMark) return;
-    if (board[index]) return;
-
-    if (role === "caller") {
-      // I'm the authority. Mutate locally, broadcast.
-      applyMove(index, myMark);
-      broadcastState();
-    } else {
-      // I'm the callee. Send the move and wait for the authority to
-      // echo the new state back. Do NOT mutate locally.
-      sendToNative({ type: "move", index: index });
-      $status.textContent = "Waiting…";
-    }
-  }
-
-  function applyMove(index, mark) {
-    if (board[index]) return false;
-    board[index] = mark;
-    winner = checkWinner(board);
-    turn = (mark === "X") ? "O" : "X";
-    if (winner) gameActive = false;
-    return true;
-  }
-
-  function broadcastState() {
-    sendToNative({
-      type: "state",
-      board: board,
-      turn: turn,
-      winner: winner
-    });
-  }
+  bindTap($back, function () {
+    currentGame = null;
+    $game.classList.add("hidden");
+    $menu.classList.remove("hidden");
+    sendToNative({ type: "menu" });
+  });
 
   function sendToNative(obj) {
     if (window.AndroidRTC && window.AndroidRTC.sendGameStateToDad) {
-      try {
-        window.AndroidRTC.sendGameStateToDad(JSON.stringify(obj));
-      } catch (e) { /* silent */ }
+      try { window.AndroidRTC.sendGameStateToDad(JSON.stringify(obj)); }
+      catch (_) {}
     }
   }
 
-  function onResetTap() {
+  // ----- TIC TAC TOE -----
+  const TTT_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  let tttBoard, tttTurn, tttWinner, tttActive;
+
+  function tttReset() {
+    tttBoard = ["","","","","","","","",""];
+    tttTurn = "X";
+    tttWinner = null;
+    tttActive = true;
+  }
+  function tttCheck(b) {
+    for (const [a,c,d] of TTT_LINES)
+      if (b[a] && b[a]===b[c] && b[a]===b[d]) return b[a];
+    return b.every(v=>v) ? "draw" : null;
+  }
+  function tttRender() {
+    $board.className = "ttt";
+    $board.innerHTML = "";
+    tttBoard.forEach(function (v, i) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.textContent = v;
+      cell.dataset.v = v;
+      const myTurn = tttActive && !tttWinner &&
+        ((role === "caller" && tttTurn === "X") ||
+         (role === "callee" && tttTurn === "O"));
+      if (v || !myTurn) cell.classList.add("disabled");
+      bindTap(cell, function () { tttTap(i); });
+      $board.appendChild(cell);
+    });
+    if (tttWinner === "draw") $status.textContent = "Tie game!";
+    else if (tttWinner) $status.textContent =
+      (tttWinner === (role === "caller" ? "X" : "O")) ? "You win! 🎉" : "Dad wins!";
+    else $status.textContent = (
+      (role === "caller" && tttTurn === "X") ||
+      (role === "callee" && tttTurn === "O")) ? "Your turn" : "Waiting…";
+  }
+  function tttTap(i) {
+    if (!tttActive || tttWinner || tttBoard[i]) return;
+    if (role === "caller") {
+      if (tttTurn !== "X") return;
+      tttBoard[i] = "X";
+      tttWinner = tttCheck(tttBoard);
+      tttTurn = "O";
+      tttActive = !tttWinner;
+      tttRender();
+      broadcast("ttt");
+    } else {
+      if (tttTurn !== "O") return;
+      sendToNative({ type: "move", game: "ttt", index: i });
+    }
+  }
+
+  // ----- CONNECT 4 -----
+  // 6 rows x 7 cols, row 0 is top. Board is a flat 42-element array.
+  const C4_COLS = 7, C4_ROWS = 6;
+  let c4Board, c4Turn, c4Winner, c4Active;
+
+  function c4Reset() {
+    c4Board = new Array(42).fill("");
+    c4Turn = "X"; c4Winner = null; c4Active = true;
+  }
+  function c4Check(b) {
+    function get(r,c){ return (r<0||r>=C4_ROWS||c<0||c>=C4_COLS) ? "" : b[r*C4_COLS+c]; }
+    for (let r=0;r<C4_ROWS;r++) for (let c=0;c<C4_COLS;c++) {
+      const v = get(r,c); if (!v) continue;
+      if (get(r,c+1)===v && get(r,c+2)===v && get(r,c+3)===v) return v;
+      if (get(r+1,c)===v && get(r+2,c)===v && get(r+3,c)===v) return v;
+      if (get(r+1,c+1)===v && get(r+2,c+2)===v && get(r+3,c+3)===v) return v;
+      if (get(r+1,c-1)===v && get(r+2,c-2)===v && get(r+3,c-3)===v) return v;
+    }
+    return b.every(v=>v) ? "draw" : null;
+  }
+  function c4Drop(b, col, mark) {
+    for (let r=C4_ROWS-1;r>=0;r--) {
+      const idx = r*C4_COLS+col;
+      if (!b[idx]) { b[idx]=mark; return idx; }
+    }
+    return -1;
+  }
+  function c4Render() {
+    $board.className = "c4";
+    $board.innerHTML = "";
+    c4Board.forEach(function (v, i) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.style.fontSize = "5vmin";
+      cell.textContent = v;
+      cell.dataset.v = v;
+      const col = i % C4_COLS;
+      const myTurn = c4Active && !c4Winner &&
+        ((role === "caller" && c4Turn === "X") ||
+         (role === "callee" && c4Turn === "O"));
+      if (!myTurn) cell.classList.add("disabled");
+      bindTap(cell, function () { c4Tap(col); });
+      $board.appendChild(cell);
+    });
+    if (c4Winner === "draw") $status.textContent = "Tie game!";
+    else if (c4Winner) $status.textContent =
+      (c4Winner === (role === "caller" ? "X" : "O")) ? "You win! 🎉" : "Dad wins!";
+    else $status.textContent = (
+      (role === "caller" && c4Turn === "X") ||
+      (role === "callee" && c4Turn === "O")) ? "Your turn" : "Waiting…";
+  }
+  function c4Tap(col) {
+    if (!c4Active || c4Winner) return;
+    if (role === "caller") {
+      if (c4Turn !== "X") return;
+      if (c4Drop(c4Board, col, "X") < 0) return;
+      c4Winner = c4Check(c4Board);
+      c4Turn = "O";
+      c4Active = !c4Winner;
+      c4Render();
+      broadcast("c4");
+    } else {
+      if (c4Turn !== "O") return;
+      sendToNative({ type: "move", game: "c4", col: col });
+    }
+  }
+
+  // ----- MEMORY MATCH -----
+  // 4x4 grid of 8 pairs. Caller shuffles and broadcasts the layout once.
+  const MEM_ICONS = ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼"];
+  let memBoard, memRevealed, memMatched, memTurn, memWinner, memActive;
+  let memFirstIndex = null;
+
+  function memReset() {
+    const deck = MEM_ICONS.concat(MEM_ICONS);
+    // Fisher-Yates.
+    for (let i=deck.length-1;i>0;i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [deck[i],deck[j]] = [deck[j],deck[i]];
+    }
+    memBoard = deck;
+    memRevealed = new Array(16).fill(false);
+    memMatched = new Array(16).fill(false);
+    memTurn = "X"; memWinner = null; memActive = true;
+    memFirstIndex = null;
+  }
+  function memRender() {
+    $board.className = "mem";
+    $board.innerHTML = "";
+    memBoard.forEach(function (v, i) {
+      const cell = document.createElement("div");
+      cell.className = "cell mem";
+      const shown = memRevealed[i] || memMatched[i];
+      cell.textContent = shown ? v : "?";
+      if (!shown) cell.classList.add("hidden");
+      if (memMatched[i]) cell.style.background = "rgba(255,255,255,.4)";
+      const myTurn = memActive && !memWinner &&
+        ((role === "caller" && memTurn === "X") ||
+         (role === "callee" && memTurn === "O"));
+      if (!myTurn || memRevealed[i] || memMatched[i]) cell.classList.add("disabled");
+      bindTap(cell, function () { memTap(i); });
+      $board.appendChild(cell);
+    });
+    if (memWinner) $status.textContent = "All matched! 🎉";
+    else $status.textContent = (
+      (role === "caller" && memTurn === "X") ||
+      (role === "callee" && memTurn === "O")) ? "Your turn" : "Waiting…";
+  }
+  function memTap(i) {
+    if (!memActive || memWinner || memRevealed[i] || memMatched[i]) return;
+    if (role === "caller") {
+      if (memTurn !== "X") return;
+      callerApplyMemFlip(i);
+    } else {
+      if (memTurn !== "O") return;
+      sendToNative({ type: "move", game: "mem", index: i });
+    }
+  }
+  function callerApplyMemFlip(i) {
+    memRevealed[i] = true;
+    if (memFirstIndex === null) {
+      memFirstIndex = i;
+    } else {
+      const a = memFirstIndex, b = i;
+      memFirstIndex = null;
+      if (memBoard[a] === memBoard[b]) {
+        memMatched[a] = memMatched[b] = true;
+        if (memMatched.every(Boolean)) { memWinner = true; memActive = false; }
+      } else {
+        // Wrong pair: brief reveal, then hide, then flip turn.
+        setTimeout(function () {
+          memRevealed[a] = false; memRevealed[b] = false;
+          memTurn = "O";
+          memRender();
+          broadcast("mem");
+        }, 900);
+      }
+    }
+    memRender();
+    broadcast("mem");
+  }
+
+  // ----- DISPATCH -----
+  function selectGame(g) {
     if (role !== "caller") {
-      // Ask the authority to reset.
-      sendToNative({ type: "reset-request" });
+      // Callee asks the authority to switch.
+      sendToNative({ type: "select-game", game: g });
       return;
     }
-    resetLocal();
-    broadcastState();
+    applyGameSelect(g);
+  }
+  function applyGameSelect(g) {
+    currentGame = g;
+    $menu.classList.add("hidden");
+    $game.classList.remove("hidden");
+    if (g === "ttt") tttReset();
+    else if (g === "c4") c4Reset();
+    else if (g === "mem") memReset();
+    renderCurrent();
+    broadcast(g);
+  }
+  function renderCurrent() {
+    if (currentGame === "ttt") tttRender();
+    else if (currentGame === "c4") c4Render();
+    else if (currentGame === "mem") memRender();
+  }
+  function broadcast(game) {
+    const payload = { type: "state", game: game };
+    if (game === "ttt") {
+      Object.assign(payload, { board: tttBoard, turn: tttTurn, winner: tttWinner });
+    } else if (game === "c4") {
+      Object.assign(payload, { board: c4Board, turn: c4Turn, winner: c4Winner });
+    } else if (game === "mem") {
+      Object.assign(payload, {
+        board: memBoard, revealed: memRevealed, matched: memMatched,
+        turn: memTurn, winner: memWinner
+      });
+    }
+    sendToNative(payload);
   }
 
-  function resetLocal() {
-    board = ["","","","","","","","",""];
-    turn = "X";
-    winner = null;
-    gameActive = true;
-    render();
-  }
+  // ----- NATIVE API -----
 
-  // ---------- native API ----------
-
-  // Called by Kotlin once the data channel is ready. role is 'caller'
-  // or 'callee'. The callee's mark is O; the caller's is X.
   window.setGameRole = function (r) {
     role = (r === "caller") ? "caller" : "callee";
-    myMark = (role === "caller") ? "X" : "O";
-    render();
+    renderCurrent();
   };
 
-  // Called by Kotlin for every inbound data-channel message. The argument
-  // is a JS string (Kotlin uses JSONObject.quote). Must parse it.
   window.receiveRemoteGameState = function (raw) {
     let msg;
-    try {
-      msg = (typeof raw === "string") ? JSON.parse(raw) : raw;
-    } catch (e) {
-      return;   // malformed; ignore
-    }
+    try { msg = (typeof raw === "string") ? JSON.parse(raw) : raw; }
+    catch (_) { return; }
     if (!msg || typeof msg.type !== "string") return;
 
+    // Callee asking to switch games.
+    if (msg.type === "select-game" && role === "caller") {
+      applyGameSelect(msg.game);
+      return;
+    }
+
+    // Callee sending a move. Caller validates and applies.
     if (msg.type === "move" && role === "caller") {
-      // Authority receives a move from the callee. Validate + apply.
-      if (gameActive && !winner &&
-          turn === "O" && !board[msg.index]) {
-        applyMove(msg.index, "O");
+      if (msg.game === "ttt" && currentGame === "ttt") {
+        if (tttActive && !tttWinner && tttTurn === "O" && !tttBoard[msg.index]) {
+          tttBoard[msg.index] = "O";
+          tttWinner = tttCheck(tttBoard);
+          tttTurn = "X";
+          tttActive = !tttWinner;
+        }
+        tttRender(); broadcast("ttt");
+      } else if (msg.game === "c4" && currentGame === "c4") {
+        const col = msg.col;
+        // NETWORK BOUNDARY VALIDATION. msg.col arrives from the data
+        // channel and cannot be trusted. Reject anything outside the
+        // playable range before touching the board array.
+        if (typeof col !== "number" ||
+            !Number.isInteger(col) ||
+            col < 0 || col >= C4_COLS) {
+          // Malformed move. Do not apply. Re-broadcast the current state
+          // so the peer resyncs to the authority's truth.
+          c4Render();
+          broadcast("c4");
+          return;
+        }
+        if (c4Active && !c4Winner && c4Turn === "O") {
+          if (c4Drop(c4Board, col, "O") >= 0) {
+            c4Winner = c4Check(c4Board);
+            c4Turn = "X";
+            c4Active = !c4Winner;
+          }
+        }
+        c4Render(); broadcast("c4");
+      } else if (msg.game === "mem" && currentGame === "mem") {
+        if (memActive && !memWinner && memTurn === "O" &&
+            !memRevealed[msg.index] && !memMatched[msg.index]) {
+          memRevealed[msg.index] = true;
+          if (memFirstIndex === null) {
+            memFirstIndex = msg.index;
+          } else {
+            const a = memFirstIndex, b = msg.index;
+            memFirstIndex = null;
+            if (memBoard[a] === memBoard[b]) {
+              memMatched[a] = memMatched[b] = true;
+              if (memMatched.every(Boolean)) { memWinner = true; memActive = false; }
+            } else {
+              setTimeout(function () {
+                memRevealed[a] = false; memRevealed[b] = false;
+                memTurn = "X"; memRender(); broadcast("mem");
+              }, 900);
+            }
+          }
+        }
+        memRender(); broadcast("mem");
       }
-      broadcastState();
       return;
     }
 
+    // Full state broadcast from the authority.
     if (msg.type === "state") {
-      // Non-authority (or the authority's own echo) applies the full state.
-      board = msg.board;
-      turn = msg.turn;
-      winner = msg.winner;
-      gameActive = !winner;
-      render();
-      return;
-    }
-
-    if (msg.type === "reset-request" && role === "caller") {
-      resetLocal();
-      broadcastState();
+      currentGame = msg.game;
+      $menu.classList.add("hidden");
+      $game.classList.remove("hidden");
+      if (msg.game === "ttt") {
+        tttBoard = msg.board; tttTurn = msg.turn; tttWinner = msg.winner;
+        tttActive = !tttWinner;
+      } else if (msg.game === "c4") {
+        c4Board = msg.board; c4Turn = msg.turn; c4Winner = msg.winner;
+        c4Active = !c4Winner;
+      } else if (msg.game === "mem") {
+        memBoard = msg.board; memRevealed = msg.revealed;
+        memMatched = msg.matched; memTurn = msg.turn; memWinner = msg.winner;
+        memActive = !memWinner;
+      }
+      renderCurrent();
       return;
     }
   };
 
-  render();
+  // Menu is visible by default. Authority selects first.
+  $menu.classList.remove("hidden");
+  $game.classList.add("hidden");
 })();
 </script>
 </body>

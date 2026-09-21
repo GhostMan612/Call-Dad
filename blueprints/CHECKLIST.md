@@ -53,6 +53,11 @@
 - [x] Debounce machine + restartIce + updateOffer + callee offer-watcher + auto-reconnect + banner + full game + PiP card + media-overlay
 - [ ] Human: Studio sync (no new deps) → build → §H matrix (game both ways, simultaneous-tap race, PiP visible, Wi-Fi toggle recovery, clean logcat)
 
+## Phase 10 — Flavors + games hub + hardening (architect prompt landed 2026-09-20, ADR-012)
+- [x] parent/child flavors (blue/pink, APP_THEME, dynamic off) + full game hub (c4 bounds guard) + camera toggle verified
+- [ ] BLOCKER FIRST: console — register com.calldad.parent + com.calldad.child, merged google-services.json (builds fail until then)
+- [ ] Human: assembleParentDebug + assembleChildDebug → side-by-side install → blue/pink check → feature colors → c4 bounds torture (99/-1/banana) → clean logcat
+
 ## Phase 9 — Ringtone + multi-TURN + games hub + voice bot (architect prompt landed 2026-09-20, ADR-011)
 - [x] TURN_URLS + audio-mode set/reset + single-ringer + voice helper (STT→bot→TTS) + game hub + host-tested bot
 - [ ] Human: Studio sync (no new deps) → TURN lines or empty → §K matrix (looping ringtone, vibration, jokes, airplane STT, multi-game sync, clean logcat)

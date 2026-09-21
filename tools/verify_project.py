@@ -72,7 +72,8 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "app/src/main/java/com/calldad/audio/CallAudioManager.kt",
                   "app/src/main/java/com/calldad/helper/KeywordBot.kt",
                   "app/src/main/java/com/calldad/ui/screens/HelperViewModel.kt",
-                  "app/src/main/java/com/calldad/ui/screens/HelperScreen.kt"]
+                  "app/src/main/java/com/calldad/ui/screens/HelperScreen.kt",
+                  "blueprints/decisions/ADR-012-phase10-flavors.md"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]
