@@ -67,7 +67,12 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "app/src/main/assets/game.html",
                   "app/src/main/java/com/calldad/ui/screens/GameScreen.kt",
                   "blueprints/decisions/ADR-010-phase8-game.md",
-                  "app/src/main/java/com/calldad/webrtc/ConnectionState.kt"]
+                  "app/src/main/java/com/calldad/webrtc/ConnectionState.kt",
+                  "blueprints/decisions/ADR-011-phase9-voice.md",
+                  "app/src/main/java/com/calldad/audio/CallAudioManager.kt",
+                  "app/src/main/java/com/calldad/helper/KeywordBot.kt",
+                  "app/src/main/java/com/calldad/ui/screens/HelperViewModel.kt",
+                  "app/src/main/java/com/calldad/ui/screens/HelperScreen.kt"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]

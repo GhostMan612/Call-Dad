@@ -26,14 +26,18 @@ android {
         // machine without credentials still builds (STUN-only, no callee).
         // NEVER commit real values — verify_project.py + .gitignore enforce.
         val localProps = gradleLocalProperties(rootDir, providers)
-        val turnUrl = localProps.getProperty("TURN_URL") ?: ""
+        // Phase 9: comma-separated TURN_URLS replaces singular TURN_URL.
+        val turnUrls = localProps.getProperty("TURN_URLS") ?: ""
         val turnUser = localProps.getProperty("TURN_USER") ?: ""
         val turnPass = localProps.getProperty("TURN_PASS") ?: ""
         val calleeUid = localProps.getProperty("CALLEE_UID") ?: ""
 
-        buildConfigField("String", "TURN_URL", "\"$turnUrl\"")
+        buildConfigField("String", "TURN_URLS", "\"$turnUrls\"")
         buildConfigField("String", "TURN_USER", "\"$turnUser\"")
         buildConfigField("String", "TURN_PASS", "\"$turnPass\"")
+        // Derived alias: first URL, for any code still reading TURN_URL.
+        buildConfigField("String", "TURN_URL",
+            "\"${turnUrls.split(",").firstOrNull()?.trim() ?: ""}\"")
         buildConfigField("String", "CALLEE_UID", "\"$calleeUid\"")
     }
 

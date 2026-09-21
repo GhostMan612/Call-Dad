@@ -40,9 +40,6 @@ import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import android.media.RingtoneManager
-import android.os.VibrationEffect
-import android.os.Vibrator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -291,23 +288,9 @@ private fun IncomingContent(
     onDecline: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Ring + buzz while the overlay is up. Scoped here so leaving (answer,
-    // decline, hangup) always silences. System default tone; no asset.
-    val context = LocalContext.current
-    DisposableEffect(Unit) {
-        val ringtone = RingtoneManager.getRingtone(
-            context,
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        )
-        ringtone?.play()
-        val vibrator = context.getSystemService(Vibrator::class.java)
-        vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), 0))
-        onDispose {
-            ringtone?.stop()
-            vibrator?.cancel()
-        }
-    }
-
+    // Visual only. Ringtone + vibration are owned SOLELY by CallAudioManager
+    // (driven from CallViewModel); the overlay-local player was removed to
+    // end double-ringing. See ADR-011.
     Column(
         modifier = modifier
             .fillMaxSize()

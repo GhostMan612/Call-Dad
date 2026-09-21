@@ -5,10 +5,12 @@
 # - CALLEE_UID: the OTHER phone's anonymous-auth uid (Firebase console → Authentication → Users).
 #   Each phone needs the other's uid, so build/install twice with swapped values.
 #   Empty = caller path shows "ask a parent to set up calling".
-# - TURN_URL/USER/PASS: TURN server for mobile-data calls (Phase 5/K8).
+# - TURN_URLS: comma-separated TURN servers for mobile-data calls (Phase 9/K8).
+#   Example: TURN_URLS=turn:turn1.example.com:3478,turn:turn2.example.com:3478
 #   Empty = STUN-only (Wi-Fi/LAN works, symmetric NAT fails).
+#   (Legacy singular TURN_URL is derived from the first entry automatically.)
 # CALLEE_UID=
-# TURN_URL=
+# TURN_URLS=
 # TURN_USER=
 # TURN_PASS=
 #

@@ -7,6 +7,7 @@
 package com.calldad.webrtc
 
 import android.content.Context
+import android.media.AudioManager
 import com.calldad.data.signaling.IceCandidate as DomainIceCandidate
 import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SessionDescription as DomainSessionDescription
@@ -171,6 +172,14 @@ class WebRTCClient(
         val rtcConfig = buildRtcConfig()
         peerConnection = f.createPeerConnection(rtcConfig, observer)
             ?: error("createPeerConnection returned null")
+        // WebRTC requires MODE_IN_COMMUNICATION for proper AEC and
+        // routing. Set here, reset in dispose(): without the reset Android
+        // treats future ringtones as "already in a call" (single TING, no
+        // vibration — device-proven class of bug). Deprecated constant is
+        // still the only reliable path across API 26–35.
+        @Suppress("DEPRECATION")
+        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+            .mode = AudioManager.MODE_IN_COMMUNICATION
         createGameDataChannel()
         attachLocalTracks()
         WebRtcLog.transition("PeerConnection created")
@@ -439,6 +448,12 @@ class WebRTCClient(
         disconnectionDebounceJob?.cancel()
         disconnectionDebounceJob = null
         scope.cancel()
+        // Audio-mode reset FIRST among native teardowns: must precede
+        // peerConnection.close() so no callback observes a half-torn-down
+        // stack in call mode. See the MODE_IN_COMMUNICATION note above.
+        @Suppress("DEPRECATION")
+        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+            .mode = AudioManager.MODE_NORMAL
         peerConnection?.close(); peerConnection = null
         factory?.dispose(); factory = null
         eglBase.release()

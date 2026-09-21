@@ -27,7 +27,8 @@ object WebRtcConfig {
      * ICE servers. STUN-only unless TURN was provisioned locally.
      *
      * TURN credentials arrive via local.properties → BuildConfig (never
-     * committed). Only included when all three are non-blank.
+     * committed). org.webrtc IceServer.Builder takes ONE URL per call, so
+     * each TURN_URLS entry becomes its own IceServer sharing the creds.
      * DO NOT log these values anywhere, ever (guardrail §G).
      */
     val iceServers: List<IceServerConfig>
@@ -35,17 +36,19 @@ object WebRtcConfig {
             add(IceServerConfig(url = "stun:stun.l.google.com:19302"))
             add(IceServerConfig(url = "stun:stun1.l.google.com:19302"))
 
-            val turnUrl = BuildConfig.TURN_URL
-            val turnUser = BuildConfig.TURN_USER
-            val turnPass = BuildConfig.TURN_PASS
+            val urls = BuildConfig.TURN_URLS
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            val user = BuildConfig.TURN_USER
+            val pass = BuildConfig.TURN_PASS
 
-            // Only include TURN if all three were provisioned locally.
-            if (turnUrl.isNotBlank() && turnUser.isNotBlank() && turnPass.isNotBlank()) {
-                add(IceServerConfig(
-                    url = turnUrl,
-                    username = turnUser,
-                    credential = turnPass
-                ))
+            if (user.isNotBlank() && pass.isNotBlank()) {
+                // org.webrtc IceServer.Builder takes ONE URL per call.
+                // Multiple TURN URLs require multiple IceServer objects.
+                urls.forEach { url ->
+                    add(IceServerConfig(url = url, username = user, credential = pass))
+                }
             }
         }
 }

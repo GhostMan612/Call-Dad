@@ -48,4 +48,5 @@ AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / 
 - G6 (Phase 6 code): LANDED 2026-09-19, UNPROVEN — ptt/ + interlock + 4 host tests; needs Studio sync (code-only) + §K press/release/interlock/boundary matrix.
 - G7 (Phase 7 code): LANDED 2026-09-20, UNPROVEN — game_sync channel + bridge + hardened WebView + game.html; needs Studio sync (webkit) + TWO-device TAP sync + escaping test (no host coverage possible).
 - G8 (Phase 8 code): LANDED 2026-09-20, UNPROVEN — debounce + restartIce + renegotiation + banner + full game + PiP; needs Studio sync (no new deps) + §H matrix.
+- G9 (Phase 9 code): LANDED 2026-09-20, UNPROVEN — TURN_URLS + audio-mode + single ringer + voice helper + game hub + 6 bot tests; needs Studio sync (no new deps) + §K matrix.
 - G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle).

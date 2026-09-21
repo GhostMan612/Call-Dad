@@ -11,6 +11,7 @@ import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.calldad.BuildConfig
+import com.calldad.audio.CallAudioManager
 import com.calldad.data.signaling.CallDocument
 import com.calldad.data.signaling.CallStatus
 import com.calldad.data.signaling.IceCandidate
@@ -41,6 +42,10 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     // Hilt lands in a later phase; manual construction for now.
     private val signaling: SignalingClient = SignalingClient()
+
+    /** Incoming-call ringer. Single owner (overlay-local ring was removed). */
+    private val callAudio: CallAudioManager =
+        CallAudioManager(application.applicationContext)
 
     private val webrtc: WebRTCClient = WebRTCClient(
         context = application.applicationContext,
@@ -107,6 +112,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * error card, never a crash.
      */
     fun startCall() {
+        callAudio.stop()
         val current = _state.value
         if (current is CallState.Connecting || current is CallState.InCall) return
         val callee = BuildConfig.CALLEE_UID
@@ -150,6 +156,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * FCM full-screen intent (killed-app).
      */
     fun answerCall(callId: String) {
+        callAudio.stop()
         val current = _state.value
         if (current is CallState.Connecting || current is CallState.InCall) return
         _state.value = CallState.Connecting
@@ -193,6 +200,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Callee decline: status flip so the caller sees it, then reset + home. */
     suspend fun declineAndAwait(callId: String?) {
+        callAudio.stop()
         if (!callId.isNullOrBlank()) {
             withTimeoutOrNull(3_000) { signaling.declineCall(callId) }
         }
@@ -203,6 +211,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Local hangup: reset now; room ENDED best-effort in the background. */
     fun endCall() {
+        callAudio.stop()
         val id = currentCallId
         cancelSessionJobs()
         resetCallState()
@@ -220,6 +229,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * navigation proceeds.
      */
     suspend fun endCallAndAwait() {
+        callAudio.stop()
         val id = currentCallId
         cancelSessionJobs()
         resetCallState()
@@ -257,6 +267,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Dismisses an [CallState.Error] back to Idle so the child can retry. */
     fun clearError() {
+        callAudio.stop()
         if (_state.value is CallState.Error) _state.value = CallState.Idle
     }
 
@@ -268,6 +279,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     fun simulateIncomingCall() {
         if (_state.value !is CallState.Idle) return
         _state.value = CallState.Incoming(fromDisplayName = "Dad")
+        callAudio.start()
     }
 
     /**
@@ -298,6 +310,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        callAudio.stop()
         sessionJob?.cancel()
         timerJob?.cancel()
         webrtc.dispose()

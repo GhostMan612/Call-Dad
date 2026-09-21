@@ -2,87 +2,261 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/HelperViewModel.kt
+// ui/screens/HelperViewModel.kt — Phase 9: voice helper (STT → bot → TTS)
 // Location: app/src/main/java/com/calldad/ui/screens/HelperViewModel.kt
 package com.calldad.ui.screens
 
+import android.app.Application
+import android.content.Intent
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.delay
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.calldad.helper.KeywordBot
+import com.calldad.webrtc.WebRtcLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
+import java.util.Locale
+import java.util.UUID
 
-data class ChatMessage(
-    val id: Long,
-    val text: String,
-    val fromChild: Boolean
+enum class HelperStatus { IDLE, LISTENING, THINKING, SPEAKING, ERROR }
+
+data class HelperUiState(
+    val status: HelperStatus = HelperStatus.IDLE,
+    val lastHeard: String? = null,
+    val lastSpoken: String? = null,
+    val error: String? = null
 )
 
-class HelperViewModel : ViewModel() {
+class HelperViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _messages = MutableStateFlow(
-        listOf(
-            ChatMessage(
-                id = 0L,
-                text = "Hi! I'm Helper. Tap a button and I'll answer!",
-                fromChild = false
-            )
-        )
-    )
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+    private val appContext = application.applicationContext
 
-    private val _quickAsks = MutableStateFlow(
-        listOf(
-            "How do I play?",
-            "Tell me a joke",
-            "What is a fun fact?",
-            "Tell me a story"
-        )
-    )
-    val quickAsks: StateFlow<List<String>> = _quickAsks.asStateFlow()
+    private val _state = MutableStateFlow(HelperUiState())
+    val state: StateFlow<HelperUiState> = _state.asStateFlow()
 
-    private val _draft = MutableStateFlow("")
-    val draft: StateFlow<String> = _draft.asStateFlow()
+    // ---- TTS ----
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
 
-    private val _isThinking = MutableStateFlow(false)
-    val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
-
-    private var nextId = 1L
-
-    fun onDraftChange(value: String) {
-        _draft.value = value
-    }
-
-    fun onAsk(question: String) {
-        val trimmed = question.trim()
-        if (trimmed.isEmpty() || _isThinking.value) return
-
-        val childMessageId = nextId++
-        _draft.value = ""
-        _messages.update { it + ChatMessage(childMessageId, trimmed, fromChild = true) }
-        _isThinking.value = true
-
-        // PHASE 2: replace `cannedReply` with the real LLM call.
-        viewModelScope.launch {
-            delay(800)
-            val replyId = nextId++
-            _messages.update { it + ChatMessage(replyId, cannedReply(trimmed), fromChild = false) }
-            _isThinking.value = false
+    init {
+        tts = TextToSpeech(appContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.US
+                tts?.setOnUtteranceProgressListener(utteranceListener)
+                ttsReady = true
+                WebRtcLog.transition("TTS ready")
+            } else {
+                WebRtcLog.transition("TTS init failed")
+            }
         }
     }
 
-    private fun cannedReply(question: String): String = when {
-        question.contains("joke", ignoreCase = true) ->
-            "Why did the teddy bear say no to dessert? Because she was stuffed!"
-        question.contains("play", ignoreCase = true) ->
-            "Tap the blue Play Games card on the home screen. Tap Home to come back!"
-        question.contains("fact", ignoreCase = true) ->
-            "Octopuses have three hearts. That's three times as many as you!"
-        question.contains("story", ignoreCase = true) ->
-            "Once upon a time, a tiny robot learned to say hello…"
-        else -> "That's a great question! Let's find out together."
+    // ---- STT ----
+    private var recognizer: SpeechRecognizer? = null
+
+    /**
+     * Builds the recognizer, preferring the on-device engine when available.
+     * On API 31+ with a device that supports it, this runs fully offline.
+     * Otherwise it falls back to the network recognizer with
+     * EXTRA_PREFER_OFFLINE set — which is best-effort, not guaranteed.
+     */
+    private fun ensureRecognizer(): SpeechRecognizer? {
+        recognizer?.let { return it }
+        val ctx = appContext
+        val r = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+            && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) {
+            WebRtcLog.transition("STT: using on-device recognizer")
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
+        } else {
+            WebRtcLog.transition("STT: using default recognizer")
+            SpeechRecognizer.createSpeechRecognizer(ctx)
+        }
+        r.setRecognitionListener(recognitionListener)
+        recognizer = r
+        return r
     }
+
+    // ---- public API ----
+
+    /** Called when the child taps the giant mic button. */
+    fun onTapToSpeak() {
+        val current = _state.value.status
+        if (current == HelperStatus.LISTENING ||
+            current == HelperStatus.SPEAKING) return
+
+        val r = ensureRecognizer() ?: run {
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "Voice isn't available on this device."
+            ) }
+            return
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            // Best-effort hint. Ignored by many OEMs on API 33+. The
+            // on-device recognizer path above is the real guarantee.
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            }
+        }
+        _state.update { it.copy(
+            status = HelperStatus.LISTENING,
+            error = null,
+            lastHeard = null
+        ) }
+        try {
+            r.startListening(intent)
+        } catch (t: Throwable) {
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "Couldn't start listening."
+            ) }
+        }
+    }
+
+    fun clearError() {
+        _state.update { it.copy(status = HelperStatus.IDLE, error = null) }
+    }
+
+    override fun onCleared() {
+        try { recognizer?.stopListening() } catch (_: Throwable) {}
+        try { recognizer?.cancel() } catch (_: Throwable) {}
+        // MUST be called on the main thread. onCleared() runs on the main
+        // thread by contract, so this is safe.
+        try { recognizer?.destroy() } catch (_: Throwable) {}
+        recognizer = null
+
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (_: Throwable) {}
+        tts = null
+        super.onCleared()
+    }
+
+    // ---- listeners ----
+
+    private val recognitionListener = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {
+            WebRtcLog.transition("STT: ready")
+        }
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {
+            _state.update { it.copy(status = HelperStatus.THINKING) }
+        }
+
+        override fun onError(error: Int) {
+            WebRtcLog.transition("STT error code: $error")
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "I didn't hear you. Tap and try again."
+            ) }
+        }
+
+        override fun onResults(results: Bundle?) {
+            val text = results
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+                ?.trim()
+            if (text.isNullOrEmpty()) {
+                _state.update { it.copy(
+                    status = HelperStatus.ERROR,
+                    error = "I didn't hear you. Tap and try again."
+                ) }
+                return
+            }
+            val response = KeywordBot.getResponse(text)
+            _state.update { it.copy(
+                status = HelperStatus.SPEAKING,
+                lastHeard = text,
+                lastSpoken = response
+            ) }
+            speak(response)
+        }
+
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    }
+
+    private val utteranceListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {}
+        override fun onDone(utteranceId: String?) {
+            _state.update { it.copy(status = HelperStatus.IDLE) }
+        }
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) {
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "My voice got stuck. Tap and try again."
+            ) }
+        }
+    }
+
+    private fun speak(text: String) {
+        val engine = tts
+        if (!ttsReady || engine == null) {
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "My voice isn't ready yet."
+            ) }
+            return
+        }
+        val id = UUID.randomUUID().toString()
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+        }
+        val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
+        if (result != TextToSpeech.SUCCESS) {
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "My voice got stuck."
+            ) }
+        }
+    }
+}
+
+/** Manual factory: AndroidViewModel has no zero-arg constructor. */
+class HelperViewModelFactory(
+    private val application: Application
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return HelperViewModel(application) as T
+    }
+}
+
+/**
+ * Shared ACTIVITY-scoped accessor (same doctrine as rememberPttViewModel):
+ * the default viewModel() factory cannot build an AndroidViewModel, and
+ * per-destination instances would split state. Single definition, all
+ * callers share it. See ADR-008.
+ */
+@Composable
+fun rememberHelperViewModel(): HelperViewModel {
+    // LocalContext cast, NOT LocalActivity (unresolved in activity-compose
+    // 1.9.3 — device-proven in Phase 6). Same shared activity scope.
+    val activity = LocalContext.current as ComponentActivity
+    return viewModel(
+        viewModelStoreOwner = activity,
+        factory = HelperViewModelFactory(activity.application)
+    )
 }
