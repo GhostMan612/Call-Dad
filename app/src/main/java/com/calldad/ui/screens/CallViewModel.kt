@@ -19,6 +19,7 @@ import com.calldad.data.signaling.SessionDescription
 import com.calldad.data.signaling.SignalingClient
 import com.calldad.data.signaling.SignalingErrorKind
 import com.calldad.data.signaling.SignalingFailure
+import com.calldad.webrtc.ConnectionHealth
 import com.calldad.webrtc.WebRTCClient
 import com.calldad.webrtc.WebRtcLog
 import kotlinx.coroutines.CancellationException
@@ -86,6 +87,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** True once the peer connection reaches CONNECTED. Drives the watchdog. */
     private val _peerConnected = MutableStateFlow(false)
+
+    /** Connection health for the UI banner + auto-reconnect trigger. */
+    val connectionHealth: StateFlow<ConnectionHealth> = webrtc.connectionHealth
+
+    /** Last remote OFFER applied (initial or renegotiation). Loop guard. */
+    private var appliedRemoteOffer: String? = null
 
     private var currentCallId: String? = null
     private val pendingLocalCandidates = mutableListOf<IceCandidate>()
@@ -157,6 +164,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
                 val doc = signaling.fetchCall(callId).getOrThrow()
                 validateRinging(doc)
+                appliedRemoteOffer = doc.offer
                 webrtc.setRemoteDescription(SessionDescription(SdpType.OFFER, doc.offer!!))
                 WebRtcLog.transition("Remote OFFER applied")
 
@@ -173,6 +181,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 startTimer()
                 watchConnection()
+                listenCall(callId)
                 listenCandidates(callId)
                 listenHangup(callId)
             } catch (t: Throwable) {
@@ -225,6 +234,26 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Exposes the WebRTCClient for the game bridge. Null before init. */
     fun webrtcClientOrNull(): WebRTCClient? = webrtc
+
+    /**
+     * Called from the UI when ConnectionHealth.LOST is observed.
+     * Caller-only: the callee never initiates ICE restarts (it answers
+     * them via the offer-watcher above). Role derives from state — no
+     * extra field to clear (executor simplification of the prompt).
+     */
+    fun onReconnectRequested() {
+        val s = _state.value
+        if (s !is CallState.InCall || s.role != CallRole.CALLER) return
+        val id = currentCallId ?: return
+        viewModelScope.launch {
+            val newOffer = webrtc.restartIce() ?: run {
+                WebRtcLog.transition("ICE restart produced no offer")
+                return@launch
+            }
+            signaling.updateOffer(id, newOffer.sdp).onFailure(::reportError)
+            WebRtcLog.transition("ICE restart offer published")
+        }
+    }
 
     /** Dismisses an [CallState.Error] back to Idle so the child can retry. */
     fun clearError() {
@@ -285,8 +314,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 .collect { doc ->
                     when (doc.status) {
                         CallStatus.CONNECTED -> {
+                            val s = _state.value
                             val ans = doc.answer
-                            if (!ans.isNullOrBlank() && _state.value is CallState.Connecting) {
+                            if (!ans.isNullOrBlank() && s is CallState.Connecting) {
                                 webrtc.setRemoteDescription(
                                     SessionDescription(SdpType.ANSWER, ans)
                                 )
@@ -297,6 +327,20 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                                 startTimer()
                                 watchConnection()
+                            } else if (s is CallState.InCall && s.role == CallRole.CALLEE) {
+                                // Renegotiation (caller ICE restart): new OFFER
+                                // mid-call. Answer it like the first one.
+                                val offer = doc.offer
+                                if (!offer.isNullOrBlank() && offer != appliedRemoteOffer) {
+                                    appliedRemoteOffer = offer
+                                    webrtc.setRemoteDescription(
+                                        SessionDescription(SdpType.OFFER, offer)
+                                    )
+                                    WebRtcLog.transition("Remote re-OFFER applied")
+                                    val reAnswer = webrtc.createAnswer()
+                                    signaling.publishAnswer(callId, reAnswer.sdp)
+                                    WebRtcLog.transition("Renegotiation ANSWER published")
+                                }
                             }
                         }
                         CallStatus.DECLINED, CallStatus.ENDED -> {
@@ -407,6 +451,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         _eglContext.value = null
         _localVideoTrack.value = null
         _peerConnected.value = false
+        appliedRemoteOffer = null
         synchronized(pendingLocalCandidates) { pendingLocalCandidates.clear() }
         _state.value = CallState.Idle
     }

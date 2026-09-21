@@ -38,6 +38,11 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Fix:** offers carry `createdAt`; listener + fetch ignore anything >60s old or unstamped. Abandoned rings now die on their own instead of haunting the phones. Per-call rooms still the real answer (Phase 5).
 - **Retest choreography (strict one-caller-at-a-time):** hang up BOTH phones first (clears room) → BLU calls and waits → Moto answers within a minute. Simultaneous calling still clobbers — don't.
 
+## Where we are (2026-09-20, Phase 8 landed — executor lane, UNCOMMITTED)
+
+- **Architect prompt executed with 6 recorded deviations (ADR-010):** debounce machine + `restartIce` (IceRestart constraint), `updateOffer` + callee offer-watcher (prompt's Phase 2 API is gone), role derived from state, auto-reconnect trigger + banner (prompt expects the logs, never wires the cause), callee `listenCall` (was blind post-answer), game.html + PiP card + media-overlay fix.
+- **Needs operator:** Studio sync (no new deps) → build → §H matrix: two-device game both directions, simultaneous-tap race, PiP-over-WebView, Wi-Fi toggle recovery, logcat guardrail audit.
+
 ## Where we are (2026-09-20, Phase 7 landed — executor lane, UNCOMMITTED)
 
 - **Architect prompt executed with 5 recorded deviations (ADR-009):** no-override fix (wouldn't compile), shared activity-scoped CallViewModel for the bridge, WebViewAssetLoader hardening + nav-lock, 1KB cap + buffer-copy, game.html TAP shell, `webrtcClientOrNull()` accessor. No new host tests possible (native + JS engines) — device matrix per prompt §G is the gate.

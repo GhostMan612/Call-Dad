@@ -1,34 +1,276 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-  <title>Game</title>
-  <style>
-    html,body{margin:0;height:100%;background:#1565C0;color:#fff;
-      font-family:sans-serif;overflow:hidden;touch-action:manipulation}
-    #btn{position:absolute;inset:10% 20%;border:0;border-radius:40px;
-      background:#fff;color:#1565C0;font-size:8vmin;font-weight:900}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Call Dad — Tic Tac Toe</title>
+<style>
+  :root {
+    --blue:  #1565C0;
+    --green: #2E7D32;
+    --red:   #C62828;
+    --amber: #E65100;
+  }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--blue); color: #fff;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+  }
+  #wrap {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100%; padding: 16px; box-sizing: border-box;
+  }
+  #status {
+    font-size: 6vmin; font-weight: 900;
+    margin-bottom: 3vmin; text-align: center;
+    min-height: 8vmin;
+  }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 2vmin;
+    width: min(80vw, 80vh);
+    height: min(80vw, 80vh);
+  }
+  .cell {
+    background: rgba(255,255,255,0.15);
+    border-radius: 3vmin;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14vmin; font-weight: 900;
+    color: #fff;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .cell:active { background: rgba(255,255,255,0.3); }
+  .cell[data-v="X"] { color: #FFEB3B; }
+  .cell[data-v="O"] { color: #80DEEA; }
+  .cell.disabled { pointer-events: none; }
+  #reset {
+    margin-top: 3vmin; padding: 2vmin 5vmin;
+    font-size: 5vmin; font-weight: 900;
+    border: 0; border-radius: 3vmin;
+    background: #fff; color: var(--blue);
+    cursor: pointer;
+  }
+  #reset.hidden { display: none; }
+</style>
 </head>
 <body>
-  <button id="btn" ontouchstart="send()">TAP</button>
-  <script>
-    let taps = 0;
-    function send() {
-      taps++;
-      const state = { taps, ts: Date.now() };
-      if (window.AndroidRTC) {
-        window.AndroidRTC.sendGameStateToDad(JSON.stringify(state));
-      }
+<div id="wrap">
+  <div id="status">Connecting…</div>
+  <div id="board"></div>
+  <button id="reset" class="hidden">Play Again</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // -------------------------------------------------------------------
+  // AUTHORITY MODEL — CALLER-AUTHORITATIVE
+  //
+  // The caller ("Dad") is the authority. The callee ("Child") sends
+  // { type: "move", index: N } only. The caller validates, mutates the
+  // board, and broadcasts { type: "state", board, turn, winner } to
+  // both ends. This eliminates the simultaneous-tap divergence race.
+  //
+  // Role is assigned by the native layer via window.setGameRole(role)
+  // before the first move. Default is 'callee' until told otherwise.
+  // -------------------------------------------------------------------
+
+  let role = "callee";           // 'caller' | 'callee'
+  let myMark = "O";              // caller is X, callee is O
+  let board = ["","","","","","","","",""];
+  let turn = "X";                // 'X' always goes first
+  let winner = null;             // null | 'X' | 'O' | 'draw'
+  let gameActive = true;
+
+  const WIN_LINES = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6]
+  ];
+
+  const $board = document.getElementById("board");
+  const $status = document.getElementById("status");
+  const $reset = document.getElementById("reset");
+
+  // ---------- DOM setup ----------
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.dataset.index = String(i);
+    $board.appendChild(cell);
+  }
+
+  // ---------- touch handling ----------
+  // Explicit { passive: false } — some Android WebView builds
+  // (Xiaomi/HyperOS) default to passive listeners and the game freezes.
+  function bindTap(el, handler) {
+    el.addEventListener("touchstart", function (ev) {
+      ev.preventDefault();
+      handler(ev);
+    }, { passive: false });
+    el.addEventListener("click", handler);
+  }
+
+  $board.querySelectorAll(".cell").forEach(function (cell) {
+    bindTap(cell, function () { onCellTap(parseInt(cell.dataset.index, 10)); });
+  });
+  bindTap($reset, onResetTap);
+
+  // ---------- game logic ----------
+  function checkWinner(b) {
+    for (let i = 0; i < WIN_LINES.length; i++) {
+      const [a, c, d] = WIN_LINES[i];
+      if (b[a] && b[a] === b[c] && b[a] === b[d]) return b[a];
     }
-    // Called from Kotlin with a pre-quoted JSON literal.
-    window.receiveRemoteGameState = function(json) {
+    return b.every(function (v) { return v; }) ? "draw" : null;
+  }
+
+  function render() {
+    const cells = $board.querySelectorAll(".cell");
+    cells.forEach(function (cell, i) {
+      const v = board[i];
+      cell.textContent = v;
+      cell.dataset.v = v;
+      const isMyTurn = gameActive && turn === myMark;
+      if (v || winner || !isMyTurn) {
+        cell.classList.add("disabled");
+      } else {
+        cell.classList.remove("disabled");
+      }
+    });
+
+    if (winner === "draw") {
+      $status.textContent = "It's a tie!";
+      $reset.classList.remove("hidden");
+    } else if (winner) {
+      $status.textContent = (winner === myMark ? "You win! 🎉" : "Dad wins!");
+      $reset.classList.remove("hidden");
+    } else {
+      $status.textContent = (turn === myMark) ? "Your turn" : "Waiting…";
+      $reset.classList.add("hidden");
+    }
+  }
+
+  function onCellTap(index) {
+    if (!gameActive || winner) return;
+    if (turn !== myMark) return;
+    if (board[index]) return;
+
+    if (role === "caller") {
+      // I'm the authority. Mutate locally, broadcast.
+      applyMove(index, myMark);
+      broadcastState();
+    } else {
+      // I'm the callee. Send the move and wait for the authority to
+      // echo the new state back. Do NOT mutate locally.
+      sendToNative({ type: "move", index: index });
+      $status.textContent = "Waiting…";
+    }
+  }
+
+  function applyMove(index, mark) {
+    if (board[index]) return false;
+    board[index] = mark;
+    winner = checkWinner(board);
+    turn = (mark === "X") ? "O" : "X";
+    if (winner) gameActive = false;
+    return true;
+  }
+
+  function broadcastState() {
+    sendToNative({
+      type: "state",
+      board: board,
+      turn: turn,
+      winner: winner
+    });
+  }
+
+  function sendToNative(obj) {
+    if (window.AndroidRTC && window.AndroidRTC.sendGameStateToDad) {
       try {
-        const s = typeof json === 'string' ? JSON.parse(json) : json;
-        document.title = 'Remote taps: ' + s.taps;
-      } catch (e) { /* ignore malformed */ }
-    };
-  </script>
+        window.AndroidRTC.sendGameStateToDad(JSON.stringify(obj));
+      } catch (e) { /* silent */ }
+    }
+  }
+
+  function onResetTap() {
+    if (role !== "caller") {
+      // Ask the authority to reset.
+      sendToNative({ type: "reset-request" });
+      return;
+    }
+    resetLocal();
+    broadcastState();
+  }
+
+  function resetLocal() {
+    board = ["","","","","","","","",""];
+    turn = "X";
+    winner = null;
+    gameActive = true;
+    render();
+  }
+
+  // ---------- native API ----------
+
+  // Called by Kotlin once the data channel is ready. role is 'caller'
+  // or 'callee'. The callee's mark is O; the caller's is X.
+  window.setGameRole = function (r) {
+    role = (r === "caller") ? "caller" : "callee";
+    myMark = (role === "caller") ? "X" : "O";
+    render();
+  };
+
+  // Called by Kotlin for every inbound data-channel message. The argument
+  // is a JS string (Kotlin uses JSONObject.quote). Must parse it.
+  window.receiveRemoteGameState = function (raw) {
+    let msg;
+    try {
+      msg = (typeof raw === "string") ? JSON.parse(raw) : raw;
+    } catch (e) {
+      return;   // malformed; ignore
+    }
+    if (!msg || typeof msg.type !== "string") return;
+
+    if (msg.type === "move" && role === "caller") {
+      // Authority receives a move from the callee. Validate + apply.
+      if (gameActive && !winner &&
+          turn === "O" && !board[msg.index]) {
+        applyMove(msg.index, "O");
+      }
+      broadcastState();
+      return;
+    }
+
+    if (msg.type === "state") {
+      // Non-authority (or the authority's own echo) applies the full state.
+      board = msg.board;
+      turn = msg.turn;
+      winner = msg.winner;
+      gameActive = !winner;
+      render();
+      return;
+    }
+
+    if (msg.type === "reset-request" && role === "caller") {
+      resetLocal();
+      broadcastState();
+      return;
+    }
+  };
+
+  render();
+})();
+</script>
 </body>
 </html>

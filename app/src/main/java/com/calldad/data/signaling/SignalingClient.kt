@@ -126,6 +126,23 @@ class SignalingClient(
         WebRtcLog.transition("ANSWER published, status CONNECTED")
     }
 
+    /**
+     * Renegotiation (ICE restart): replace the offer in place, keeping
+     * status CONNECTED. The callee's offer-watcher answers it like a fresh
+     * OFFER. Executor addition — the Phase 2 publishOffer this replaces
+     * no longer exists (per-call rooms, Phase 5).
+     */
+    suspend fun updateOffer(
+        callId: String,
+        offerSdp: String
+    ): Result<Unit> = runCatchingFirestore {
+        require(offerSdp.isNotBlank()) { "Offer SDP must not be blank" }
+        callsCollection.document(callId).update(
+            mapOf(FIELD_OFFER to offerSdp)
+        ).await()
+        WebRtcLog.transition("Renegotiation offer published")
+    }
+
     /** Fetch a call document once. */
     suspend fun fetchCall(callId: String): Result<CallDocument> =
         runCatchingFirestore {

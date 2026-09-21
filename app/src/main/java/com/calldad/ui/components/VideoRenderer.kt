@@ -54,6 +54,10 @@ fun VideoRenderer(
         factory = { ctx ->
             SurfaceViewRenderer(ctx).apply {
                 init(eglContext, null)
+                // MediaOverlay (NOT OnTop): video floats above the WebView's
+                // surface but below window chrome. OnTop would hide WebView
+                // content behind black. Executor-verified per spec §F.
+                setZOrderMediaOverlay(true)
                 setEnableHardwareScaler(true)
                 setMirror(mirror)
                 setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)

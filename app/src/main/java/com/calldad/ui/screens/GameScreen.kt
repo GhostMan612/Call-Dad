@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/GameScreen.kt — Phase 7: hardened WebView + data-channel sync
+// ui/screens/GameScreen.kt — Phase 8: game + PiP video card
 // Location: app/src/main/java/com/calldad/ui/screens/GameScreen.kt
 package com.calldad.ui.screens
 
@@ -14,44 +14,42 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.webkit.WebViewAssetLoader
 import com.calldad.game.GameWebRtcBridge
 import com.calldad.ui.components.GiantButton
+import com.calldad.ui.components.VideoRenderer
 import com.calldad.ui.theme.GameBlue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-/**
- * Mini-game host with WebRTC data-channel sync.
- *
- * WEBVIEW HARDENING (all four are load-bearing):
- *   - WebViewAssetLoader serves assets over https://appassets.androidplatform.net
- *     instead of file://. This eliminates the file-scheme cross-origin class
- *     of vulnerabilities flagged by the setAllowFileAccessFromFileURLs
- *     deprecation.
- *   - allowFileAccess = false
- *   - allowContentAccess = false
- *   - mixedContentMode = MIXED_CONTENT_NEVER_ALLOW
- */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun GameScreen(
@@ -62,10 +60,12 @@ fun GameScreen(
     BackHandler(onBack = onBackHome)
 
     val webrtc = viewModel.webrtcClientOrNull()
+    val eglContext by viewModel.eglContext.collectAsStateWithLifecycle()
+    val localTrack by viewModel.localVideoTrack.collectAsStateWithLifecycle()
+    val remoteTrack by viewModel.remoteVideoTrack.collectAsStateWithLifecycle()
+    val callState by viewModel.state.collectAsStateWithLifecycle()
     val currentOnBackHome by rememberUpdatedState(onBackHome)
 
-    // Asset loader is created once per composition. The domain MUST match
-    // the loadUrl host below.
     val context = LocalContext.current
     val assetLoader = remember {
         WebViewAssetLoader.Builder()
@@ -78,26 +78,41 @@ fun GameScreen(
 
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
 
-    // Inbound: WebRTC → JS. Copy is safe; JSONObject.quote is the canonical
-    // JS string literal encoder — do NOT use manual quote escaping.
-    DisposableEffect(webrtc) {
+    // Push role to the JS layer once the WebView and call state are ready.
+    // The caller is authoritative in the Tic-Tac-Toe protocol.
+    LaunchedEffect(webViewRef.value, callState) {
+        val wv = webViewRef.value ?: return@LaunchedEffect
+        val role = when (val s = callState) {
+            is CallState.InCall -> if (s.role == CallRole.CALLER) "caller" else "callee"
+            else -> return@LaunchedEffect
+        }
+        wv.evaluateJavascript("window.setGameRole && window.setGameRole('$role')", null)
+    }
+
+    // Inbound: WebRTC → JS.
+    DisposableEffect(webrtc, webViewRef.value) {
         val wv = webViewRef.value
         val client = webrtc
         if (wv == null || client == null) return@DisposableEffect onDispose { }
 
-        val handle = CoroutineScope(Dispatchers.Main).launch {
+        val scope = CoroutineScope(Dispatchers.Main)
+        val job = scope.launch {
             client.gameSyncMessages.collect { json ->
+                // JSONObject.quote produces a correctly escaped JS string
+                // literal. Do NOT hand-roll quote escaping.
                 val quoted = JSONObject.quote(json)
                 wv.evaluateJavascript(
-                    "window.receiveRemoteGameState($quoted)",
+                    "window.receiveRemoteGameState && window.receiveRemoteGameState($quoted)",
                     null
                 )
             }
         }
-        onDispose { handle.cancel() }
+        onDispose { job.cancel() }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize().background(GameBlue)) {
+
+        // ------ Layer 1: the game WebView ------
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -114,7 +129,8 @@ fun GameScreen(
                         setSupportZoom(false)
                         builtInZoomControls = false
                         mediaPlaybackRequiresUserGesture = false
-                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        mixedContentMode =
+                            WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     }
                     webViewClient = object : WebViewClient() {
                         override fun shouldInterceptRequest(
@@ -123,7 +139,6 @@ fun GameScreen(
                         ): WebResourceResponse? =
                             assetLoader.shouldInterceptRequest(request.url)
 
-                        // Block any navigation away from the asset host.
                         override fun shouldOverrideUrlLoading(
                             view: WebView,
                             request: WebResourceRequest
@@ -144,17 +159,57 @@ fun GameScreen(
             }
         )
 
+        // ------ Layer 2: floating PiP video card ------
+        //
+        // CRITICAL: VideoRenderer wraps SurfaceViewRenderer. On Android,
+        // SurfaceView lives in a separate compositor layer, so Compose
+        // Box ordering does NOT determine z-order — SurfaceFlinger does.
+        // VideoRenderer calls setZOrderMediaOverlay(true) internally,
+        // which keeps the video above the WebView's surface but still
+        // inside the window's view hierarchy. setZOrderOnTop(true) would
+        // put it above dialogs and the status bar; do not use that.
+        Card(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+                .clip(RoundedCornerShape(12.dp)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.Black)
+        ) {
+            Box(modifier = Modifier.size(width = 120.dp, height = 160.dp)) {
+                // Remote fills the card.
+                VideoRenderer(
+                    track = remoteTrack,
+                    eglContext = eglContext,
+                    mirror = false,
+                    modifier = Modifier.fillMaxSize()
+                )
+                // Local as a small self-view in the corner.
+                VideoRenderer(
+                    track = localTrack,
+                    eglContext = eglContext,
+                    mirror = true,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                        .size(width = 44.dp, height = 60.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                )
+            }
+        }
+
+        // ------ Layer 3: persistent escape hatch ------
         GiantButton(
             label = "Back to Home",
             icon = Icons.Filled.Home,
             containerColor = Color.White,
             contentColor = GameBlue,
-            minHeight = 120.dp,
+            minHeight = 100.dp,
             onClick = { currentOnBackHome() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 32.dp)
+                .padding(horizontal = 24.dp, vertical = 24.dp)
         )
     }
 }

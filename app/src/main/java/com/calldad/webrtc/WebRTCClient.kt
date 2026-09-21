@@ -11,10 +11,20 @@ import com.calldad.data.signaling.IceCandidate as DomainIceCandidate
 import com.calldad.data.signaling.SdpType
 import com.calldad.data.signaling.SessionDescription as DomainSessionDescription
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -60,10 +70,18 @@ class WebRTCClient(
 
     private companion object {
         const val MAX_GAME_MESSAGE_BYTES = 1024
+        const val DISCONNECTED_DEBOUNCE_MS = 3_000L
     }
 
     private var micEnabled = true
     private var cameraEnabled = true
+
+    private val _connectionHealth = MutableStateFlow(ConnectionHealth.HEALTHY)
+    val connectionHealth: StateFlow<ConnectionHealth> =
+        _connectionHealth.asStateFlow()
+
+    private var disconnectionDebounceJob: Job? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /**
      * The EGL context the renderer MUST init with. Passed into
@@ -345,6 +363,57 @@ class WebRTCClient(
         WebRtcLog.transition("Camera switched")
     }
 
+    /**
+     * Initiates an ICE restart. Android's org.webrtc has no restartIce() —
+     * the documented workaround is to set the IceRestart constraint and
+     * create a fresh offer. The caller must publish the new offer via
+     * SignalingClient so the peer can answer it.
+     */
+    suspend fun restartIce(): DomainSessionDescription? {
+        val pc = peerConnection ?: return null
+        _connectionHealth.value = ConnectionHealth.RECONNECTING
+
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+        }
+
+        val deferred = CompletableDeferred<DomainSessionDescription>()
+        pc.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(created: RtcSessionDescription) {
+                pc.setLocalDescription(object : SdpObserver {
+                    override fun onSetSuccess() {
+                        val local = pc.localDescription ?: created
+                        WebRtcLog.transition("ICE restart offer created")
+                        deferred.complete(local.toDomain(SdpType.OFFER))
+                    }
+                    override fun onSetFailure(err: String?) {
+                        deferred.completeExceptionally(
+                            IllegalStateException("ICE restart setLocal failed")
+                        )
+                    }
+                    override fun onCreateSuccess(p0: RtcSessionDescription?) {}
+                    override fun onCreateFailure(p0: String?) {}
+                }, created)
+            }
+            override fun onCreateFailure(err: String?) {
+                deferred.completeExceptionally(
+                    IllegalStateException("ICE restart createOffer failed")
+                )
+            }
+            override fun onSetSuccess() {}
+            override fun onSetFailure(p0: String?) {}
+        }, constraints)
+
+        return try {
+            deferred.await()
+        } catch (t: Throwable) {
+            WebRtcLog.transition("ICE restart failed")
+            null
+        }
+    }
+
     // -------- teardown --------
 
     private var disposed = false
@@ -367,6 +436,9 @@ class WebRTCClient(
         gameChannel?.unregisterObserver()
         gameChannel?.close()
         gameChannel = null
+        disconnectionDebounceJob?.cancel()
+        disconnectionDebounceJob = null
+        scope.cancel()
         peerConnection?.close(); peerConnection = null
         factory?.dispose(); factory = null
         eglBase.release()
@@ -395,6 +467,32 @@ class WebRTCClient(
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
             WebRtcLog.transition("ICE connection state: $state")
+            when (state) {
+                PeerConnection.IceConnectionState.CONNECTED,
+                PeerConnection.IceConnectionState.COMPLETED -> {
+                    disconnectionDebounceJob?.cancel()
+                    disconnectionDebounceJob = null
+                    _connectionHealth.value = ConnectionHealth.HEALTHY
+                }
+                PeerConnection.IceConnectionState.DISCONNECTED -> {
+                    if (disconnectionDebounceJob?.isActive == true) return
+                    _connectionHealth.value = ConnectionHealth.DEGRADED
+                    disconnectionDebounceJob = scope.launch {
+                        delay(DISCONNECTED_DEBOUNCE_MS)
+                        // Still disconnected after the window? Escalate.
+                        if (peerConnection?.iceConnectionState() ==
+                            PeerConnection.IceConnectionState.DISCONNECTED) {
+                            _connectionHealth.value = ConnectionHealth.LOST
+                            WebRtcLog.transition("ICE debounce expired: LOST")
+                        }
+                    }
+                }
+                PeerConnection.IceConnectionState.FAILED -> {
+                    disconnectionDebounceJob?.cancel()
+                    _connectionHealth.value = ConnectionHealth.LOST
+                }
+                else -> Unit
+            }
         }
 
         override fun onIceConnectionReceivingChange(receiving: Boolean) {}

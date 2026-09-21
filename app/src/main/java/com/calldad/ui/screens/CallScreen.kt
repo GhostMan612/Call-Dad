@@ -76,6 +76,7 @@ import com.calldad.ui.permissions.rememberCallPermissionRequest
 import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.CallGreenDark
 import com.calldad.ui.theme.HangUpRed
+import com.calldad.webrtc.ConnectionHealth
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 
@@ -93,6 +94,7 @@ fun CallScreen(
     val remoteVideoTrack by viewModel.remoteVideoTrack.collectAsStateWithLifecycle()
     val localVideoTrack by viewModel.localVideoTrack.collectAsStateWithLifecycle()
     val eglContext by viewModel.eglContext.collectAsStateWithLifecycle()
+    val health by viewModel.connectionHealth.collectAsStateWithLifecycle()
 
     // Caller (production path): permission-gated auto-start, exactly once.
     // Incoming QA path: permissions only; overlay drives answerCall().
@@ -160,6 +162,14 @@ fun CallScreen(
         }
     }
 
+    // Auto-reconnect: a LOST health observation fires one caller-side ICE
+    // restart (callee answers via its offer-watcher). Keyed on the value so
+    // it runs once per LOST entry — no loops. Executor wiring: the prompt
+    // expects these logs but never connects the trigger.
+    LaunchedEffect(health) {
+        if (health == ConnectionHealth.LOST) viewModel.onReconnectRequested()
+    }
+
     // System back = Hang Up (or Decline on the overlay). Without this the
     // back gesture pops navigation silently: no room update, peer strands,
     // ghost rings. Same awaited path as the buttons (3s cap inside).
@@ -182,6 +192,7 @@ fun CallScreen(
         remoteVideoTrack = remoteVideoTrack,
         localVideoTrack = localVideoTrack,
         eglContext = eglContext,
+        health = health,
         onToggleCamera = viewModel::onToggleCamera,
         onRetry = viewModel::clearError,
         onAnswer = {
@@ -230,6 +241,7 @@ private fun CallContent(
     remoteVideoTrack: VideoTrack?,
     localVideoTrack: VideoTrack?,
     eglContext: EglBase.Context?,
+    health: ConnectionHealth,
     onToggleCamera: () -> Unit,
     onRetry: () -> Unit,
     onAnswer: () -> Unit,
@@ -254,6 +266,7 @@ private fun CallContent(
             remoteVideoTrack = remoteVideoTrack,
             localVideoTrack = localVideoTrack,
             eglContext = eglContext,
+            health = health,
             elapsedSeconds = elapsedSeconds,
             isCameraOn = isCameraOn,
             onToggleCamera = onToggleCamera,
@@ -384,6 +397,7 @@ private fun InCallContent(
     remoteVideoTrack: VideoTrack?,
     localVideoTrack: VideoTrack?,
     eglContext: EglBase.Context?,
+    health: ConnectionHealth,
     elapsedSeconds: Int,
     isCameraOn: Boolean,
     onToggleCamera: () -> Unit,
@@ -412,7 +426,8 @@ private fun InCallContent(
                 .clip(RoundedCornerShape(16.dp))
         )
 
-        // Timer overlay, top-start.
+        // Timer overlay, top-start. Health banner below it while
+        // reconnecting (DEGRADED shows nothing, per spec).
         Text(
             text = formatElapsed(elapsedSeconds),
             style = MaterialTheme.typography.titleLarge,
@@ -421,6 +436,18 @@ private fun InCallContent(
                 .align(Alignment.TopStart)
                 .padding(24.dp)
         )
+        if (health == ConnectionHealth.LOST ||
+            health == ConnectionHealth.RECONNECTING
+        ) {
+            Text(
+                text = "Connection lost. Reconnecting…",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 24.dp, top = 64.dp)
+            )
+        }
 
         // Controls row, bottom. Camera toggle + Hang Up.
         Row(
@@ -678,6 +705,7 @@ private fun CallContentPreview() {
             remoteVideoTrack = null,
             localVideoTrack = null,
             eglContext = null,
+            health = ConnectionHealth.HEALTHY,
             onToggleCamera = {},
             onRetry = {},
             onAnswer = {},

@@ -49,6 +49,10 @@
 - [x] game_sync channel (create/accept, copy-before-emit, 1KB cap, cleanup) + bridge + hardened WebView + game.html + shared VM accessor
 - [ ] Human: Studio sync (androidx.webkit) → build → TWO-device TAP sync + escaping test + guardrail log audit
 
+## Phase 8 — Tic-tac-toe + resilience (architect prompt landed 2026-09-20, ADR-010)
+- [x] Debounce machine + restartIce + updateOffer + callee offer-watcher + auto-reconnect + banner + full game + PiP card + media-overlay
+- [ ] Human: Studio sync (no new deps) → build → §H matrix (game both ways, simultaneous-tap race, PiP visible, Wi-Fi toggle recovery, clean logcat)
+
 ## Phase 3 — Chat + remote (BP-03)
 - [ ] `SovereignCommsEngine` + receipts + voice memo
 - [ ] `RendezvousClient` + relay deploy; remote matrix proof (human)
