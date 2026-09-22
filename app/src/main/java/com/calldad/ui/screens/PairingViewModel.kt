@@ -15,8 +15,12 @@ import com.calldad.pairing.SecurePeerStore
 import com.calldad.webrtc.WebRtcLog
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -28,7 +32,9 @@ sealed interface PairingUiState {
     data object CheckingModule : PairingUiState
     data object Loading : PairingUiState
     data class Ready(val qrBitmap: android.graphics.Bitmap) : PairingUiState
-    data object Paired : PairingUiState
+    data class Paired(
+        val qrBitmap: android.graphics.Bitmap
+    ) : PairingUiState
     data class Error(val message: String) : PairingUiState
 }
 
@@ -42,6 +48,9 @@ class PairingViewModel(application: Application) : AndroidViewModel(application)
 
     private val _resetTrigger = MutableStateFlow(0)
     val resetTrigger: StateFlow<Int> = _resetTrigger.asStateFlow()
+
+    private val _navigationEvent = MutableSharedFlow<Unit>()
+    val navigationEvent: SharedFlow<Unit> = _navigationEvent.asSharedFlow()
 
     private val sessionNonce: String = UUID.randomUUID().toString()
 
@@ -115,7 +124,20 @@ class PairingViewModel(application: Application) : AndroidViewModel(application)
 
                 store.storePeer(peerUid, peerFcm)
                 WebRtcLog.transition("Pairing: peer stored")
-                _state.value = PairingUiState.Paired
+
+                val currentBitmap =
+                    (state.value as? PairingUiState.Ready)?.qrBitmap
+                if (currentBitmap == null) {
+                    _state.value = PairingUiState.Error(
+                        "Internal error: QR not available."
+                    )
+                    return@launch
+                }
+                _state.value = PairingUiState.Paired(currentBitmap)
+
+                delay(3500)
+
+                _navigationEvent.emit(Unit)
             } catch (t: Throwable) {
                 WebRtcLog.transition("Pairing failed")
                 _state.value = PairingUiState.Error(

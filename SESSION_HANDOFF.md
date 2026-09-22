@@ -19,6 +19,13 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-22, night-firefight bundle pushed as b5c98a6 — first E2E call GREEN)
+
+- **Breakthrough:** Moto→BLU signaling completed live (OFFER published → ANSWER published → ICE trickle flowing). Per-call rules rewrite (auth-only get + party updates) unblocked publishes; stale seq-1 room (dead UIDs) deleted.
+- **Fixed in bundle:** Home incoming listener restored (callee was deaf), try/catch on all call launches (silent deaths → Error cards), ICE trickle both ways (media could never connect), setup timeouts (5s store/10s offer), instruments (publish/answer/ring/failure-kind logs), incoming caller-label ("Mama"/"Dad" inverted), stale-track observer crash guard (hangup FATAL).
+- **Still open (hardening contract):** intermittent hangup crash (no post-fix crash in buffers — needs one watched hangup test to confirm), intermittent no-ring (FCM/killed-app path never tested; doze unknown), stuck-calling (NoAnswer path vs ICE/timeout tuning), retired tests (CallStateTest/CallDocumentTest target dead models), deprecation warnings (onNewToken, FCM token), TURN/mobile-data, real-tablet coverage.
+- **Process debt:** CHECKLIST.md / CURRENT_STATE.md refresh + ADR-014 (datastore pairing) still owed; line-ending noise files remain uncommitted (SPEC_SHEET.json, README, Routes, GiantComponents, Type, RoutesTest).
+
 ## Where we are (2026-09-19, hangup SIGSEGV root-caused — fix committed, needs rebuild)
 
 - **Tombstone proof (BLU, every hangup):** `VideoTrack.removeSink` → libjingle SIGSEGV from `VideoRenderer onDispose`. Race: endCall() disposed native tracks while composables still held sinks; navigation-pop disposal then touched freed memory. Fix: endCall no longer disposes — disposal only in onCleared (composition gone first). No FATALs since fix exists yet — rebuild + hangup test PENDING.

@@ -65,6 +65,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -92,6 +93,13 @@ fun CallScreen(
     val localVideoTrack by viewModel.localVideoTrack.collectAsStateWithLifecycle()
     val eglContext by viewModel.eglContext.collectAsStateWithLifecycle()
     val health by viewModel.connectionHealth.collectAsStateWithLifecycle()
+
+    LifecycleResumeEffect(Unit) {
+        viewModel.onResume()
+        onPauseOrDispose {
+            viewModel.onPause()
+        }
+    }
 
     val context = LocalContext.current
     val shouldKeepOn = viewModel.shouldKeepScreenOn()

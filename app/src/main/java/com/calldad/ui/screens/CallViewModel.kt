@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -72,6 +73,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private var autoDismissJob: Job? = null
     private var noAnswerJob: Job? = null
     private var listenerWatchdogJob: Job? = null
+    private var callObserverJob: Job? = null
+    private var lastPauseTime: Long = 0L
 
     private val _state = MutableStateFlow<CallState>(CallState.Idle)
     val state: StateFlow<CallState> = _state.asStateFlow()
@@ -95,7 +98,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         startListenerWatchdog()
-        viewModelScope.launch {
+        restartCallObserver()
+    }
+
+    private fun restartCallObserver() {
+        callObserverJob?.cancel()
+        callObserverJob = viewModelScope.launch {
             signaling.observeCall(STATIC_ROOM_ID)
                 .catch { t -> reportError(t) }
                 .collect { doc -> handleDocument(doc) }
@@ -308,6 +316,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearError() {
         if (_state.value is CallState.Error) {
+            noAnswerJob?.cancel()
+            noAnswerJob = null
             _state.value = CallState.Idle
         }
     }
@@ -382,6 +392,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 if (doc.status == "RINGING") {
                     autoDismissJob?.cancel()
                     autoDismissJob = null
+                    noAnswerJob?.cancel()
+                    noAnswerJob = null
                 }
                 currentSeq = incomingSeq
                 appliedCandidates.clear()
@@ -431,6 +443,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
         if (newState is CallState.Ringing && newState.isIncoming) {
             WebRtcLog.transition("Remote ring observed")
+        }
+
+        if (newState is CallState.Connected) {
+            noAnswerJob?.cancel()
+            noAnswerJob = null
         }
 
         // Sequence-tracked SDP application. Runs only on committed
@@ -530,10 +547,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         noAnswerJob?.cancel()
         noAnswerJob = viewModelScope.launch {
             delay(15_000)
-            val s = _state.value
-            if (s is CallState.Ringing && !s.isIncoming && s.seq == seq) {
-                WebRtcLog.transition("Ring unanswered")
+            val current = _state.value
+            if (current is CallState.Ringing &&
+                current.seq == seq) {
+                WebRtcLog.transition("No answer after 15s")
                 _state.value = CallState.NoAnswer(seq)
+                runCatching { webrtc.dispose() }
             }
         }
     }
@@ -556,6 +575,35 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    fun onResume() {
+        val pausedDuration = System.currentTimeMillis() - lastPauseTime
+        if (lastPauseTime > 0L && pausedDuration > 60_000L) {
+            WebRtcLog.transition("Resume after long pause: re-attaching")
+            restartCallObserver()
+        }
+        listenerSilentSince = System.currentTimeMillis()
+
+        listenerWatchdogJob?.cancel()
+        listenerWatchdogJob = viewModelScope.launch {
+            while (isActive) {
+                delay(30_000)
+                val elapsed =
+                    System.currentTimeMillis() - listenerSilentSince
+                if (elapsed >= 60_000) {
+                    WebRtcLog.transition("Listener stalled: re-subscribing")
+                    restartCallObserver()
+                    listenerSilentSince = System.currentTimeMillis()
+                }
+            }
+        }
+    }
+
+    fun onPause() {
+        lastPauseTime = System.currentTimeMillis()
+        listenerWatchdogJob?.cancel()
+        listenerWatchdogJob = null
     }
 
     private fun reportError(t: Throwable) {

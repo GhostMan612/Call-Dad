@@ -71,8 +71,10 @@ fun PairingScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val resetTrigger by viewModel.resetTrigger.collectAsStateWithLifecycle()
 
-    LaunchedEffect(state) {
-        if (state is PairingUiState.Paired) onPaired()
+    LaunchedEffect(Unit) {
+        viewModel.navigationEvent.collect {
+            onPaired()
+        }
     }
 
     Box(
@@ -169,9 +171,32 @@ fun PairingScreen(
 
                 is PairingUiState.Paired -> {
                     Text(
-                        "Paired!",
+                        text = "Paired!",
                         style = MaterialTheme.typography.displaySmall,
                         color = Color.White
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "Returning home…",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Image(
+                        bitmap = s.qrBitmap.asImageBitmap(),
+                        contentDescription = "Pairing QR code",
+                        modifier = Modifier
+                            .size(240.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White)
+                            .padding(8.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Keep this visible for the other device",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Center
                     )
                 }
 
