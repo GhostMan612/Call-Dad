@@ -6,44 +6,93 @@
 // Location: app/src/main/java/com/calldad/ui/screens/CallState.kt
 package com.calldad.ui.screens
 
-/** Which side of the OFFER/ANSWER exchange this device is playing. */
-enum class CallRole { CALLER, CALLEE }
-
 /**
- * The complete lifecycle of one call, as far as the UI is concerned.
+ * The seven-state call machine. This is the ONLY state type the UI
+ * observes. The ViewModel maps every Firestore document change to exactly
+ * one of these states via CallState.fromDocument(...).
  *
- *  Idle ──startCall()/answerCall()──> Connecting ──remote SDP──> InCall
- *    ^                                     │                        │
- *    └─────────────────endCall()───────────┴────────────────────────┘
- *                                          │
- *                                          └──> Error
+ * TRANSITION TABLE (enforced in CallViewModel via canTransition):
+ *
+ *   Idle           + USER_CALL       -> Ringing(isIncoming=false)
+ *   Idle           + DOC_RINGING     -> Ringing(isIncoming=true)
+ *
+ *   Ringing(false) + DOC_ANSWER      -> Connected
+ *   Ringing(false) + TIMEOUT_15S     -> NoAnswer(seq)
+ *   Ringing(false) + DOC_DECLINED    -> Declined
+ *   Ringing(false) + USER_HANGUP     -> Ended(LOCAL_HANGUP)
+ *
+ *   Ringing(true)  + USER_ANSWER     -> Connected
+ *   Ringing(true)  + USER_DECLINE    -> Declined
+ *   Ringing(true)  + DOC_ENDED       -> Ended(REMOTE_HANGUP)
+ *
+ *   Connected      + USER_HANGUP     -> Ended(LOCAL_HANGUP)
+ *   Connected      + DOC_ENDED       -> Ended(REMOTE_HANGUP)
+ *   Connected      + DOC_SEQ_CHANGED -> Ringing(isIncoming=true)
+ *
+ *   NoAnswer(seq)  + USER_RERING     -> Ringing(isIncoming=false)
+ *   NoAnswer(seq)  + USER_HANGUP     -> Ended(LOCAL_HANGUP)
+ *
+ *   Declined       + AUTO_DISMISS    -> Idle
+ *   Ended          + AUTO_DISMISS    -> Idle
+ *   Error          + USER_DISMISS    -> Idle
  */
 sealed interface CallState {
 
-    /** Nothing happening. Initial state; returns here after hang-up. */
     data object Idle : CallState
 
-    /** Signaling in progress: exchanging SDP via Firestore. */
-    data object Connecting : CallState
-
-    /** Remote SDP received; the peer connection is (about to be) live. */
-    data class InCall(
-        val role: CallRole,
-        val startedAtMillis: Long
+    data class Ringing(
+        val seq: Int,
+        val isIncoming: Boolean,
+        val peerName: String,
+        val callId: String
     ) : CallState
 
-    /**
-     * Callee-only. Rendered as a full-screen accept/decline overlay.
-     * Phase 4 populates this via CallViewModel.simulateIncomingCall() for QA.
-     * Phase 5 (FCM) will populate it from a real push payload.
-     */
-    data class Incoming(
-        val fromDisplayName: String = "Dad"
-    ) : CallState
+    data class Connected(val seq: Int) : CallState
 
-    /** Recoverable failure surfaced to the child as a single big Retry button. */
+    data object Declined : CallState
+
+    data class NoAnswer(val seq: Int) : CallState
+
+    data class Ended(val reason: EndReason) : CallState
+
     data class Error(
-        val kind: com.calldad.data.signaling.SignalingErrorKind,
-        val message: String
+        val kind: CallErrorKind,
+        val message: String,
+        val seq: Int? = null
     ) : CallState
+
+    companion object {
+        fun fromDocument(
+            status: String,
+            seq: Int,
+            isIncoming: Boolean,
+            peerName: String,
+            callId: String
+        ): CallState = when (status) {
+            "RINGING"   -> Ringing(seq, isIncoming, peerName, callId)
+            "CONNECTED" -> Connected(seq)
+            "DECLINED"  -> Declined
+            "ENDED"     -> Ended(EndReason.REMOTE_HANGUP)
+            "IDLE"      -> Idle
+            else        -> Error(CallErrorKind.MALFORMED, "Unknown status.", seq)
+        }
+    }
+}
+
+enum class EndReason {
+    LOCAL_HANGUP,
+    REMOTE_HANGUP,
+    NETWORK_FAILURE,
+    TIMEOUT
+}
+
+enum class CallErrorKind {
+    LISTENER_DISCONNECTED,
+    SIGNALING_FAILED,
+    TRANSACTION_EXHAUSTED,
+    WEBRTC_FAILED,
+    PERMISSION_DENIED,
+    PEER_BUSY,
+    MALFORMED,
+    UNKNOWN
 }

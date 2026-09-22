@@ -17,15 +17,9 @@ import androidx.core.app.NotificationCompat
 import com.calldad.CallDadApplication
 import com.calldad.MainActivity
 import com.calldad.R
-import com.calldad.data.signaling.CallStatus
 import com.calldad.webrtc.WebRtcLog
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 /**
  * Foreground service of type `phoneCall`, started by the topic receiver.
@@ -44,53 +38,51 @@ import kotlinx.coroutines.tasks.await
  */
 class CallForegroundService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildIncomingCallNotification()
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-            WebRtcLog.transition("FGS started (phoneCall type)")
-        } catch (t: Throwable) {
-            WebRtcLog.transition("FGS startForeground rejected")
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid == null) {
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // Async room check: stale push (caller hung up already) → stop.
-        scope.launch {
-            val ringing = try {
-                val snap = FirebaseFirestore.getInstance()
-                    .collection("calls")
-                    .document("family_channel")
-                    .get()
-                    .await()
-                snap.exists() &&
-                    CallStatus.fromWire(snap.getString("status")) == CallStatus.RINGING
-            } catch (t: Throwable) {
-                false
+        val db = FirebaseFirestore.getInstance()
+        db.collection("calls").document("family_channel").get()
+            .addOnSuccessListener { doc ->
+                if (!doc.exists() ||
+                    doc.getString("status") != "RINGING" ||
+                    doc.getString("calleeUid") != uid) {
+                    stopSelf()
+                    return@addOnSuccessListener
+                }
+                val notification = buildIncomingCallNotification()
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(
+                            NOTIFICATION_ID,
+                            notification,
+                            android.content.pm.ServiceInfo
+                                .FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                        )
+                    } else {
+                        startForeground(NOTIFICATION_ID, notification)
+                    }
+                    WebRtcLog.transition("FGS started (phoneCall type)")
+                } catch (t: Throwable) {
+                    WebRtcLog.transition("FGS startForeground rejected")
+                    stopSelf()
+                }
             }
-            if (!ringing) {
-                WebRtcLog.transition("Stale push — no live ring")
+            .addOnFailureListener {
+                WebRtcLog.transition("FGS document read failed")
                 stopSelf()
             }
-        }
+
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        scope.cancel()
         super.onDestroy()
     }
 

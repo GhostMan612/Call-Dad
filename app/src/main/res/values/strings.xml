@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Peer display names. The child flavor sees "Mama"; the parent
+         flavor sees "Dad". These are the names shown during a call. -->
+    <string name="child_peer_name">Mama</string>
+    <string name="parent_peer_name">Dad</string>
+</resources>

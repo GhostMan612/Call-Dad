@@ -26,6 +26,11 @@ play-services-auth = "21.3.0"
 # WebViewAssetLoader (replaces file:///android_asset).
 webkit = "1.12.1"
 
+# --- Phase 12 additions -------------------------------------------------
+# Plaintext peer persistence (SecurePeerStore). Tink deliberately omitted:
+# two-person sideloaded threat model; allowBackup=false + D2D rules cover it.
+datastorePreferences = "1.1.1"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -59,6 +64,9 @@ play-services-auth = { group = "com.google.android.gms", name = "play-services-a
 
 # --- Phase 7 additions --------------------------------------------------
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
+
+# --- Phase 12 additions -------------------------------------------------
+datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

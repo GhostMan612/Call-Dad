@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.webkit.WebViewAssetLoader
+import com.calldad.BuildConfig
 import com.calldad.game.GameWebRtcBridge
 import com.calldad.ui.components.GiantButton
 import com.calldad.ui.components.VideoRenderer
@@ -79,14 +80,19 @@ fun GameScreen(
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
 
     // Push role to the JS layer once the WebView and call state are ready.
-    // The caller is authoritative in the Tic-Tac-Toe protocol.
+    // The caller is authoritative in the Tic-Tac-Toe protocol. Role is
+    // derived from the flavor: parent (blue) hosts as caller.
     LaunchedEffect(webViewRef.value, callState) {
         val wv = webViewRef.value ?: return@LaunchedEffect
-        val role = when (val s = callState) {
-            is CallState.InCall -> if (s.role == CallRole.CALLER) "caller" else "callee"
+        val role = when (callState) {
+            is CallState.Connected ->
+                if (BuildConfig.APP_THEME == "blue") "caller" else "callee"
             else -> return@LaunchedEffect
         }
-        wv.evaluateJavascript("window.setGameRole && window.setGameRole('$role')", null)
+        wv.evaluateJavascript(
+            "window.setGameRole && window.setGameRole('$role')",
+            null
+        )
     }
 
     // Inbound: WebRTC → JS.

@@ -11,6 +11,7 @@
 package com.calldad.ui.screens
 
 import android.app.Application
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -32,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Refresh
@@ -46,7 +48,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,10 +68,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.launch
 import com.calldad.ui.components.VideoRenderer
 import com.calldad.ui.permissions.rememberCallPermissionRequest
 import com.calldad.ui.theme.CallDadTheme
+import com.calldad.ui.theme.CallGreen
 import com.calldad.ui.theme.CallGreenDark
 import com.calldad.ui.theme.HangUpRed
 import com.calldad.webrtc.ConnectionHealth
@@ -91,6 +92,26 @@ fun CallScreen(
     val localVideoTrack by viewModel.localVideoTrack.collectAsStateWithLifecycle()
     val eglContext by viewModel.eglContext.collectAsStateWithLifecycle()
     val health by viewModel.connectionHealth.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
+    val shouldKeepOn = viewModel.shouldKeepScreenOn()
+
+    DisposableEffect(shouldKeepOn) {
+        val window = (context as? android.app.Activity)?.window
+        if (window == null) return@DisposableEffect onDispose { }
+
+        if (shouldKeepOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        onDispose {
+            // Safety net: if the composable leaves composition while the
+            // flag is set, clear it so the screen can sleep normally.
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     // Caller (production path): permission-gated auto-start, exactly once.
     // Incoming QA path: permissions only; overlay drives answerCall().
@@ -137,7 +158,9 @@ fun CallScreen(
     // AND crash on the AndroidViewModel constructor).
     val pttViewModel: PttViewModel = rememberPttViewModel()
     LaunchedEffect(state) {
-        pttViewModel.onCallStateChanged(state is CallState.InCall)
+        pttViewModel.onCallStateChanged(
+            state is CallState.Ringing || state is CallState.Connected
+        )
     }
 
     // Any return to Idle after real activity (ringing, incoming, in-call,
@@ -146,9 +169,12 @@ fun CallScreen(
     // Initial Idle never triggers (wasActive starts false).
     var wasActive by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
-        if (state is CallState.Connecting ||
-            state is CallState.Incoming ||
-            state is CallState.InCall
+        if (state is CallState.Ringing ||
+            state is CallState.Connected ||
+            state is CallState.NoAnswer ||
+            state is CallState.Declined ||
+            state is CallState.Ended ||
+            state is CallState.Error
         ) {
             wasActive = true
         } else if (state is CallState.Idle && wasActive) {
@@ -157,24 +183,14 @@ fun CallScreen(
         }
     }
 
-    // Auto-reconnect: a LOST health observation fires one caller-side ICE
-    // restart (callee answers via its offer-watcher). Keyed on the value so
-    // it runs once per LOST entry — no loops. Executor wiring: the prompt
-    // expects these logs but never connects the trigger.
-    LaunchedEffect(health) {
-        if (health == ConnectionHealth.LOST) viewModel.onReconnectRequested()
-    }
-
-    // System back = Hang Up (or Decline on the overlay). Without this the
-    // back gesture pops navigation silently: no room update, peer strands,
-    // ghost rings. Same awaited path as the buttons (3s cap inside).
-    val scope = rememberCoroutineScope()
+    // System back = Hang Up (or Decline on an incoming ring). Without this
+    // the back gesture pops navigation silently: no room update, peer
+    // strands, ghost rings. Same direct path as the buttons.
     BackHandler {
-        scope.launch {
-            if (state is CallState.Incoming) viewModel.declineAndAwait()
-            else viewModel.endCallAndAwait()
-            onFinished()
-        }
+        val s = state
+        if (s is CallState.Ringing && s.isIncoming) viewModel.declineCall()
+        else viewModel.endCall()
+        onFinished()
     }
 
     // Local hangup/decline awaits the room delete BEFORE navigating:
@@ -189,19 +205,16 @@ fun CallScreen(
         eglContext = eglContext,
         health = health,
         onToggleCamera = viewModel::onToggleCamera,
-        onRetry = viewModel::clearError,
         onAnswer = { viewModel.answerCall() },
         onDecline = {
-            scope.launch {
-                viewModel.declineAndAwait()
-                onFinished()
-            }
+            viewModel.declineCall()
+            onFinished()
         },
+        onReRing = viewModel::onReRing,
+        onDismissError = viewModel::clearError,
         onHangUp = {
-            scope.launch {
-                viewModel.endCallAndAwait()
-                onFinished()
-            }
+            viewModel.endCall()
+            onFinished()
         },
         modifier = modifier
     )
@@ -234,26 +247,32 @@ private fun CallContent(
     eglContext: EglBase.Context?,
     health: ConnectionHealth,
     onToggleCamera: () -> Unit,
-    onRetry: () -> Unit,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
+    onReRing: () -> Unit,
+    onDismissError: () -> Unit,
     onHangUp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     when (state) {
-        is CallState.Error -> ErrorContent(
-            message = state.message,
-            onRetry = onRetry,
-            onHangUp = onHangUp,
-            modifier = modifier
-        )
-        is CallState.Incoming -> IncomingContent(
-            fromDisplayName = state.fromDisplayName,
-            onAnswer = onAnswer,
-            onDecline = onDecline,
-            modifier = modifier
-        )
-        is CallState.InCall -> InCallContent(
+        is CallState.Ringing -> if (state.isIncoming) {
+            IncomingContent(
+                fromDisplayName = state.peerName,
+                onAnswer = onAnswer,
+                onDecline = onDecline,
+                modifier = modifier
+            )
+        } else {
+            ConnectedContent(
+                state = state,
+                elapsedSeconds = elapsedSeconds,
+                isCameraOn = isCameraOn,
+                onToggleCamera = onToggleCamera,
+                onHangUp = onHangUp,
+                modifier = modifier
+            )
+        }
+        is CallState.Connected -> InCallContent(
             remoteVideoTrack = remoteVideoTrack,
             localVideoTrack = localVideoTrack,
             eglContext = eglContext,
@@ -264,7 +283,19 @@ private fun CallContent(
             onHangUp = onHangUp,
             modifier = modifier
         )
-        else -> ConnectedContent(
+        is CallState.NoAnswer -> NoAnswerContent(
+            onReRing = onReRing,
+            onHangUp = onHangUp,
+            modifier = modifier
+        )
+        is CallState.Error -> ErrorContent(
+            kind = state.kind,
+            message = state.message,
+            onRetry = onReRing,
+            onDismiss = onDismissError,
+            modifier = modifier
+        )
+        is CallState.Declined, is CallState.Ended, CallState.Idle -> ConnectedContent(
             state = state,
             elapsedSeconds = elapsedSeconds,
             isCameraOn = isCameraOn,
@@ -459,9 +490,11 @@ private fun ConnectedContent(
 ) {
     val statusLabel = when (state) {
         CallState.Idle -> "Ready"
-        CallState.Connecting -> "Calling Dad…"
-        is CallState.InCall -> "Dad is here!"
-        is CallState.Incoming -> ""
+        is CallState.Ringing -> if (state.isIncoming) "" else "Calling Dad…"
+        is CallState.Connected -> "Dad is here!"
+        is CallState.NoAnswer -> ""
+        is CallState.Declined -> "Declined"
+        is CallState.Ended -> "Call ended"
         is CallState.Error -> "" // handled by ErrorContent
     }
 
@@ -536,17 +569,75 @@ private fun ConnectedContent(
 }
 
 @Composable
-private fun ErrorContent(
-    message: String,
-    onRetry: () -> Unit,
+private fun NoAnswerContent(
+    onReRing: () -> Unit,
     onHangUp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(CallGreenDark)
-            .padding(24.dp),
+        modifier = modifier.fillMaxSize()
+            .background(CallGreenDark).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Face,
+            contentDescription = null,
+            modifier = Modifier.size(160.dp),
+            tint = Color.White.copy(alpha = 0.6f)
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(
+            text = "No answer yet",
+            style = MaterialTheme.typography.displaySmall,
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(40.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            GiantCallButton(
+                label = "Stop",
+                icon = Icons.Filled.CallEnd,
+                containerColor = HangUpRed,
+                onClick = onHangUp,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+            GiantCallButton(
+                label = "Try Again",
+                icon = Icons.Filled.Refresh,
+                containerColor = CallGreen,
+                onClick = onReRing,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorContent(
+    kind: CallErrorKind,
+    message: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isRecoverable = when (kind) {
+        CallErrorKind.PEER_BUSY,
+        CallErrorKind.TRANSACTION_EXHAUSTED,
+        CallErrorKind.SIGNALING_FAILED,
+        CallErrorKind.WEBRTC_FAILED,
+        CallErrorKind.LISTENER_DISCONNECTED -> true
+        CallErrorKind.PERMISSION_DENIED,
+        CallErrorKind.MALFORMED,
+        CallErrorKind.UNKNOWN -> false
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize()
+            .background(CallGreenDark).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -564,47 +655,26 @@ private fun ErrorContent(
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(40.dp))
-
         Row(
-            modifier = Modifier.fillMaxWidth().height(120.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Retry — green
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Color(0xFF2E7D32))
-                    .clickable(onClick = onRetry)
-                    .semantics { contentDescription = "Try again" },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Refresh,
-                    contentDescription = null,
-                    modifier = Modifier.size(72.dp),
-                    tint = Color.White
+            if (isRecoverable) {
+                GiantCallButton(
+                    label = "Try Again",
+                    icon = Icons.Filled.Refresh,
+                    containerColor = CallGreen,
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
-            // Hang up — red
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(HangUpRed)
-                    .clickable(onClick = onHangUp)
-                    .semantics { contentDescription = "Go back home" },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.CallEnd,
-                    contentDescription = null,
-                    modifier = Modifier.size(72.dp),
-                    tint = Color.White
-                )
-            }
+            GiantCallButton(
+                label = "Dismiss",
+                icon = Icons.Filled.Close,
+                containerColor = HangUpRed,
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
         }
     }
 }
@@ -676,7 +746,7 @@ private fun HangUpButton(
 private fun CallContentPreview() {
     CallDadTheme {
         CallContent(
-            state = CallState.InCall(CallRole.CALLER, startedAtMillis = 0L),
+            state = CallState.Connected(seq = 1),
             elapsedSeconds = 42,
             isCameraOn = true,
             remoteVideoTrack = null,
@@ -684,9 +754,10 @@ private fun CallContentPreview() {
             eglContext = null,
             health = ConnectionHealth.HEALTHY,
             onToggleCamera = {},
-            onRetry = {},
             onAnswer = {},
             onDecline = {},
+            onReRing = {},
+            onDismissError = {},
             onHangUp = {}
         )
     }

@@ -125,6 +125,9 @@ dependencies {
     // ---- Phase 7: WebViewAssetLoader (hardened asset serving) ----
     implementation(libs.androidx.webkit)
 
+    // ---- Phase 12: peer persistence (SecurePeerStore, plaintext per catalog note) ----
+    implementation(libs.datastore.preferences)
+
     // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
     testImplementation("junit:junit:4.13.2")
     testImplementation(libs.kotlinx.coroutines.test)

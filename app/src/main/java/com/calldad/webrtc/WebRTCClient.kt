@@ -95,6 +95,9 @@ class WebRTCClient(
     val localVideoTrack: VideoTrack?
         get() = videoTrack
 
+    fun isInitialized(): Boolean =
+        factory != null && peerConnection != null
+
     /**
      * Hot flow of inbound game-sync messages, decoded to UTF-8 strings.
      *
@@ -421,6 +424,30 @@ class WebRTCClient(
             WebRtcLog.transition("ICE restart failed")
             null
         }
+    }
+
+    /**
+     * Drops the current PeerConnection and builds a fresh one on the
+     * existing factory, so a re-ring at a higher seq gets a clean
+     * signaling state. Defense-in-depth: no factory (never initialized
+     * or already disposed) → skip instead of crashing startup.
+     */
+    suspend fun resetPeerConnection() {
+        if (factory == null) {
+            WebRtcLog.transition("Reset skipped: not initialized")
+            return
+        }
+        runCatching { peerConnection?.close() }
+        peerConnection = null
+        gameChannel?.unregisterObserver()
+        runCatching { gameChannel?.close() }
+        gameChannel = null
+        remoteTrackDelivered = false
+        disconnectionDebounceJob?.cancel()
+        disconnectionDebounceJob = null
+        _connectionHealth.value = ConnectionHealth.HEALTHY
+        createPeerConnection()
+        WebRtcLog.transition("PeerConnection reset for new generation")
     }
 
     // -------- teardown --------
