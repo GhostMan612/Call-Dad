@@ -113,6 +113,23 @@ class SignalingClient(
         Unit
     }
 
+    /**
+     * Trickles one locally-gathered candidate into the room arrays.
+     * Caller writes callerCandidates, callee writes calleeCandidates;
+     * arrayUnion makes concurrent trickle safe with no read-modify-write.
+     */
+    suspend fun addIceCandidate(
+        callId: String,
+        candidate: IceCandidate,
+        byCaller: Boolean
+    ): Result<Unit> = runCatching {
+        val field = if (byCaller) "callerCandidates" else "calleeCandidates"
+        calls.document(callId)
+            .update(field, FieldValue.arrayUnion(candidate.toWireMap()))
+            .await()
+        Unit
+    }
+
     fun observeCall(callId: String): Flow<CallDocument> = callbackFlow {
         val reg: ListenerRegistration = calls.document(callId)
             .addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
@@ -166,9 +183,32 @@ class SignalingClient(
             calleeUid = calleeUid,
             offer = offer,
             answer = answer,
+            callerCandidates = (get("callerCandidates") as? List<*>)
+                .orEmpty()
+                .mapNotNull { (it as? Map<*, *>)?.toIceCandidateOrNull() },
+            calleeCandidates = (get("calleeCandidates") as? List<*>)
+                .orEmpty()
+                .mapNotNull { (it as? Map<*, *>)?.toIceCandidateOrNull() },
             isFromCache = false
         )
     }
+
+    private fun Map<*, *>.toIceCandidateOrNull(): IceCandidate? {
+        val payload = this["sdpCandidate"] as? String ?: return null
+        return IceCandidate(
+            sdpCandidate = payload,
+            sdpMid = this["sdpMid"] as? String,
+            sdpMLineIndex = (this["sdpMLineIndex"] as? Long)?.toInt(),
+            serverUrl = this["serverUrl"] as? String
+        )
+    }
+
+    private fun IceCandidate.toWireMap(): Map<String, Any?> = mapOf(
+        "serverUrl" to serverUrl,
+        "sdpMid" to sdpMid,
+        "sdpMLineIndex" to sdpMLineIndex,
+        "sdpCandidate" to sdpCandidate
+    )
 }
 
 class PeerBusyException : Exception("Peer is already in a call.")
@@ -183,9 +223,11 @@ data class CallDocument(
     val calleeUid: String,
     val offer: SessionDescription?,
     val answer: SessionDescription?,
+    val callerCandidates: List<IceCandidate> = emptyList(),
+    val calleeCandidates: List<IceCandidate> = emptyList(),
     val isFromCache: Boolean
 ) {
     companion object {
-        val EMPTY = CallDocument("", "IDLE", 0, "", "", null, null, false)
+        val EMPTY = CallDocument("", "IDLE", 0, "", "", null, null, emptyList(), emptyList(), false)
     }
 }

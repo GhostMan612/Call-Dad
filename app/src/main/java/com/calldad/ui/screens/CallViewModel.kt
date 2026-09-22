@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.calldad.BuildConfig
 import com.calldad.R
 import com.calldad.data.signaling.CallDocument
+import com.calldad.data.signaling.IceCandidate
 import com.calldad.data.signaling.PeerBusyException
 import com.calldad.data.signaling.SignalingClient
 import com.calldad.data.signaling.TransactionExhaustedException
@@ -21,7 +22,9 @@ import com.calldad.webrtc.WebRTCClient
 import com.calldad.webrtc.WebRtcLog
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestoreException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +34,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 import java.util.Locale
@@ -45,7 +49,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     private val webrtc: WebRTCClient = WebRTCClient(
         context = application.applicationContext,
-        onLocalIceCandidate = { },
+        onLocalIceCandidate = { candidate -> onLocalIceCandidate(candidate) },
         onRemoteVideoTrack = { track -> _remoteVideoTrack.value = track },
         onConnectionStateChanged = { }
     )
@@ -57,6 +61,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private var lastAppliedAnswerSeq: Int = -1
 
     private var currentSeq: Int = 0
+
+    private var amCaller: Boolean = false
+
+    /** SDP payloads already fed to the PeerConnection (dedupe trickle). */
+    private val appliedCandidates = mutableSetOf<String>()
 
     private val peerConnectionMutex = Mutex()
 
@@ -105,7 +114,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            val calleeUid = peerStore.observePeerUid().first()
+            // Any throw below (peer store, WebRTC, publish) must surface
+            // as an Error card, never a stuck screen. Cancellation still
+            // propagates so teardown stays prompt.
+            try {
+            val calleeUid = withTimeout(5_000) { peerStore.observePeerUid().first() }
             if (calleeUid.isNullOrBlank()) {
                 _state.value = CallState.Error(
                     CallErrorKind.SIGNALING_FAILED,
@@ -122,7 +135,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 webrtc.startCapture()
             }
 
-            val offer = webrtc.createOffer()
+            val offer = withTimeout(10_000) { webrtc.createOffer() }
+            amCaller = true
+            WebRtcLog.transition("OFFER publish started")
 
             _state.value = CallState.Ringing(
                 seq = currentSeq,
@@ -137,6 +152,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 callerUid = callerUid,
                 calleeUid = calleeUid
             ).onSuccess { seq ->
+                WebRtcLog.transition("OFFER published")
+                appliedCandidates.clear()
                 currentSeq = seq
                 _state.value = CallState.Ringing(
                     seq = seq,
@@ -146,6 +163,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 startNoAnswerTimer(seq)
             }.onFailure { t -> reportError(t) }
+            } catch (t: TimeoutCancellationException) {
+                reportError(IllegalStateException("Setup timed out. Tap to try again."))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                reportError(t)
+            }
         }
     }
 
@@ -153,6 +176,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value as? CallState.Ringing ?: return
         if (!current.isIncoming) return
         viewModelScope.launch {
+            try {
             if (!webrtc.isInitialized()) {
                 webrtc.initialize()
                 webrtc.createPeerConnection()
@@ -160,6 +184,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 _localVideoTrack.value = webrtc.localVideoTrack
                 webrtc.startCapture()
             }
+            amCaller = false
             // First-call defense: if the factory was created between
             // the Ringing transition and now, the offer was not applied
             // in applyDocumentPayload. Fetch and apply it here BEFORE
@@ -173,11 +198,19 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val answer = webrtc.createAnswer()
+            val answer = withTimeout(10_000) { webrtc.createAnswer() }
             signaling.publishAnswer(
                 callId = STATIC_ROOM_ID,
                 answerSdp = answer.sdp
-            ).onFailure(::reportError)
+            ).onSuccess {
+                WebRtcLog.transition("ANSWER published")
+            }.onFailure(::reportError)
+            } catch (t: TimeoutCancellationException) {
+                reportError(IllegalStateException("Setup timed out. Tap to try again."))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                reportError(t)
+            }
         }
     }
 
@@ -206,7 +239,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            val calleeUid = peerStore.observePeerUid().first()
+            try {
+            val calleeUid = withTimeout(5_000) { peerStore.observePeerUid().first() }
             if (calleeUid.isNullOrBlank()) {
                 _state.value = CallState.Error(
                     CallErrorKind.UNKNOWN,
@@ -236,6 +270,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 callerUid = callerUid,
                 calleeUid = calleeUid
             ).onSuccess { seq ->
+                appliedCandidates.clear()
                 currentSeq = seq
                 _state.value = CallState.Ringing(
                     seq = seq,
@@ -245,6 +280,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 startNoAnswerTimer(seq)
             }.onFailure { t -> reportError(t) }
+            } catch (t: TimeoutCancellationException) {
+                reportError(IllegalStateException("Setup timed out. Tap to try again."))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                reportError(t)
+            }
         }
     }
 
@@ -261,6 +302,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         webrtc.dispose()
         lastAppliedOfferSeq = -1
         lastAppliedAnswerSeq = -1
+        appliedCandidates.clear()
         _state.value = CallState.Ended(EndReason.LOCAL_HANGUP)
     }
 
@@ -288,6 +330,19 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Exposes the WebRTCClient for the game bridge. Null before init. */
     fun webrtcClientOrNull(): WebRTCClient? = webrtc
+
+    /**
+     * Trickles a locally-gathered candidate into the room arrays.
+     * Fire-and-forget: a single lost candidate never fails the call;
+     * regather and ICE restart cover gaps.
+     */
+    fun onLocalIceCandidate(candidate: IceCandidate) {
+        viewModelScope.launch {
+            runCatching {
+                signaling.addIceCandidate(STATIC_ROOM_ID, candidate, amCaller).getOrThrow()
+            }
+        }
+    }
 
     /**
      * Returns true when the screen should be kept awake. Used by
@@ -329,6 +384,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     autoDismissJob = null
                 }
                 currentSeq = incomingSeq
+                appliedCandidates.clear()
 
                 val isActiveGeneration =
                     doc.status == "RINGING" || doc.status == "CONNECTED"
@@ -361,14 +417,20 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             status = doc.status,
             seq = doc.seq,
             isIncoming = isCallee,
-            peerName = peerDisplayName(),
+            peerName = if (isCallee) callerDisplayName() else peerDisplayName(),
             callId = doc.callId
         )
+
+        feedNewRemoteCandidates(doc)
 
         if (newState == _state.value) return
         if (!canTransition(_state.value, newState)) {
             WebRtcLog.transition("Illegal transition blocked")
             return
+        }
+
+        if (newState is CallState.Ringing && newState.isIncoming) {
+            WebRtcLog.transition("Remote ring observed")
         }
 
         // Sequence-tracked SDP application. Runs only on committed
@@ -389,6 +451,22 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
         _state.value = newState
         scheduleAutoDismiss(newState)
+    }
+
+    /**
+     * Feeds ICE candidates the peer trickled into the room arrays. Runs on
+     * EVERY document delivery (not only committed transitions): candidates
+     * arrive as same-seq metadata echoes the state machine skips.
+     * Already-applied payloads are deduped; a new generation clears the set.
+     */
+    private fun feedNewRemoteCandidates(doc: CallDocument) {
+        if (!webrtc.isInitialized()) return
+        val remote = if (amCaller) doc.calleeCandidates else doc.callerCandidates
+        remote.forEach { candidate ->
+            if (appliedCandidates.add(candidate.sdpCandidate)) {
+                runCatching { webrtc.addRemoteIceCandidate(candidate) }
+            }
+        }
     }
 
     private fun canTransition(from: CallState, to: CallState): Boolean {
@@ -424,6 +502,19 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 R.string.child_peer_name
         )
 
+    /**
+     * Name shown on the INCOMING overlay: the caller's side, i.e. the
+     * opposite flavor's label. The callee must see who is calling them,
+     * not their own peer label (parent sees "Mama", child sees "Dad").
+     */
+    private fun callerDisplayName(): String =
+        getApplication<Application>().getString(
+            if (BuildConfig.APP_THEME == "blue")
+                R.string.child_peer_name
+            else
+                R.string.parent_peer_name
+        )
+
     private fun scheduleAutoDismiss(state: CallState) {
         autoDismissJob?.cancel()
         autoDismissJob = null
@@ -441,6 +532,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             delay(15_000)
             val s = _state.value
             if (s is CallState.Ringing && !s.isIncoming && s.seq == seq) {
+                WebRtcLog.transition("Ring unanswered")
                 _state.value = CallState.NoAnswer(seq)
             }
         }
@@ -490,6 +582,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 CallErrorKind.UNKNOWN to
                     (t.message ?: "Something went wrong.")
         }
+        WebRtcLog.transition("Call failed: ${kind.name}")
         _state.value = CallState.Error(kind = kind, message = message, seq = currentSeq)
     }
 }

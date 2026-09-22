@@ -2,46 +2,49 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    match /calls/family_channel {
-
-      // Read: any authenticated user (both flavors use anonymous auth).
-      allow read: if request.auth != null;
-
-      // Create: only the initial IDLE document with no sdp.
-      allow create: if request.auth != null
-                    && request.resource.data.status == 'IDLE'
-                    && request.resource.data.seq == 0
-                    && !('sdp' in request.resource.data);
-
-      // Update: the room is a signaling channel. Validate the shape.
-      // An attacker can still write, but they cannot inject arbitrary
-      // fields or change the document structure.
-      allow update: if request.auth != null
-                    && request.resource.data.keys().hasOnly(
-                         ['seq','type','sdp','status','updatedAt'])
-                    && request.resource.data.seq is int
-                    && request.resource.data.seq >= 0
-                    && request.resource.data.status in
-                         ['IDLE','RINGING','CONNECTING','CONNECTED','ENDED']
-                    && (request.resource.data.type in ['OFFER','ANSWER']
-                        || request.resource.data.status == 'IDLE');
-
-      // Delete: forbidden. The document persists across calls.
-      allow delete: if false;
-
-      // Candidates subcollection: same auth gate, same shape check.
-      match /candidates/{candidateId} {
-        allow read, write: if request.auth != null
-              && request.resource.data.keys().hasOnly(
-                   ['serverUrl','sdpMid','sdpMLineIndex','sdpCandidate'])
-              && request.resource.data.sdpCandidate is string
-              && request.resource.data.sdpCandidate.size() < 512;
-      }
+    // Users collection: only the owner can read/write their doc.
+    // Needed for fcmToken storage in Phase 6.
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
     }
 
-    // Everything else: deny.
-    match /{document=**} {
-      allow read, write: if false;
+    // Calls: per-call documents (Contract 4 client). The call id is an
+    // opaque id per attempt (currently the static family_channel id);
+    // both parties' UIDs are recorded on the doc. Fresh installs mint
+    // new anon UIDs, orphaning old rooms -- orphan docs fail closed
+    // (no party match) and are harmless dead data.
+    match /calls/{callId} {
+
+      // Get: any authenticated user. The publish path runs a transaction
+      // that reads the doc BEFORE it exists; a read rule referencing
+      // resource.data denies missing docs, which surfaces as
+      // PERMISSION_DENIED and bricks every first call as "line busy".
+      // Auth-only get keeps the pre-read working; all mutation stays
+      // party-restricted below. Doc ids are unguessable and SDP is no
+      // more sensitive than the consented call itself.
+      allow get: if request.auth != null;
+
+      // List: denied. Clients address docs by id; no query path exists,
+      // so none is opened.
+      allow list: if false;
+
+      // Create: caller must claim themselves; callee must be a string;
+      // every call starts RINGING. Prevents caller spoofing.
+      allow create: if request.auth != null
+                    && request.resource.data.callerUid == request.auth.uid
+                    && request.resource.data.calleeUid is string
+                    && request.resource.data.status == 'RINGING';
+
+      // Update: only the two parties recorded on the existing doc.
+      // Covers answer (callee), decline/end (either side), re-ring.
+      allow update: if request.auth != null
+                    && (request.auth.uid == resource.data.callerUid
+                        || request.auth.uid == resource.data.calleeUid);
+
+      // Delete: forbidden. Teardown writes ENDED; the doc is the shared
+      // teardown signal the peer observes. Nobody deletes.
+      allow delete: if false;
     }
   }
 }

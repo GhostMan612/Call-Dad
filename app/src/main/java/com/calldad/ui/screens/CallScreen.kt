@@ -142,10 +142,17 @@ fun CallScreen(
     DisposableEffect(lifecycleOwner, localVideoTrack) {
         val track = localVideoTrack ?: return@DisposableEffect onDispose { }
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> track.setEnabled(false)
-                Lifecycle.Event.ON_RESUME -> track.setEnabled(true)
-                else -> Unit
+            // The track reference is captured at composition: after a
+            // hangup the native track is already disposed while this
+            // observer is still registered, and the navigate-home
+            // transition fires one last ON_PAUSE into it. Swallow that
+            // (device-proven FATAL: "MediaStreamTrack has been disposed").
+            runCatching {
+                when (event) {
+                    Lifecycle.Event.ON_PAUSE -> track.setEnabled(false)
+                    Lifecycle.Event.ON_RESUME -> track.setEnabled(true)
+                    else -> Unit
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
