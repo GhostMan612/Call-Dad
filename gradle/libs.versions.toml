@@ -31,6 +31,16 @@ webkit = "1.12.1"
 # two-person sideloaded threat model; allowBackup=false + D2D rules cover it.
 datastorePreferences = "1.1.1"
 
+# --- Contract 4 additions (pairing: CameraX + unbundled ML Kit + ZXing) --
+# Unbundled ML Kit pivot is for APK size (~2.4MB -> ~200KB); the 16KB
+# alignment issue is resolved in 18.3.1. play-services-base carries
+# ModuleInstallClient (OptionalModuleApi install path).
+camerax = "1.6.1"
+mlkitBarcode = "18.3.1"
+zxing = "3.5.3"
+kotlinxCoroutinesPlayServices = "1.10.2"
+playServicesBase = "18.5.0"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -67,6 +77,17 @@ androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "w
 
 # --- Phase 12 additions -------------------------------------------------
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
+
+# --- Contract 4 additions -------------------------------------------------
+camerax-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+camerax-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+camerax-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+camerax-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
+camerax-mlkit-vision = { group = "androidx.camera", name = "camera-mlkit-vision", version.ref = "camerax" }
+mlkit-barcode-scanning = { group = "com.google.android.gms", name = "play-services-mlkit-barcode-scanning", version.ref = "mlkitBarcode" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
+play-services-base = { group = "com.google.android.gms", name = "play-services-base", version.ref = "playServicesBase" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

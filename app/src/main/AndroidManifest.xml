@@ -35,6 +35,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.CallDad">
 
+        <!-- Contract 4: unbundled ML Kit barcode model (Play Services download). -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

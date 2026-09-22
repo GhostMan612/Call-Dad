@@ -128,6 +128,19 @@ dependencies {
     // ---- Phase 12: peer persistence (SecurePeerStore, plaintext per catalog note) ----
     implementation(libs.datastore.preferences)
 
+    // ---- Contract 4: QR pairing (CameraX + unbundled ML Kit + ZXing) ----
+    // NOTE: kotlinx-coroutines-play-services intentionally NOT repeated here:
+    // Phase 2 already declares implementation(libs.kotlinx.coroutines.play.services),
+    // which now resolves to 1.10.2 via the catalog re-point above.
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+    implementation(libs.camerax.mlkit.vision)
+    implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.zxing.core)
+    implementation(libs.play.services.base)
+
     // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
     testImplementation("junit:junit:4.13.2")
     testImplementation(libs.kotlinx.coroutines.test)
