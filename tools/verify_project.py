@@ -78,7 +78,9 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "app/src/main/java/com/calldad/pairing/ModuleAvailabilityCheck.kt",
                   "app/src/main/java/com/calldad/pairing/QrGenerator.kt",
                   "app/src/main/java/com/calldad/ui/screens/PairingViewModel.kt",
-                  "app/src/main/java/com/calldad/ui/screens/PairingScreen.kt"]
+                  "app/src/main/java/com/calldad/ui/screens/PairingScreen.kt",
+                  "app/src/main/res/xml/backup_rules.xml",
+                  "app/src/main/res/xml/data_extraction_rules.xml"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]

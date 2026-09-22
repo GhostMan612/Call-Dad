@@ -13,4 +13,5 @@ object Routes {
     const val PTT = "ptt"
     const val GAME = "game"
     const val HELPER = "helper"
+    const val PAIRING = "pairing"
 }

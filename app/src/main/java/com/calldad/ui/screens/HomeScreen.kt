@@ -7,6 +7,7 @@
 package com.calldad.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,20 +15,27 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsVoice
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,6 +51,7 @@ import com.calldad.ui.theme.PttOrange
 @Composable
 fun HomeScreen(
     onNavigate: (String) -> Unit,
+    onOpenPairing: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = viewModel()
 ) {
@@ -59,6 +68,7 @@ fun HomeScreen(
     HomeContent(
         destinations = destinations,
         onActionSelected = onNavigate,
+        onOpenPairing = onOpenPairing,
         modifier = modifier
     )
 }
@@ -75,45 +85,68 @@ fun HomeScreen(
 private fun HomeContent(
     destinations: List<HomeDestination>,
     onActionSelected: (String) -> Unit,
+    onOpenPairing: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "Hi! What do you want to do?",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Hi! What do you want to do?",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
 
-            destinations.chunked(2).forEach { rowItems ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    rowItems.forEach { destination ->
-                        val visuals = destination.visuals()
-                        GiantActionCard(
-                            label = destination.label,
-                            icon = visuals.icon,
-                            containerColor = visuals.container,
-                            onClick = { onActionSelected(destination.route) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                        )
+                destinations.chunked(2).forEach { rowItems ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        rowItems.forEach { destination ->
+                            val visuals = destination.visuals()
+                            GiantActionCard(
+                                label = destination.label,
+                                icon = visuals.icon,
+                                containerColor = visuals.container,
+                                onClick = { onActionSelected(destination.route) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
+                        }
+                        // Preserve the 2x2 rhythm if a row is ever short.
+                        if (rowItems.size == 1) Spacer(Modifier.weight(1f))
                     }
-                    // Preserve the 2x2 rhythm if a row is ever short.
-                    if (rowItems.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
+        }
+
+        // Gear icon, top-end corner. 64dp touch target, 50% alpha
+        // tint. Visually subordinate to the four action cards so
+        // a 6-year-old does not press it accidentally.
+        IconButton(
+            onClick = onOpenPairing,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+                .size(64.dp)
+                .semantics { contentDescription = "Pair devices" }
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = MaterialTheme.colorScheme.onBackground
+                    .copy(alpha = 0.5f)
+            )
         }
     }
 }
@@ -133,7 +166,8 @@ private fun HomeContentPreview() {
     CallDadTheme {
         HomeContent(
             destinations = HomeDestination.entries.toList(),
-            onActionSelected = {}
+            onActionSelected = {},
+            onOpenPairing = {}
         )
     }
 }

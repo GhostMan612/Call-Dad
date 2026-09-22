@@ -19,6 +19,7 @@ import com.calldad.ui.screens.CallScreen
 import com.calldad.ui.screens.GameScreen
 import com.calldad.ui.screens.HelperScreen
 import com.calldad.ui.screens.HomeScreen
+import com.calldad.ui.screens.PairingScreen
 import com.calldad.ui.screens.PttScreen
 
 /**
@@ -51,7 +52,14 @@ fun AppNavHost(
         modifier = modifier
     ) {
         composable(Routes.HOME) {
-            HomeScreen(onNavigate = navController::navigateGuarded)
+            HomeScreen(
+                onNavigate = navController::navigateGuarded,
+                onOpenPairing = {
+                    navController.navigate(Routes.PAIRING) {
+                        launchSingleTop = true
+                    }
+                }
+            )
         }
         composable(
             route = "${Routes.CALL}?mode={mode}",
@@ -72,6 +80,11 @@ fun AppNavHost(
         }
         composable(Routes.HELPER) {
             HelperScreen(onBackHome = navController::returnHome)
+        }
+        composable(Routes.PAIRING) {
+            PairingScreen(
+                onPaired = { navController.popBackStack() }
+            )
         }
     }
 }

@@ -34,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -241,6 +242,22 @@ private fun QrScannerView(
             setEnabledUseCases(
                 androidx.camera.view.CameraController.IMAGE_ANALYSIS
             )
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            // Release the camera hardware when the composable leaves
+            // the composition. The state transition to Paired or Error
+            // removes QrScannerView from the tree while the
+            // NavBackStackEntry lifecycle remains active, so the
+            // controller would otherwise keep the camera LED on.
+            //
+            // NOTE: the method is unbind(), NOT unbindAll().
+            // unbindAll() is @hide and @RestrictTo(LIBRARY_GROUP) on
+            // the CameraX class. It is not callable from application
+            // code.
+            cameraController.unbind()
         }
     }
 
