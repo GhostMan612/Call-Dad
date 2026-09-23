@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
@@ -72,6 +73,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     private var autoDismissJob: Job? = null
     private var noAnswerJob: Job? = null
+    private var elapsedJob: Job? = null
     private var listenerWatchdogJob: Job? = null
     private var callObserverJob: Job? = null
     private var lastPauseTime: Long = 0L
@@ -299,6 +301,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     fun declineCall() {
         viewModelScope.launch { signaling.declineCall(STATIC_ROOM_ID) }
+        stopElapsedTimer()
         _state.value = CallState.Declined
     }
 
@@ -309,6 +312,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         listenerWatchdogJob?.cancel()
         webrtc.dispose()
         lastAppliedOfferSeq = -1
+        stopElapsedTimer()
         lastAppliedAnswerSeq = -1
         appliedCandidates.clear()
         _state.value = CallState.Ended(EndReason.LOCAL_HANGUP)
@@ -318,6 +322,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value is CallState.Error) {
             noAnswerJob?.cancel()
             noAnswerJob = null
+            stopElapsedTimer()
             _state.value = CallState.Idle
         }
     }
@@ -448,6 +453,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         if (newState is CallState.Connected) {
             noAnswerJob?.cancel()
             noAnswerJob = null
+            startElapsedTimer()
         }
 
         // Sequence-tracked SDP application. Runs only on committed
@@ -536,11 +542,28 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         autoDismissJob?.cancel()
         autoDismissJob = null
         if (state is CallState.Declined || state is CallState.Ended) {
+            stopElapsedTimer()
             autoDismissJob = viewModelScope.launch {
                 delay(2_000)
                 _state.value = CallState.Idle
             }
         }
+    }
+
+    private fun startElapsedTimer() {
+        elapsedJob?.cancel()
+        _elapsedSeconds.value = 0
+        elapsedJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1_000)
+                _elapsedSeconds.update { it + 1 }
+            }
+        }
+    }
+
+    private fun stopElapsedTimer() {
+        elapsedJob?.cancel()
+        elapsedJob = null
     }
 
     private fun startNoAnswerTimer(seq: Int) {
