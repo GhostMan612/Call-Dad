@@ -1,5 +1,5 @@
 // Call-Dad app module. Phase 5 — BuildConfig fields injected from local.properties (gitignored).
-// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.0.
+// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.1.
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 
 plugins {
@@ -17,9 +17,9 @@ android {
         applicationId = "com.calldad"
         minSdk = 26
         targetSdk = 35
-        // versionCode 3: build fingerprint (lane-checkable via dumpsys).
-        versionCode = 3
-        versionName = "0.2.0"
+        // versionCode 4: build fingerprint (lane-checkable via dumpsys).
+        versionCode = 4
+        versionName = "0.2.1"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

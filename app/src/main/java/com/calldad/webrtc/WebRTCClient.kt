@@ -180,9 +180,15 @@ class WebRTCClient(
         // treats future ringtones as "already in a call" (single TING, no
         // vibration — device-proven class of bug). Deprecated constant is
         // still the only reliable path across API 26–35.
+        // Speakerphone is forced ON for the same reason a 6-year-old never
+        // holds a phone to her ear: without it all call audio routes to the
+        // earpiece and a video call sounds dead (device-reported 09-23).
+        // Restored in dispose() alongside the mode reset.
         @Suppress("DEPRECATION")
-        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-            .mode = AudioManager.MODE_IN_COMMUNICATION
+        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager).also { audio ->
+            audio.mode = AudioManager.MODE_IN_COMMUNICATION
+            audio.isSpeakerphoneOn = true
+        }
         createGameDataChannel()
         attachLocalTracks()
         WebRtcLog.transition("PeerConnection created")
@@ -478,9 +484,13 @@ class WebRTCClient(
         // Audio-mode reset FIRST among native teardowns: must precede
         // peerConnection.close() so no callback observes a half-torn-down
         // stack in call mode. See the MODE_IN_COMMUNICATION note above.
+        // Speakerphone from createPeerConnection() is released here too so
+        // the next ringtone/call starts from the platform default (earpiece).
         @Suppress("DEPRECATION")
-        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-            .mode = AudioManager.MODE_NORMAL
+        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager).also { audio ->
+            audio.mode = AudioManager.MODE_NORMAL
+            audio.isSpeakerphoneOn = false
+        }
         peerConnection?.close(); peerConnection = null
         factory?.dispose(); factory = null
         eglBase.release()
