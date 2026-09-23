@@ -46,5 +46,32 @@ service cloud.firestore {
       // teardown signal the peer observes. Nobody deletes.
       allow delete: if false;
     }
+
+    match /pairings/{uid} {
+      // Read: any authenticated user. The peer must be able to read
+      // an EXPIRED pairing document to determine unreachability.
+      // Rules are not filters — a protected read would fail the
+      // transaction with PERMISSION_DENIED instead of returning null.
+      allow read: if request.auth != null;
+
+      // Write: owner only, with bounded expiry. sessionNonce is
+      // intentionally NOT required here: the heartbeat's set(merge)
+      // creates the doc with only {uid, expiresAt} when missing, and
+      // a create evaluates this same rule — demanding sessionNonce
+      // would brick presence creation on fresh installs (the heartbeat
+      // never learns the handshake nonce). Handshake queries filter by
+      // nonce equality, so nonce-less presence docs are invisible to
+      // pairing logic. Owner + 25-minute upper bound still enforced.
+      allow create, update: if request.auth != null
+                            && request.auth.uid == uid
+                            && request.resource.data.uid == uid
+                            && request.resource.data.expiresAt is timestamp
+                            && request.resource.data.expiresAt > request.time
+                            && request.resource.data.expiresAt <
+                               request.time + duration.value(25, 'm');
+
+      allow delete: if request.auth != null
+                    && request.auth.uid == uid;
+    }
   }
 }

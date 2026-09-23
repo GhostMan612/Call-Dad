@@ -6,12 +6,16 @@
 // Location: app/src/main/java/com/calldad/data/signaling/SignalingClient.kt
 package com.calldad.data.signaling
 
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.TransactionOptions
+import com.calldad.webrtc.WebRtcLog
+import java.util.Date
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -27,6 +31,8 @@ class SignalingClient(
         .setMaxAttempts(5)
         .build()
 
+    private val STALE_THRESHOLD_MS = 1_200_000L
+
     suspend fun publishOffer(
         callId: String,
         offerSdp: String,
@@ -37,11 +43,38 @@ class SignalingClient(
             val ref = calls.document(callId)
             val snap = txn.get(ref)
 
-            if (snap.getString("status") == "CONNECTED") {
-                throw FirebaseFirestoreException(
-                    "Peer busy",
-                    FirebaseFirestoreException.Code.ABORTED
+            if (snap.exists() && snap.getString("status") == "CONNECTED") {
+                val updatedAt = snap.getTimestamp("updatedAt")
+                val isStale = updatedAt == null ||
+                    (System.currentTimeMillis() -
+                        updatedAt.toDate().time) > STALE_THRESHOLD_MS
+                if (!isStale) {
+                    throw FirebaseFirestoreException(
+                        "Peer busy",
+                        FirebaseFirestoreException.Code.ABORTED
+                    )
+                }
+
+                // Peer-unreachability guard. The pairing rules allow
+                // reads of all pairing documents (expired or not), so
+                // this txn.get() returns the document even when
+                // expiresAt is in the past. The client checks expiry.
+                val peerPairing = txn.get(
+                    firestore.collection("pairings").document(calleeUid)
                 )
+                if (peerPairing.exists()) {
+                    val peerExpiresAt = peerPairing.getTimestamp("expiresAt")
+                    if (peerExpiresAt != null &&
+                        peerExpiresAt.toDate().time >
+                            System.currentTimeMillis()) {
+                        throw FirebaseFirestoreException(
+                            "Peer reachable",
+                            FirebaseFirestoreException.Code.ABORTED
+                        )
+                    }
+                }
+
+                WebRtcLog.transition("Stale CONNECTED room taken over")
             }
 
             val currentSeq = snap.getLong("seq")?.toInt() ?: 0
@@ -114,6 +147,41 @@ class SignalingClient(
     }
 
     /**
+     * Heartbeat: refreshes the room timestamp and keeps this device's
+     * pairing presence alive, atomically. Called every 120s while
+     * Connected; the 20-minute stale threshold gives margin against
+     * Doze throttling the loop.
+     */
+    suspend fun heartbeat(
+        callId: String,
+        ownUid: String
+    ): Result<Unit> = runCatching {
+        val batch = firestore.batch()
+
+        batch.update(
+            calls.document(callId),
+            "updatedAt", FieldValue.serverTimestamp()
+        )
+
+        // Use set(merge) instead of update(). The pairing document
+        // may not exist (fresh install, cleaned up). update() would
+        // fail with NOT_FOUND and abort the entire batch.
+        batch.set(
+            firestore.collection("pairings").document(ownUid),
+            mapOf(
+                "uid" to ownUid,
+                "expiresAt" to Timestamp(
+                    Date(System.currentTimeMillis() + 1_200_000L)
+                )
+            ),
+            SetOptions.merge()
+        )
+
+        batch.commit().await()
+        Unit
+    }
+
+    /**
      * Trickles one locally-gathered candidate into the room arrays.
      * Caller writes callerCandidates, callee writes calleeCandidates;
      * arrayUnion makes concurrent trickle safe with no read-modify-write.
@@ -156,6 +224,13 @@ class SignalingClient(
 
     private fun com.google.firebase.firestore.DocumentSnapshot
         .toCallDocumentOrNull(): CallDocument? {
+        // serverTimestamp() fires the listener twice: once optimistically
+        // with hasPendingWrites=true and a null timestamp, then again
+        // with the server value. The optimistic snap has no usable clock
+        // (and a half-written shape); skip it and wait for the server ack.
+        // NOTE: spec text uses property syntax; the Java getter requires
+        // explicit parens to compile.
+        if (metadata.hasPendingWrites()) return null
         val status = getString("status") ?: return null
         val seq = getLong("seq")?.toInt() ?: 0
         val callerUid = getString("callerUid").orEmpty()

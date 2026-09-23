@@ -52,3 +52,11 @@ AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / 
 - G10 (Phase 10 code): LANDED 2026-09-20, BLOCKED — flavors + game hub + bounds guard; needs console app entries + merged json BEFORE any build, then §G matrix.
 - G9 (Phase 9 code): LANDED 2026-09-20, UNPROVEN — TURN_URLS + audio-mode + single ringer + voice helper + game hub + 6 bot tests; needs Studio sync (no new deps) + §K matrix.
 - G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle).
+
+## Contracts 2–7 delta (2026-09-21/22 — see SESSION_HANDOFF for the night log)
+
+- Signaling is per-call rooms (`calls/{id}`, STATIC_ROOM_ID family_channel) with seq/status machine, topic FCM, 7-state UI machine, ICE trickle into room arrays, setup timeouts, instruments. Tests: `CallStateTest` (fromDocument); `CallDocumentTest` deleted (model retired).
+- Pairing: QR both ways → DataStore; mutual handshake via `pairings/{uid}` presence docs (nonce-scoped, 20-min expiry); rules stanza pending DEPLOY (lane cannot deploy — operator console step).
+- Reliability: heartbeat (120s batch) keeps room fresh; stale-CONNECTED takeover (20-min threshold + peer-unreachability guard) ends the delete-doc ritual; hasPendingWrites guard skips optimistic echoes.
+- Known open: hangup-crash guard needs watched confirmation; FCM wakeup is blueprint-only (Contract 7 deferred implementation); TURN/tablet matrices; retired-test debt cleared this round.
+- G-C7 (Contract 7 code): LANDED, UNCOMMITTED — needs pairings-rules deploy + assemble both + takeover/handshake/heartbeat matrices.

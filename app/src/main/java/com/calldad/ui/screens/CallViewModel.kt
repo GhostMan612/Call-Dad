@@ -76,6 +76,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private var elapsedJob: Job? = null
     private var listenerWatchdogJob: Job? = null
     private var callObserverJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var lastPauseTime: Long = 0L
 
     private val _state = MutableStateFlow<CallState>(CallState.Idle)
@@ -310,6 +311,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         autoDismissJob?.cancel()
         noAnswerJob?.cancel()
         listenerWatchdogJob?.cancel()
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         webrtc.dispose()
         lastAppliedOfferSeq = -1
         stopElapsedTimer()
@@ -322,6 +325,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value is CallState.Error) {
             noAnswerJob?.cancel()
             noAnswerJob = null
+            heartbeatJob?.cancel()
+            heartbeatJob = null
             stopElapsedTimer()
             _state.value = CallState.Idle
         }
@@ -372,6 +377,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         autoDismissJob?.cancel()
         noAnswerJob?.cancel()
         listenerWatchdogJob?.cancel()
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         webrtc.dispose()
         super.onCleared()
     }
@@ -454,6 +461,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             noAnswerJob?.cancel()
             noAnswerJob = null
             startElapsedTimer()
+            startHeartbeat()
         }
 
         // Sequence-tracked SDP application. Runs only on committed
@@ -564,6 +572,20 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopElapsedTimer() {
         elapsedJob?.cancel()
         elapsedJob = null
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = viewModelScope.launch {
+            while (isActive) {
+                delay(120_000L)
+                val ownUid = FirebaseAuth.getInstance()
+                    .currentUser?.uid ?: continue
+                runCatching {
+                    signaling.heartbeat(STATIC_ROOM_ID, ownUid)
+                }
+            }
+        }
     }
 
     private fun startNoAnswerTimer(seq: Int) {

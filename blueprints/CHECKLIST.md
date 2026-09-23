@@ -79,3 +79,19 @@
 - [ ] Parent gate + consent cert + kill switch
 - [ ] SQLCipher (per ADR-003), kid-UX + no-escape audits
 - [ ] v0.1 device proof on Moto G + BLU View 5 (human)
+
+## Contracts 2–6 — Signaling rebuild → pairing → reliability (landed 2026-09-21/22, pushed)
+- [x] C2&3: 7-state CallState + per-call rooms + topic wakeup + wakelock + strings (Mama/Dad)
+- [x] Legacy cleanup: duplicate CallDocument deleted, seq-tracked SDP, Home listener restored, try/catch call launches, ICE trickle, setup timeouts, instruments, caller-label fix, stale-track crash guard, SecurePeerStore
+- [x] C4: CameraX 1.4.2 + unbundled ML Kit 18.3.1 + ZXing pairing (QR both ways, DataStore persistence)
+- [x] C5: PAIRING route + gear + backup rules both API ranges + allowBackup false + camera unbind
+- [x] Timer fix: elapsed timer on Connected (was frozen at 00:00)
+- [x] Operator-run clean assembleParentDebug+assembleChildDebug BUILD SUCCESSFUL; first E2E call GREEN (offer/answer live)
+- [ ] Human: fresh-install both flavors → pair both ways → strict one-caller test → hangup test (observer-guard confirmation)
+
+## Contract 7 — Stale takeover + mutual pairing + debt (code landed, uncommitted)
+- [x] Heartbeat (120s batch: room updatedAt + pairings presence) + stale-CONNECTED takeover (20-min threshold + peer-unreachability guard) + hasPendingWrites guard
+- [x] Mutual handshake (QR-derived nonce, presence docs, 30s peer wait, 1.5s hold) + pairings rules stanza
+- [x] CallStateTest rewritten (7-state fromDocument); CallDocumentTest deleted (model retired); deprecation suppressions + FID TODO
+- [x] ADR-014 (pairing) + LESSONS_LEARNED.md + CURRENT_STATE/CHECKLIST updated
+- [ ] Human: deploy pairings rules (console — new stanza, lane cannot deploy) → assemble both → takeover matrix (§2) + handshake matrix (§3) + heartbeat check (§4)

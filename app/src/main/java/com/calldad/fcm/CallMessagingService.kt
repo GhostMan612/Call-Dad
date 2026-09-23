@@ -34,6 +34,10 @@ class CallMessagingService : FirebaseMessagingService() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    // TODO: Defer to FID-based Admin SDK migration. Requires
+    // synchronized Cloud Function rewrite and Firestore schema
+    // migration (fcmToken -> fid). Do NOT partial-migrate.
     override fun onNewToken(token: String) {
         // TODO: persist when per-device targeting returns (topic needs no
         // token today). For now, log only — never the token itself.
