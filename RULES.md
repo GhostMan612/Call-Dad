@@ -47,7 +47,7 @@ C:\Program Files\Microsoft Visual Studio
 
 ### 1.5 BUILD BOUNDARY — HARD RULE
 - NEVER run: `assemble*`, `install*`, `connected*`, `flutter build/run`, emulator installs. The human builds + installs in Android Studio on Moto G 2025 / BLU View 5.
-- Your lane ends at source correctness: `./gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest :app:lintParentDebug :app:lintChildDebug` (run from the repo root; the parent/child flavors mean the unflavored `testDebugUnitTest`/`lintDebug` tasks do not exist), `tools/verify_project.py`, `node --test functions/`, the Firestore rules tests in `tools/rules-test/` (local emulator), `adb devices` / read-only `adb shell getprop`. Compiling via the unit-test tasks is source verification, not a build claim.
+- Your lane ends at source correctness: `./gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest :app:lintParentDebug :app:lintChildDebug` (run from the repo root; the parent/child flavors mean the unflavored `testDebugUnitTest`/`lintDebug` tasks do not exist), `tools/verify_project.py`, `node --test functions/ring.test.js`, the Firestore rules tests in `tools/rules-test/` (local emulator), `adb devices` / read-only `adb shell getprop`. Compiling via the unit-test tasks is source verification, not a build claim.
 - Device/instrumented suites under `app/src/androidTest/` exist for the human's manual runs — do NOT execute them here unless explicitly asked.
 - Debug device failures from the human's pasted output — never by rebuilding locally.
 - Source: Vision `§1.5`, Atlas `§1.6`, Recovery `§1.5`.

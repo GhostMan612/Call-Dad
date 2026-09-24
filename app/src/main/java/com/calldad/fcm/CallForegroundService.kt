@@ -96,7 +96,7 @@ class CallForegroundService : Service() {
             return
         }
 
-        CallAudioManager.startRinging(applicationContext)
+        CallAudioManager.startRinging(applicationContext, CallAudioManager.OWNER_SERVICE)
 
         registration?.remove()
         registration = FirebaseFirestore.getInstance()
@@ -119,7 +119,7 @@ class CallForegroundService : Service() {
     }
 
     private fun shutDown() {
-        CallAudioManager.stop()
+        CallAudioManager.stopRinging(CallAudioManager.OWNER_SERVICE)
         registration?.remove()
         registration = null
         watchJob?.cancel()

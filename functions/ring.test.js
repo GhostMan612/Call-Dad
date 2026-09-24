@@ -1,4 +1,4 @@
-// Host test for the ring decision. Run: node --test functions/
+// Host test for the ring decision. Run: node --test functions/ring.test.js
 const test = require("node:test");
 const assert = require("node:assert");
 

@@ -77,6 +77,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private var currentSeq = 0
     private var amCaller = false
     private var publishingOffer = false
+    /**
+     * Bumped on every teardown and new generation. A coroutine captures it
+     * at start and does nothing after a suspension if it moved on: a slow
+     * answer/offer from an old attempt can never touch a newer call.
+     */
+    private var attempt = 0
     private var answering = false
     private var localSdpPublished = false
     private val pendingLocalCandidates = mutableListOf<IceCandidate>()
@@ -154,6 +160,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         beginGeneration(asCaller = true)
         _state.value = CallState.Ringing(currentSeq, false, peerDisplayName(), p.roomId)
         CallAudioManager.startRingback()
+        val myAttempt = attempt
 
         viewModelScope.launch {
             try {
@@ -165,7 +172,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 WebRtcLog.transition("OFFER published")
                 val stillCalling = _state.value.let { it is CallState.Ringing && !it.isIncoming }
-                if (!stillCalling || rtc !== client) {
+                if (!stillCalling || rtc !== client || attempt != myAttempt) {
                     // Hung up (or failed) while the offer was in flight:
                     // cancel the ring we just started so the peer never
                     // rings for a call nobody is on.
@@ -177,13 +184,15 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 flushLocalCandidates()
                 _state.value = CallState.Ringing(seq, false, peerDisplayName(), p.roomId)
                 startNoAnswerTimer(seq)
-                publishingOffer = false
-                lastDoc?.takeIf { it.seq == seq }?.let { handleDocument(it) }
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
-                fail(t)
+                if (attempt == myAttempt) fail(t)
             } finally {
                 publishingOffer = false
+                // Docs held back while publishing (our own echo, an answer
+                // that beat the transaction result, or the peer's ring in
+                // glare / after a failed publish) are replayed now.
+                lastDoc?.takeIf { it.seq >= currentSeq }?.let { handleDocument(it) }
             }
         }
     }
@@ -198,6 +207,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         answering = true
         CallAudioManager.stop()
         CallForegroundService.dismiss(app)
+        noAnswerJob?.cancel(); noAnswerJob = null
+        val myAttempt = attempt
 
         viewModelScope.launch {
             try {
@@ -206,6 +217,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                         ?.takeIf { it.seq == s.seq && it.status == "RINGING" }
                     ?: throw CallNoLongerRingingException()
                 val offer = doc.offer ?: throw CallNoLongerRingingException()
+                if (attempt != myAttempt) return@launch
 
                 val client = newClient()
                 if (!client.setRemoteDescription(offer)) {
@@ -217,18 +229,24 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     signaling.publishAnswer(p.roomId, s.seq, answer.sdp).getOrThrow()
                 }
                 WebRtcLog.transition("ANSWER published")
+                if (attempt != myAttempt || rtc !== client) {
+                    signaling.finishCall(p.roomId, s.seq, "ENDED")
+                    return@launch
+                }
                 localSdpPublished = true
                 flushLocalCandidates()
                 val now = _state.value
                 if (now is CallState.Ringing && now.seq == s.seq) goConnected(s.seq)
             } catch (t: CallNoLongerRingingException) {
-                teardownMedia()
-                commitTerminal(CallState.Ended(EndReason.MISSED))
+                if (attempt == myAttempt) {
+                    teardownMedia()
+                    commitTerminal(CallState.Ended(EndReason.MISSED))
+                }
             } catch (t: Throwable) {
                 if (t is CancellationException && t !is TimeoutCancellationException) throw t
-                fail(t)
+                if (attempt == myAttempt) fail(t)
             } finally {
-                answering = false
+                if (attempt == myAttempt) answering = false
             }
         }
     }
@@ -364,7 +382,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val mineAsCaller = doc.callerUid == p.ownUid
-        if (publishingOffer && mineAsCaller) return
+        // While our offer is in flight, only a NEWER generation from the
+        // peer matters (glare); everything else waits for the replay.
+        if (publishingOffer && (mineAsCaller || doc.seq <= currentSeq)) return
 
         when {
             doc.seq < currentSeq -> Unit
@@ -403,6 +423,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 answerCall()
             } else {
                 CallAudioManager.startRinging(app)
+                startIncomingTimeout(doc.seq)
             }
             return
         }
@@ -522,6 +543,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The ONE exit path for media: ringers off, jobs off, UI detached, native freed. */
     private fun teardownMedia() {
+        attempt += 1
+        answering = false
         CallAudioManager.stop()
         noAnswerJob?.cancel(); noAnswerJob = null
         elapsedJob?.cancel(); elapsedJob = null
@@ -534,6 +557,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun beginGeneration(asCaller: Boolean) {
+        attempt += 1
         amCaller = asCaller
         localSdpPublished = false
         pendingLocalCandidates.clear()
@@ -594,27 +618,58 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** A peer that vanished (crash, dead battery) ends the call after a grace window. */
+    /**
+     * A ring nobody ends (the caller's phone died or went offline, so its
+     * no-answer write never landed) stops ringing here after a minute.
+     */
+    private fun startIncomingTimeout(seq: Int) {
+        noAnswerJob?.cancel()
+        noAnswerJob = viewModelScope.launch {
+            delay(INCOMING_RING_MS)
+            val s = _state.value
+            if (s is CallState.Ringing && s.isIncoming && s.seq == seq && !answering) {
+                WebRtcLog.transition("Incoming ring expired")
+                pair?.let { p ->
+                    viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
+                }
+                CallForegroundService.dismiss(app)
+                teardownMedia()
+                commitTerminal(CallState.Ended(EndReason.MISSED))
+            }
+        }
+    }
+
+    /**
+     * Ends a call nobody is really on: media never connected within
+     * [FIRST_MEDIA_GRACE_MS] of the answer (dead peer, blocked network), or
+     * the connection stayed LOST for [LOST_GRACE_MS] (crash, dead battery).
+     */
     private fun startConnectionWatch() {
         connectionWatchJob?.cancel()
+        val client = rtc ?: return
         connectionWatchJob = viewModelScope.launch {
+            val connectedAt = System.currentTimeMillis()
             var lostSince = 0L
             while (isActive) {
                 delay(1_000)
-                if (connectionHealth.value == ConnectionHealth.LOST) {
-                    if (lostSince == 0L) lostSince = System.currentTimeMillis()
-                    if (System.currentTimeMillis() - lostSince >= LOST_GRACE_MS) {
-                        WebRtcLog.transition("Connection lost: ending call")
-                        val seq = currentSeq
-                        pair?.let { p ->
-                            viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
-                        }
-                        teardownMedia()
-                        commitTerminal(CallState.Ended(EndReason.NETWORK_FAILURE))
-                        return@launch
+                val now = System.currentTimeMillis()
+                val neverConnected = !client.iceEverConnected.value &&
+                    now - connectedAt >= FIRST_MEDIA_GRACE_MS
+                lostSince = when {
+                    connectionHealth.value != ConnectionHealth.LOST -> 0L
+                    lostSince == 0L -> now
+                    else -> lostSince
+                }
+                val lostTooLong = lostSince != 0L && now - lostSince >= LOST_GRACE_MS
+                if (neverConnected || lostTooLong) {
+                    WebRtcLog.transition("Connection lost: ending call")
+                    val seq = currentSeq
+                    pair?.let { p ->
+                        viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
                     }
-                } else {
-                    lostSince = 0L
+                    teardownMedia()
+                    commitTerminal(CallState.Ended(EndReason.NETWORK_FAILURE))
+                    return@launch
                 }
             }
         }
@@ -667,6 +722,8 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         const val SETUP_TIMEOUT_MS = 10_000L
         const val AUTO_DISMISS_MS = 2_000L
         const val LOST_GRACE_MS = 20_000L
+        const val FIRST_MEDIA_GRACE_MS = 25_000L
+        const val INCOMING_RING_MS = 60_000L
     }
 }
 

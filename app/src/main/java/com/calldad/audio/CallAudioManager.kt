@@ -34,10 +34,20 @@ object CallAudioManager {
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
     private var ringback: ToneGenerator? = null
+    private var ringOwner: String? = null
 
+    /**
+     * [owner] tags who started the ring. The in-app session always takes
+     * ownership; the background service only rings when nothing else is,
+     * and [stopRinging] by the service never silences the app's newer ring.
+     */
     @Synchronized
-    fun startRinging(context: Context) {
-        if (ringtone != null || vibrator != null) return
+    fun startRinging(context: Context, owner: String = OWNER_APP) {
+        if (ringtone != null || vibrator != null) {
+            if (owner == OWNER_APP) ringOwner = OWNER_APP
+            return
+        }
+        ringOwner = owner
         stopRingbackLocked()
         val app = context.applicationContext
 
@@ -90,7 +100,17 @@ object CallAudioManager {
         stopRingbackLocked()
     }
 
+    /** Stops the ring only if [owner] started it and still owns it. */
+    @Synchronized
+    fun stopRinging(owner: String) {
+        if (ringOwner == owner) stopRingingLocked()
+    }
+
+    const val OWNER_APP = "app"
+    const val OWNER_SERVICE = "service"
+
     private fun stopRingingLocked() {
+        ringOwner = null
         if (ringtone == null && vibrator == null) return
         runCatching { ringtone?.stop() }
         ringtone = null

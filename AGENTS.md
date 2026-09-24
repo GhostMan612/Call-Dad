@@ -49,7 +49,7 @@ Call-Dad/
 
 ```powershell
 C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py
-node --test functions/
+node --test functions/ring.test.js
 cd tools\rules-test; npm install; npx firebase emulators:exec --only firestore --project demo-calldad "node --test"
 ```
 

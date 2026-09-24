@@ -91,6 +91,12 @@ class WebRTCClient(
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<RtcIceCandidate>()
 
+    private val _iceEverConnected = MutableStateFlow(false)
+    /** True once ICE reached CONNECTED/COMPLETED at least once. */
+    val iceEverConnected: StateFlow<Boolean> = _iceEverConnected.asStateFlow()
+
+    private val channelLock = Any()
+
     private val _connectionHealth = MutableStateFlow(ConnectionHealth.HEALTHY)
     val connectionHealth: StateFlow<ConnectionHealth> =
         _connectionHealth.asStateFlow()
@@ -163,12 +169,14 @@ class WebRTCClient(
         scope.cancel()
         stopCapture()
 
-        gameChannel?.let { ch ->
-            runCatching { ch.unregisterObserver() }
-            runCatching { ch.close() }
-            runCatching { ch.dispose() }
+        synchronized(channelLock) {
+            gameChannel?.let { ch ->
+                runCatching { ch.unregisterObserver() }
+                runCatching { ch.close() }
+                runCatching { ch.dispose() }
+            }
+            gameChannel = null
         }
-        gameChannel = null
 
         peerConnection?.let { pc ->
             runCatching { pc.close() }
@@ -286,16 +294,22 @@ class WebRTCClient(
         WebRtcLog.transition("Camera capture stopped")
     }
 
-    /** Sends a JSON string over "game_sync". False if not open or over 1 KB. */
+    /**
+     * Sends a JSON string over "game_sync". False if not open or over 1 KB.
+     * Called from the WebView's JS-bridge thread: locked against dispose().
+     */
     fun sendGameData(json: String): Boolean {
-        val channel = gameChannel ?: return false
-        if (channel.state() != DataChannel.State.OPEN) return false
         val bytes = json.toByteArray(Charsets.UTF_8)
         if (bytes.size > MAX_GAME_MESSAGE_BYTES) {
             WebRtcLog.transition("Game message rejected: exceeds 1 KB cap")
             return false
         }
-        return channel.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), false))
+        synchronized(channelLock) {
+            if (disposed) return false
+            val channel = gameChannel ?: return false
+            if (channel.state() != DataChannel.State.OPEN) return false
+            return channel.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), false))
+        }
     }
 
     // -------- internals --------
@@ -337,6 +351,11 @@ class WebRTCClient(
         savedSpeakerOn = null
     }
 
+    /**
+     * Pre-negotiated channel (same id on both sides). Each side creating an
+     * in-band channel and closing the "duplicate" closed BOTH ends in most
+     * timings; a negotiated channel is one channel, no onDataChannel dance.
+     */
     private fun createGameDataChannel(pc: PeerConnection) {
         if (gameChannel != null) return
         val init = DataChannel.Init().apply {
@@ -344,7 +363,8 @@ class WebRTCClient(
             maxRetransmits = -1
             maxRetransmitTimeMs = -1
             protocol = ""
-            negotiated = false
+            negotiated = true
+            id = GAME_CHANNEL_ID
         }
         gameChannel = pc.createDataChannel(GAME_CHANNEL_LABEL, init)?.also {
             it.registerObserver(gameChannelObserver)
@@ -487,19 +507,7 @@ class WebRTCClient(
         override fun onRemoveStream(stream: MediaStream?) {}
 
         override fun onDataChannel(channel: DataChannel?) {
-            channel ?: return
-            if (channel.label() != GAME_CHANNEL_LABEL) return
-            scope.launch {
-                val existing = gameChannel
-                if (existing != null && existing.state() == DataChannel.State.OPEN) {
-                    runCatching { channel.close() }
-                    return@launch
-                }
-                existing?.let { runCatching { it.unregisterObserver(); it.close() } }
-                gameChannel = channel
-                channel.registerObserver(gameChannelObserver)
-                WebRtcLog.transition("DataChannel 'game_sync' accepted from peer")
-            }
+            WebRtcLog.transition("Unexpected in-band DataChannel ignored")
         }
 
         override fun onRenegotiationNeeded() {}
@@ -524,6 +532,7 @@ class WebRTCClient(
             PeerConnection.IceConnectionState.COMPLETED -> {
                 disconnectionDebounceJob?.cancel()
                 disconnectionDebounceJob = null
+                _iceEverConnected.value = true
                 _connectionHealth.value = ConnectionHealth.HEALTHY
             }
             PeerConnection.IceConnectionState.DISCONNECTED -> {
@@ -547,6 +556,7 @@ class WebRTCClient(
 
     private companion object {
         const val GAME_CHANNEL_LABEL = "game_sync"
+        const val GAME_CHANNEL_ID = 0
         const val MAX_GAME_MESSAGE_BYTES = 1024
         const val DISCONNECTED_DEBOUNCE_MS = 3_000L
     }

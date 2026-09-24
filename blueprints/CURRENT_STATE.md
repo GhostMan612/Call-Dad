@@ -59,7 +59,7 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `
 - `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: PASS (80 tests, 0 failures).
 - `:app:lintParentDebug :app:lintChildDebug`: 0 errors. Remaining warnings are dependency-version nags (frozen by ADR-004), portrait lock and missing launcher icon (pre-existing).
 - Kotlin compile: 0 warnings, both flavors.
-- `node --test functions/`: 6/6. Firestore rules emulator suite: 15/15.
+- `node --test functions/ring.test.js`: 6/6. Firestore rules emulator suite: 15/15.
 - `tools/verify_project.py`: PASS.
 - Game protocol: headless two-WebView simulation (solo, synced, validation, resync) PASS.
 - NOT claimed: assemble, install, any on-device behavior.
