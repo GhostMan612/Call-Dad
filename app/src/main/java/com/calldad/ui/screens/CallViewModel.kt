@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/CallViewModel.kt — static room + seq-tracked SDP
+// ui/screens/CallViewModel.kt — activity-scoped call session (ADR-015)
 // Location: app/src/main/java/com/calldad/ui/screens/CallViewModel.kt
 package com.calldad.ui.screens
 
@@ -11,76 +11,91 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.calldad.BuildConfig
 import com.calldad.R
+import com.calldad.audio.CallAudioManager
+import com.calldad.data.session.FamilyPair
+import com.calldad.data.session.FamilySession
 import com.calldad.data.signaling.CallDocument
+import com.calldad.data.signaling.CallNoLongerRingingException
+import com.calldad.data.signaling.CallRoom
 import com.calldad.data.signaling.IceCandidate
-import com.calldad.data.signaling.PeerBusyException
 import com.calldad.data.signaling.SignalingClient
-import com.calldad.data.signaling.TransactionExhaustedException
-import com.calldad.pairing.SecurePeerStore
+import com.calldad.fcm.CallForegroundService
 import com.calldad.webrtc.ConnectionHealth
 import com.calldad.webrtc.WebRTCClient
 import com.calldad.webrtc.WebRtcLog
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 import java.util.Locale
 
+/**
+ * The app's single call session. ACTIVITY-SCOPED (see [callViewModel]):
+ * it outlives the call screen, so it observes the paired room from every
+ * screen (incoming rings are never missed off Home) and the game screen
+ * shares the live call's data channel.
+ *
+ * Media is per attempt: every call/answer builds a fresh [WebRTCClient]
+ * and every exit path goes through [teardownMedia]. The EglBase is owned
+ * here for the ViewModel's lifetime so renderers never outlive it.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
 class CallViewModel(application: Application) : AndroidViewModel(application) {
 
-    companion object {
-        const val STATIC_ROOM_ID = "family_channel"
-    }
+    private val app = application
+    private val signaling = SignalingClient()
+    private val eglBase: EglBase = EglBase.create()
 
-    private val signaling: SignalingClient = SignalingClient()
+    /** Stable for the ViewModel's lifetime; renderers init with it. */
+    val eglContext: EglBase.Context = eglBase.eglBaseContext
 
-    private val webrtc: WebRTCClient = WebRTCClient(
-        context = application.applicationContext,
-        onLocalIceCandidate = { candidate -> onLocalIceCandidate(candidate) },
-        onRemoteVideoTrack = { track -> _remoteVideoTrack.value = track },
-        onConnectionStateChanged = { }
-    )
+    private val rtcFlow = MutableStateFlow<WebRTCClient?>(null)
+    private val rtc: WebRTCClient? get() = rtcFlow.value
 
-    private val peerStore = SecurePeerStore(getApplication())
-    private var listenerSilentSince: Long = System.currentTimeMillis()
+    private var pair: FamilyPair? = null
+    private var lastDoc: CallDocument? = null
 
-    private var lastAppliedOfferSeq: Int = -1
-    private var lastAppliedAnswerSeq: Int = -1
+    private var currentSeq = 0
+    private var amCaller = false
+    private var publishingOffer = false
+    private var answering = false
+    private var localSdpPublished = false
+    private val pendingLocalCandidates = mutableListOf<IceCandidate>()
+    private val appliedRemoteCandidates = mutableSetOf<String>()
+    private var answerAppliedSeq = -1
 
-    private var currentSeq: Int = 0
-
-    private var amCaller: Boolean = false
-
-    /** SDP payloads already fed to the PeerConnection (dedupe trickle). */
-    private val appliedCandidates = mutableSetOf<String>()
-
-    private val peerConnectionMutex = Mutex()
-
+    private var roomJob: Job? = null
+    private var awaitingFirstSnapshot = true
     private var autoDismissJob: Job? = null
     private var noAnswerJob: Job? = null
     private var elapsedJob: Job? = null
-    private var listenerWatchdogJob: Job? = null
-    private var callObserverJob: Job? = null
-    private var heartbeatJob: Job? = null
-    private var lastPauseTime: Long = 0L
+    private var connectionWatchJob: Job? = null
 
     private val _state = MutableStateFlow<CallState>(CallState.Idle)
     val state: StateFlow<CallState> = _state.asStateFlow()
+
+    private val _isPaired = MutableStateFlow<Boolean?>(null)
+    /** null until known; false = no contact yet (Call button explains). */
+    val isPaired: StateFlow<Boolean?> = _isPaired.asStateFlow()
 
     private val _elapsedSeconds = MutableStateFlow(0)
     val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
@@ -88,472 +103,482 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val _isCameraOn = MutableStateFlow(true)
     val isCameraOn: StateFlow<Boolean> = _isCameraOn.asStateFlow()
 
+    private val _isMicOn = MutableStateFlow(true)
+    val isMicOn: StateFlow<Boolean> = _isMicOn.asStateFlow()
+
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
-
-    private val _eglContext = MutableStateFlow<EglBase.Context?>(null)
-    val eglContext: StateFlow<EglBase.Context?> = _eglContext.asStateFlow()
 
     private val _localVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val localVideoTrack: StateFlow<VideoTrack?> = _localVideoTrack.asStateFlow()
 
-    val connectionHealth: StateFlow<ConnectionHealth> = webrtc.connectionHealth
+    val connectionHealth: StateFlow<ConnectionHealth> = rtcFlow
+        .flatMapLatest { it?.connectionHealth ?: flowOf(ConnectionHealth.HEALTHY) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ConnectionHealth.HEALTHY)
+
+    /** Inbound game-sync messages of the live call (empty between calls). */
+    val gameMessages: Flow<String> =
+        rtcFlow.flatMapLatest { it?.gameSyncMessages ?: emptyFlow() }
+
+    /** True once the game data channel can carry messages. */
+    val canPlayTogether: StateFlow<Boolean> = state
+        .map { it is CallState.Connected }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
-        startListenerWatchdog()
-        restartCallObserver()
-    }
-
-    private fun restartCallObserver() {
-        callObserverJob?.cancel()
-        callObserverJob = viewModelScope.launch {
-            signaling.observeCall(STATIC_ROOM_ID)
-                .catch { t -> reportError(t) }
-                .collect { doc -> handleDocument(doc) }
+        viewModelScope.launch {
+            FamilySession.pair(app).collectLatest { p ->
+                onPairChanged(p)
+            }
         }
     }
 
     // -------- public API --------
 
     fun startCall() {
-        if (_state.value !is CallState.Idle) return
-        val callerUid = FirebaseAuth.getInstance().currentUser?.uid ?: run {
+        val s = _state.value
+        val canStart = s is CallState.Idle || s is CallState.NoAnswer ||
+            s is CallState.Declined || s is CallState.Ended || s is CallState.Error
+        if (!canStart || publishingOffer || answering) return
+        val p = pair ?: run {
             _state.value = CallState.Error(
-                CallErrorKind.SIGNALING_FAILED,
-                "Not signed in yet. Please wait a moment."
+                CallErrorKind.NOT_PAIRED,
+                "Not paired yet. Ask a grown-up to pair the phones."
             )
             return
         }
+
+        publishingOffer = true
+        autoDismissJob?.cancel()
+        teardownMedia()
+        beginGeneration(asCaller = true)
+        _state.value = CallState.Ringing(currentSeq, false, peerDisplayName(), p.roomId)
+        CallAudioManager.startRingback()
+
         viewModelScope.launch {
-            // Any throw below (peer store, WebRTC, publish) must surface
-            // as an Error card, never a stuck screen. Cancellation still
-            // propagates so teardown stays prompt.
             try {
-            val calleeUid = withTimeout(5_000) { peerStore.observePeerUid().first() }
-            if (calleeUid.isNullOrBlank()) {
-                _state.value = CallState.Error(
-                    CallErrorKind.SIGNALING_FAILED,
-                    "Not paired yet. Scan the code again."
-                )
-                return@launch
-            }
-
-            if (!webrtc.isInitialized()) {
-                webrtc.initialize()
-                webrtc.createPeerConnection()
-                _eglContext.value = webrtc.eglContext
-                _localVideoTrack.value = webrtc.localVideoTrack
-                webrtc.startCapture()
-            }
-
-            val offer = withTimeout(10_000) { webrtc.createOffer() }
-            amCaller = true
-            WebRtcLog.transition("OFFER publish started")
-
-            _state.value = CallState.Ringing(
-                seq = currentSeq,
-                isIncoming = false,
-                peerName = peerDisplayName(),
-                callId = STATIC_ROOM_ID
-            )
-
-            signaling.publishOffer(
-                callId = STATIC_ROOM_ID,
-                offerSdp = offer.sdp,
-                callerUid = callerUid,
-                calleeUid = calleeUid
-            ).onSuccess { seq ->
+                val client = newClient()
+                val offer = withTimeout(SETUP_TIMEOUT_MS) { client.createOffer() }
+                WebRtcLog.transition("OFFER publish started")
+                val seq = withTimeout(SETUP_TIMEOUT_MS) {
+                    signaling.publishOffer(p.roomId, offer.sdp, p.ownUid, p.peerUid).getOrThrow()
+                }
                 WebRtcLog.transition("OFFER published")
-                appliedCandidates.clear()
+                val stillCalling = _state.value.let { it is CallState.Ringing && !it.isIncoming }
+                if (!stillCalling || rtc !== client) {
+                    // Hung up (or failed) while the offer was in flight:
+                    // cancel the ring we just started so the peer never
+                    // rings for a call nobody is on.
+                    signaling.finishCall(p.roomId, seq, "ENDED")
+                    return@launch
+                }
+                localSdpPublished = true
                 currentSeq = seq
-                _state.value = CallState.Ringing(
-                    seq = seq,
-                    isIncoming = false,
-                    peerName = peerDisplayName(),
-                    callId = STATIC_ROOM_ID
-                )
+                flushLocalCandidates()
+                _state.value = CallState.Ringing(seq, false, peerDisplayName(), p.roomId)
                 startNoAnswerTimer(seq)
-            }.onFailure { t -> reportError(t) }
-            } catch (t: TimeoutCancellationException) {
-                reportError(IllegalStateException("Setup timed out. Tap to try again."))
+                publishingOffer = false
+                lastDoc?.takeIf { it.seq == seq }?.let { handleDocument(it) }
             } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                reportError(t)
+                if (t is CancellationException && t !is TimeoutCancellationException) throw t
+                fail(t)
+            } finally {
+                publishingOffer = false
             }
         }
     }
+
+    /** Try Again from NoAnswer or a recoverable Error: a brand-new call. */
+    fun onReRing() = startCall()
 
     fun answerCall() {
-        val current = _state.value as? CallState.Ringing ?: return
-        if (!current.isIncoming) return
+        val s = _state.value as? CallState.Ringing ?: return
+        if (!s.isIncoming || answering) return
+        val p = pair ?: return
+        answering = true
+        CallAudioManager.stop()
+        CallForegroundService.dismiss(app)
+
         viewModelScope.launch {
             try {
-            if (!webrtc.isInitialized()) {
-                webrtc.initialize()
-                webrtc.createPeerConnection()
-                _eglContext.value = webrtc.eglContext
-                _localVideoTrack.value = webrtc.localVideoTrack
-                webrtc.startCapture()
-            }
-            amCaller = false
-            // First-call defense: if the factory was created between
-            // the Ringing transition and now, the offer was not applied
-            // in applyDocumentPayload. Fetch and apply it here BEFORE
-            // createAnswer. Sequence-tracked so a re-ring at higher seq
-            // is not re-applied twice.
-            signaling.fetchCall(STATIC_ROOM_ID).onSuccess { doc ->
-                val offer = doc.offer
-                if (offer != null && doc.seq > lastAppliedOfferSeq) {
-                    runCatching { webrtc.setRemoteDescription(offer) }
-                    lastAppliedOfferSeq = doc.seq
+                val doc = lastDoc?.takeIf { it.seq == s.seq && it.offer != null }
+                    ?: signaling.fetchCall(p.roomId).getOrNull()
+                        ?.takeIf { it.seq == s.seq && it.status == "RINGING" }
+                    ?: throw CallNoLongerRingingException()
+                val offer = doc.offer ?: throw CallNoLongerRingingException()
+
+                val client = newClient()
+                if (!client.setRemoteDescription(offer)) {
+                    throw IllegalStateException("Could not read the call. Try again.")
                 }
-            }
-
-            val answer = withTimeout(10_000) { webrtc.createAnswer() }
-            signaling.publishAnswer(
-                callId = STATIC_ROOM_ID,
-                answerSdp = answer.sdp
-            ).onSuccess {
+                feedRemoteCandidates(doc)
+                val answer = withTimeout(SETUP_TIMEOUT_MS) { client.createAnswer() }
+                withTimeout(SETUP_TIMEOUT_MS) {
+                    signaling.publishAnswer(p.roomId, s.seq, answer.sdp).getOrThrow()
+                }
                 WebRtcLog.transition("ANSWER published")
-            }.onFailure(::reportError)
-            } catch (t: TimeoutCancellationException) {
-                reportError(IllegalStateException("Setup timed out. Tap to try again."))
+                localSdpPublished = true
+                flushLocalCandidates()
+                val now = _state.value
+                if (now is CallState.Ringing && now.seq == s.seq) goConnected(s.seq)
+            } catch (t: CallNoLongerRingingException) {
+                teardownMedia()
+                commitTerminal(CallState.Ended(EndReason.MISSED))
             } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                reportError(t)
-            }
-        }
-    }
-
-    fun onReRing() {
-        val current = _state.value
-        val allowed = when (current) {
-            is CallState.NoAnswer -> true
-            is CallState.Error -> when (current.kind) {
-                CallErrorKind.PEER_BUSY,
-                CallErrorKind.TRANSACTION_EXHAUSTED,
-                CallErrorKind.SIGNALING_FAILED,
-                CallErrorKind.WEBRTC_FAILED,
-                CallErrorKind.LISTENER_DISCONNECTED -> true
-                else -> false
-            }
-            else -> false
-        }
-        if (!allowed) return
-
-        val callerUid = FirebaseAuth.getInstance().currentUser?.uid ?: run {
-            _state.value = CallState.Error(
-                CallErrorKind.UNKNOWN,
-                "Missing pairing data"
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-            val calleeUid = withTimeout(5_000) { peerStore.observePeerUid().first() }
-            if (calleeUid.isNullOrBlank()) {
-                _state.value = CallState.Error(
-                    CallErrorKind.UNKNOWN,
-                    "Missing pairing data"
-                )
-                return@launch
-            }
-
-            if (!webrtc.isInitialized()) {
-                webrtc.initialize()
-                webrtc.createPeerConnection()
-            }
-
-            val newOffer = webrtc.restartIce()
-            if (newOffer == null) {
-                _state.value = CallState.Error(
-                    kind = CallErrorKind.WEBRTC_FAILED,
-                    message = "Could not prepare the call. Tap to try again.",
-                    seq = currentSeq
-                )
-                return@launch
-            }
-
-            signaling.publishOffer(
-                callId = STATIC_ROOM_ID,
-                offerSdp = newOffer.sdp,
-                callerUid = callerUid,
-                calleeUid = calleeUid
-            ).onSuccess { seq ->
-                appliedCandidates.clear()
-                currentSeq = seq
-                _state.value = CallState.Ringing(
-                    seq = seq,
-                    isIncoming = false,
-                    peerName = peerDisplayName(),
-                    callId = STATIC_ROOM_ID
-                )
-                startNoAnswerTimer(seq)
-            }.onFailure { t -> reportError(t) }
-            } catch (t: TimeoutCancellationException) {
-                reportError(IllegalStateException("Setup timed out. Tap to try again."))
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                reportError(t)
+                if (t is CancellationException && t !is TimeoutCancellationException) throw t
+                fail(t)
+            } finally {
+                answering = false
             }
         }
     }
 
     fun declineCall() {
-        viewModelScope.launch { signaling.declineCall(STATIC_ROOM_ID) }
-        stopElapsedTimer()
-        _state.value = CallState.Declined
+        val s = _state.value as? CallState.Ringing ?: return
+        if (!s.isIncoming) return
+        val p = pair
+        CallAudioManager.stop()
+        CallForegroundService.dismiss(app)
+        if (p != null) viewModelScope.launch { signaling.finishCall(p.roomId, s.seq, "DECLINED") }
+        teardownMedia()
+        commitTerminal(CallState.Declined)
     }
 
+    /** Hang Up / Stop / back gesture. Safe from any state. */
     fun endCall() {
-        viewModelScope.launch { signaling.endCall(STATIC_ROOM_ID) }
-        autoDismissJob?.cancel()
-        noAnswerJob?.cancel()
-        listenerWatchdogJob?.cancel()
-        heartbeatJob?.cancel()
-        heartbeatJob = null
-        webrtc.dispose()
-        lastAppliedOfferSeq = -1
-        stopElapsedTimer()
-        lastAppliedAnswerSeq = -1
-        appliedCandidates.clear()
-        _state.value = CallState.Ended(EndReason.LOCAL_HANGUP)
+        val s = _state.value
+        val p = pair
+        when (s) {
+            is CallState.Ringing -> if (s.isIncoming) {
+                declineCall()
+                return
+            }
+            else -> Unit
+        }
+        if (p != null && (s is CallState.Ringing || s is CallState.Connected)) {
+            val seq = currentSeq
+            viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
+        }
+        teardownMedia()
+        when (s) {
+            is CallState.Ringing, is CallState.Connected ->
+                commitTerminal(CallState.Ended(EndReason.LOCAL_HANGUP))
+            else -> {
+                autoDismissJob?.cancel()
+                _state.value = CallState.Idle
+            }
+        }
     }
 
     fun clearError() {
         if (_state.value is CallState.Error) {
-            noAnswerJob?.cancel()
-            noAnswerJob = null
-            heartbeatJob?.cancel()
-            heartbeatJob = null
-            stopElapsedTimer()
+            teardownMedia()
             _state.value = CallState.Idle
         }
     }
 
     fun onToggleCamera() {
-        _isCameraOn.value = !_isCameraOn.value
-        webrtc.toggleCamera()
+        val on = !_isCameraOn.value
+        _isCameraOn.value = on
+        rtc?.setCameraEnabled(on)
     }
 
-    /**
-     * Incoming overlay only: is there a live, answerable ring right now?
-     * Own ringback answers false (never strand on our own echo).
-     */
-    suspend fun checkIncomingCall(): Boolean {
-        val localUid = FirebaseAuth.getInstance().currentUser?.uid
-        val doc = signaling.fetchCall(STATIC_ROOM_ID).getOrNull() ?: return false
-        if (doc.status != "RINGING" || doc.offer == null) return false
-        return doc.callerUid.isNotEmpty() && doc.callerUid != localUid
+    fun onToggleMic() {
+        val on = !_isMicOn.value
+        _isMicOn.value = on
+        rtc?.setMicEnabled(on)
     }
 
-    /** Exposes the WebRTCClient for the game bridge. Null before init. */
-    fun webrtcClientOrNull(): WebRTCClient? = webrtc
-
-    /**
-     * Trickles a locally-gathered candidate into the room arrays.
-     * Fire-and-forget: a single lost candidate never fails the call;
-     * regather and ICE restart cover gaps.
-     */
-    fun onLocalIceCandidate(candidate: IceCandidate) {
-        viewModelScope.launch {
-            runCatching {
-                signaling.addIceCandidate(STATIC_ROOM_ID, candidate, amCaller).getOrThrow()
-            }
-        }
+    fun onSwitchCamera() {
+        rtc?.switchCamera()
     }
 
-    /**
-     * Returns true when the screen should be kept awake. Used by
-     * CallScreen to toggle FLAG_KEEP_SCREEN_ON.
-     */
-    fun shouldKeepScreenOn(): Boolean {
-        val s = _state.value
-        return s is CallState.Ringing || s is CallState.Connected
+    /** Screen locked / app backgrounded: camera pauses, call continues. */
+    fun onUiHidden() {
+        rtc?.setCameraEnabled(false)
     }
+
+    /** Back in front: camera returns only if the kid had it on. */
+    fun onUiVisible() {
+        rtc?.setCameraEnabled(_isCameraOn.value)
+    }
+
+    fun sendGameData(json: String): Boolean = rtc?.sendGameData(json) ?: false
 
     override fun onCleared() {
-        autoDismissJob?.cancel()
-        noAnswerJob?.cancel()
-        listenerWatchdogJob?.cancel()
-        heartbeatJob?.cancel()
-        heartbeatJob = null
-        webrtc.dispose()
+        val s = _state.value
+        pair?.let { p ->
+            if (s is CallState.Connected ||
+                (s is CallState.Ringing && !s.isIncoming)) {
+                signaling.finishCallDetached(p.roomId, "ENDED")
+            }
+        }
+        teardownMedia()
+        runCatching { eglBase.release() }
         super.onCleared()
     }
 
-    // -------- document pipeline --------
+    // -------- room pipeline --------
+
+    private fun onPairChanged(p: FamilyPair?) {
+        roomJob?.cancel()
+        if (_state.value.isLive) {
+            teardownMedia()
+            _state.value = CallState.Idle
+        }
+        pair = p
+        lastDoc = null
+        currentSeq = 0
+        _isPaired.value = p != null
+        if (p == null) return
+        roomJob = viewModelScope.launch {
+            var backoffMs = 2_000L
+            while (isActive) {
+                try {
+                    awaitingFirstSnapshot = true
+                    signaling.observeCall(p.roomId).collect { doc ->
+                        backoffMs = 2_000L
+                        handleDocument(doc)
+                        if (!doc.isFromCache) awaitingFirstSnapshot = false
+                    }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    WebRtcLog.transition("Room listener failed; retrying")
+                    if (_state.value.isLive) fail(t)
+                }
+                delay(backoffMs)
+                backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
+            }
+        }
+    }
 
     private fun handleDocument(doc: CallDocument) {
-        listenerSilentSince = System.currentTimeMillis()
+        val p = pair ?: return
+        if (doc.callId != p.roomId) return
+        lastDoc = doc
+        if (doc.status == "IDLE") return
 
-        val localUid = FirebaseAuth.getInstance().currentUser?.uid
-        val isLocalCaller = doc.callerUid.isNotEmpty() &&
-            doc.callerUid == localUid
+        val parties = setOf(doc.callerUid, doc.calleeUid)
+        if (parties != setOf(p.ownUid, p.peerUid)) {
+            WebRtcLog.transition("Foreign parties on room ignored")
+            return
+        }
+        val mineAsCaller = doc.callerUid == p.ownUid
+        if (publishingOffer && mineAsCaller) return
 
-        val incomingSeq = doc.seq
         when {
-            incomingSeq < currentSeq -> {
-                WebRtcLog.transition("Stale doc seq ignored")
-            }
-            incomingSeq == currentSeq -> {
-                applyDocumentPayload(doc)
-            }
-            incomingSeq > currentSeq -> {
-                if (doc.status == "RINGING") {
-                    autoDismissJob?.cancel()
-                    autoDismissJob = null
-                    noAnswerJob?.cancel()
-                    noAnswerJob = null
-                }
-                currentSeq = incomingSeq
-                appliedCandidates.clear()
-
-                val isActiveGeneration =
-                    doc.status == "RINGING" || doc.status == "CONNECTED"
-
-                if (isActiveGeneration && !isLocalCaller &&
-                    webrtc.isInitialized()) {
-                    viewModelScope.launch {
-                        peerConnectionMutex.withLock {
-                            webrtc.resetPeerConnection()
-                            applyDocumentPayload(doc)
-                        }
-                    }
-                } else {
-                    applyDocumentPayload(doc)
-                }
-            }
+            doc.seq < currentSeq -> Unit
+            doc.seq > currentSeq -> onNewGeneration(doc, p, mineAsCaller)
+            else -> onSameGeneration(doc)
         }
     }
 
-    private fun applyDocumentPayload(doc: CallDocument) {
-        if (_state.value is CallState.Idle &&
-            (doc.status == "ENDED" || doc.status == "DECLINED")) {
-            return
-        }
+    private fun onNewGeneration(doc: CallDocument, p: FamilyPair, mineAsCaller: Boolean) {
+        // New generations are only acted on from server truth: a cached
+        // snapshot may be hours old, and advancing currentSeq on it would
+        // swallow the real server snapshot that follows.
+        if (doc.isFromCache) return
+        val s = _state.value
+        // A change delivered live by the listener is fresh by definition.
+        // Only the first snapshot after (re)subscribing can be an old,
+        // abandoned ring; only then does the timestamp decide.
+        val fresh = !awaitingFirstSnapshot ||
+            CallRoom.isFreshRing(doc.updatedAtMs, System.currentTimeMillis())
 
-        val localUid = FirebaseAuth.getInstance().currentUser?.uid
-        val isCallee = doc.calleeUid == localUid
-
-        val newState = CallState.fromDocument(
-            status = doc.status,
-            seq = doc.seq,
-            isIncoming = isCallee,
-            peerName = if (isCallee) callerDisplayName() else peerDisplayName(),
-            callId = doc.callId
-        )
-
-        feedNewRemoteCandidates(doc)
-
-        if (newState == _state.value) return
-        if (!canTransition(_state.value, newState)) {
-            WebRtcLog.transition("Illegal transition blocked")
-            return
-        }
-
-        if (newState is CallState.Ringing && newState.isIncoming) {
+        if (doc.status == "RINGING" && !mineAsCaller) {
+            if (publishingOffer) return
+            if (!fresh || doc.offer == null) {
+                currentSeq = doc.seq
+                return
+            }
+            val glare = s is CallState.Ringing && !s.isIncoming
+            if (s.isLive) teardownMedia()
+            currentSeq = doc.seq
+            beginGeneration(asCaller = false)
+            autoDismissJob?.cancel()
+            _state.value = CallState.Ringing(doc.seq, true, callerDisplayName(), p.roomId)
             WebRtcLog.transition("Remote ring observed")
-        }
-
-        if (newState is CallState.Connected) {
-            noAnswerJob?.cancel()
-            noAnswerJob = null
-            startElapsedTimer()
-            startHeartbeat()
-        }
-
-        // Sequence-tracked SDP application. Runs only on committed
-        // transitions. Re-ring at higher seq applies the fresh offer;
-        // same-seq metadata echoes are skipped.
-        if (webrtc.isInitialized()) {
-            if (isCallee && doc.offer != null &&
-                doc.seq > lastAppliedOfferSeq) {
-                runCatching { webrtc.setRemoteDescription(doc.offer) }
-                lastAppliedOfferSeq = doc.seq
+            if (glare) {
+                WebRtcLog.transition("Glare: both called, auto-answering")
+                answerCall()
+            } else {
+                CallAudioManager.startRinging(app)
             }
-            if (!isCallee && doc.answer != null &&
-                doc.seq > lastAppliedAnswerSeq) {
-                runCatching { webrtc.setRemoteDescription(doc.answer) }
-                lastAppliedAnswerSeq = doc.seq
+            return
+        }
+
+        currentSeq = doc.seq
+        val orphaned = doc.status == "CONNECTED" ||
+            (doc.status == "RINGING" && mineAsCaller)
+        when {
+            s.isLive -> {
+                teardownMedia()
+                commitTerminal(CallState.Ended(EndReason.REMOTE_HANGUP))
+            }
+            orphaned -> {
+                WebRtcLog.transition("Orphaned live room closed")
+                viewModelScope.launch { signaling.finishCall(p.roomId, doc.seq, "ENDED") }
             }
         }
-
-        _state.value = newState
-        scheduleAutoDismiss(newState)
     }
 
-    /**
-     * Feeds ICE candidates the peer trickled into the room arrays. Runs on
-     * EVERY document delivery (not only committed transitions): candidates
-     * arrive as same-seq metadata echoes the state machine skips.
-     * Already-applied payloads are deduped; a new generation clears the set.
-     */
-    private fun feedNewRemoteCandidates(doc: CallDocument) {
-        if (!webrtc.isInitialized()) return
+    private fun onSameGeneration(doc: CallDocument) {
+        val s = _state.value
+        if (rtc != null) feedRemoteCandidates(doc)
+
+        when (s) {
+            is CallState.Ringing -> when {
+                !s.isIncoming && doc.status == "CONNECTED" -> applyAnswerAndConnect(doc)
+                !s.isIncoming && doc.status == "DECLINED" -> {
+                    teardownMedia()
+                    commitTerminal(CallState.Declined)
+                }
+                doc.status == "ENDED" || doc.status == "DECLINED" -> {
+                    teardownMedia()
+                    commitTerminal(
+                        CallState.Ended(if (s.isIncoming) EndReason.MISSED else EndReason.REMOTE_HANGUP)
+                    )
+                }
+                else -> Unit
+            }
+            is CallState.Connected ->
+                if (doc.status == "ENDED" || doc.status == "DECLINED") {
+                    teardownMedia()
+                    commitTerminal(CallState.Ended(EndReason.REMOTE_HANGUP))
+                }
+            else -> Unit
+        }
+    }
+
+    private fun applyAnswerAndConnect(doc: CallDocument) {
+        val answer = doc.answer ?: return
+        val client = rtc ?: return
+        if (answerAppliedSeq == doc.seq) return
+        answerAppliedSeq = doc.seq
+        viewModelScope.launch {
+            if (client.setRemoteDescription(answer) && rtc === client) {
+                lastDoc?.takeIf { it.seq == doc.seq }?.let { feedRemoteCandidates(it) }
+                val now = _state.value
+                if (now is CallState.Ringing && now.seq == doc.seq) goConnected(doc.seq)
+            } else if (rtc === client) {
+                fail(IllegalStateException("Could not connect the call. Tap to try again."))
+            }
+        }
+    }
+
+    private fun feedRemoteCandidates(doc: CallDocument) {
+        val client = rtc ?: return
         val remote = if (amCaller) doc.calleeCandidates else doc.callerCandidates
         remote.forEach { candidate ->
-            if (appliedCandidates.add(candidate.sdpCandidate)) {
-                runCatching { webrtc.addRemoteIceCandidate(candidate) }
+            if (appliedRemoteCandidates.add(candidate.sdpCandidate)) {
+                client.addRemoteIceCandidate(candidate)
             }
         }
     }
 
-    private fun canTransition(from: CallState, to: CallState): Boolean {
-        if (from::class == to::class) return true
+    // -------- media --------
 
-        return when (from) {
-            is CallState.Idle -> to is CallState.Ringing
-            is CallState.Ringing ->
-                to is CallState.Connected
-                || to is CallState.Declined
-                || to is CallState.NoAnswer
-                || to is CallState.Ended
-                || to is CallState.Error
-            is CallState.Connected ->
-                to is CallState.Ringing
-                || to is CallState.Ended
-                || to is CallState.Error
-            is CallState.NoAnswer ->
-                to is CallState.Ringing || to is CallState.Ended
-            is CallState.Declined -> to is CallState.Idle
-            is CallState.Ended ->
-                to is CallState.Idle || to is CallState.Ringing
-            is CallState.Error ->
-                to is CallState.Idle || to is CallState.Ringing
+    private fun newClient(): WebRTCClient {
+        lateinit var client: WebRTCClient
+        client = WebRTCClient(
+            context = app,
+            eglBase = eglBase,
+            onLocalIceCandidate = { candidate ->
+                viewModelScope.launch { onLocalCandidate(client, candidate) }
+            },
+            onRemoteVideoTrack = { track ->
+                if (rtc === client) _remoteVideoTrack.value = track
+            }
+        )
+        rtcFlow.value = client
+        client.start(cameraEnabled = _isCameraOn.value)
+        client.setMicEnabled(_isMicOn.value)
+        _localVideoTrack.value = client.localVideoTrack
+        return client
+    }
+
+    private fun onLocalCandidate(client: WebRTCClient, candidate: IceCandidate) {
+        if (rtc !== client) return
+        if (!localSdpPublished) {
+            pendingLocalCandidates.add(candidate)
+            return
+        }
+        sendLocalCandidate(candidate)
+    }
+
+    private fun flushLocalCandidates() {
+        val batch = pendingLocalCandidates.toList()
+        pendingLocalCandidates.clear()
+        batch.forEach { sendLocalCandidate(it) }
+    }
+
+    private fun sendLocalCandidate(candidate: IceCandidate) {
+        val p = pair ?: return
+        val byCaller = amCaller
+        viewModelScope.launch {
+            signaling.addIceCandidate(p.roomId, candidate, byCaller)
         }
     }
 
-    private fun peerDisplayName(): String =
-        getApplication<Application>().getString(
-            if (BuildConfig.APP_THEME == "blue")
-                R.string.parent_peer_name
-            else
-                R.string.child_peer_name
-        )
+    /** The ONE exit path for media: ringers off, jobs off, UI detached, native freed. */
+    private fun teardownMedia() {
+        CallAudioManager.stop()
+        noAnswerJob?.cancel(); noAnswerJob = null
+        elapsedJob?.cancel(); elapsedJob = null
+        connectionWatchJob?.cancel(); connectionWatchJob = null
+        val old = rtcFlow.value
+        rtcFlow.value = null
+        _remoteVideoTrack.value = null
+        _localVideoTrack.value = null
+        old?.dispose()
+    }
 
-    /**
-     * Name shown on the INCOMING overlay: the caller's side, i.e. the
-     * opposite flavor's label. The callee must see who is calling them,
-     * not their own peer label (parent sees "Mama", child sees "Dad").
-     */
-    private fun callerDisplayName(): String =
-        getApplication<Application>().getString(
-            if (BuildConfig.APP_THEME == "blue")
-                R.string.child_peer_name
-            else
-                R.string.parent_peer_name
-        )
+    private fun beginGeneration(asCaller: Boolean) {
+        amCaller = asCaller
+        localSdpPublished = false
+        pendingLocalCandidates.clear()
+        appliedRemoteCandidates.clear()
+        answerAppliedSeq = -1
+        _isCameraOn.value = true
+        _isMicOn.value = true
+        _elapsedSeconds.value = 0
+    }
 
-    private fun scheduleAutoDismiss(state: CallState) {
+    // -------- state helpers --------
+
+    private fun goConnected(seq: Int) {
+        CallAudioManager.stop()
+        noAnswerJob?.cancel(); noAnswerJob = null
+        _state.value = CallState.Connected(seq)
+        startElapsedTimer()
+        startConnectionWatch()
+    }
+
+    private fun commitTerminal(next: CallState) {
+        if (!CallState.canTransition(_state.value, next)) {
+            _state.value = CallState.Idle
+            return
+        }
+        _state.value = next
         autoDismissJob?.cancel()
-        autoDismissJob = null
-        if (state is CallState.Declined || state is CallState.Ended) {
-            stopElapsedTimer()
-            autoDismissJob = viewModelScope.launch {
-                delay(2_000)
-                _state.value = CallState.Idle
+        autoDismissJob = viewModelScope.launch {
+            delay(AUTO_DISMISS_MS)
+            if (_state.value == next) _state.value = CallState.Idle
+        }
+    }
+
+    private fun startNoAnswerTimer(seq: Int) {
+        noAnswerJob?.cancel()
+        noAnswerJob = viewModelScope.launch {
+            delay(CallRoom.NO_ANSWER_MS)
+            val s = _state.value
+            if (s is CallState.Ringing && !s.isIncoming && s.seq == seq) {
+                WebRtcLog.transition("No answer")
+                pair?.let { p ->
+                    viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
+                }
+                teardownMedia()
+                _state.value = CallState.NoAnswer(seq)
             }
         }
     }
@@ -569,114 +594,79 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun stopElapsedTimer() {
-        elapsedJob?.cancel()
-        elapsedJob = null
-    }
-
-    private fun startHeartbeat() {
-        heartbeatJob?.cancel()
-        heartbeatJob = viewModelScope.launch {
+    /** A peer that vanished (crash, dead battery) ends the call after a grace window. */
+    private fun startConnectionWatch() {
+        connectionWatchJob?.cancel()
+        connectionWatchJob = viewModelScope.launch {
+            var lostSince = 0L
             while (isActive) {
-                delay(120_000L)
-                val ownUid = FirebaseAuth.getInstance()
-                    .currentUser?.uid ?: continue
-                runCatching {
-                    signaling.heartbeat(STATIC_ROOM_ID, ownUid)
+                delay(1_000)
+                if (connectionHealth.value == ConnectionHealth.LOST) {
+                    if (lostSince == 0L) lostSince = System.currentTimeMillis()
+                    if (System.currentTimeMillis() - lostSince >= LOST_GRACE_MS) {
+                        WebRtcLog.transition("Connection lost: ending call")
+                        val seq = currentSeq
+                        pair?.let { p ->
+                            viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
+                        }
+                        teardownMedia()
+                        commitTerminal(CallState.Ended(EndReason.NETWORK_FAILURE))
+                        return@launch
+                    }
+                } else {
+                    lostSince = 0L
                 }
             }
         }
     }
 
-    private fun startNoAnswerTimer(seq: Int) {
-        noAnswerJob?.cancel()
-        noAnswerJob = viewModelScope.launch {
-            delay(15_000)
-            val current = _state.value
-            if (current is CallState.Ringing &&
-                current.seq == seq) {
-                WebRtcLog.transition("No answer after 15s")
-                _state.value = CallState.NoAnswer(seq)
-                runCatching { webrtc.dispose() }
-            }
-        }
-    }
-
-    private fun startListenerWatchdog() {
-        listenerWatchdogJob?.cancel()
-        listenerSilentSince = System.currentTimeMillis()
-        listenerWatchdogJob = viewModelScope.launch {
-            delay(10_000)
-            val elapsed = System.currentTimeMillis() - listenerSilentSince
-            if (elapsed >= 10_000 && _state.value !is CallState.Error) {
-                val iceDead = webrtc.connectionHealth.value !=
-                    ConnectionHealth.HEALTHY
-                if (iceDead) {
-                    _state.value = CallState.Error(
-                        kind = CallErrorKind.LISTENER_DISCONNECTED,
-                        message = "Connection lost. Please try again.",
-                        seq = currentSeq
-                    )
-                }
-            }
-        }
-    }
-
-    fun onResume() {
-        val pausedDuration = System.currentTimeMillis() - lastPauseTime
-        if (lastPauseTime > 0L && pausedDuration > 60_000L) {
-            WebRtcLog.transition("Resume after long pause: re-attaching")
-            restartCallObserver()
-        }
-        listenerSilentSince = System.currentTimeMillis()
-
-        listenerWatchdogJob?.cancel()
-        listenerWatchdogJob = viewModelScope.launch {
-            while (isActive) {
-                delay(30_000)
-                val elapsed =
-                    System.currentTimeMillis() - listenerSilentSince
-                if (elapsed >= 60_000) {
-                    WebRtcLog.transition("Listener stalled: re-subscribing")
-                    restartCallObserver()
-                    listenerSilentSince = System.currentTimeMillis()
-                }
-            }
-        }
-    }
-
-    fun onPause() {
-        lastPauseTime = System.currentTimeMillis()
-        listenerWatchdogJob?.cancel()
-        listenerWatchdogJob = null
-    }
-
-    private fun reportError(t: Throwable) {
+    private fun fail(t: Throwable) {
         val (kind, message) = when (t) {
-            is PeerBusyException ->
-                CallErrorKind.PEER_BUSY to
-                    "Dad is on another call. Try again in a minute."
-            is TransactionExhaustedException ->
-                CallErrorKind.TRANSACTION_EXHAUSTED to
-                    "The line is busy. Tap to try again."
-            is FirebaseFirestoreException ->
-                when (t.code) {
-                    FirebaseFirestoreException.Code.UNAVAILABLE ->
-                        CallErrorKind.LISTENER_DISCONNECTED to
-                            "No internet connection. Check Wi-Fi."
-                    FirebaseFirestoreException.Code.PERMISSION_DENIED ->
-                        CallErrorKind.PERMISSION_DENIED to
-                            "Calling is not allowed right now."
-                    else ->
-                        CallErrorKind.SIGNALING_FAILED to
-                            "Something went wrong. Tap to try again."
-                }
-            else ->
-                CallErrorKind.UNKNOWN to
-                    (t.message ?: "Something went wrong.")
+            is TimeoutCancellationException ->
+                CallErrorKind.WEBRTC_FAILED to "Setup timed out. Tap to try again."
+            is FirebaseFirestoreException -> when (t.code) {
+                FirebaseFirestoreException.Code.UNAVAILABLE ->
+                    CallErrorKind.LISTENER_DISCONNECTED to "No internet connection. Check Wi-Fi."
+                FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                    CallErrorKind.PERMISSION_DENIED to
+                        "Calling is not allowed right now. Ask a grown-up to pair the phones again."
+                else ->
+                    CallErrorKind.SIGNALING_FAILED to "Something went wrong. Tap to try again."
+            }
+            else -> CallErrorKind.UNKNOWN to (t.message ?: "Something went wrong. Tap to try again.")
         }
         WebRtcLog.transition("Call failed: ${kind.name}")
-        _state.value = CallState.Error(kind = kind, message = message, seq = currentSeq)
+        val s = _state.value
+        val seq = currentSeq
+        pair?.let { p ->
+            if (s is CallState.Connected || (s is CallState.Ringing && !s.isIncoming)) {
+                viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
+            }
+        }
+        teardownMedia()
+        _state.value = CallState.Error(kind = kind, message = message, seq = seq)
+    }
+
+    private fun peerDisplayName(): String =
+        app.getString(
+            if (BuildConfig.APP_THEME == "blue") R.string.parent_peer_name
+            else R.string.child_peer_name
+        )
+
+    /**
+     * Name shown on the INCOMING overlay: the caller's side, i.e. the
+     * opposite flavor's label (parent sees "Mama", child sees "Dad").
+     */
+    private fun callerDisplayName(): String =
+        app.getString(
+            if (BuildConfig.APP_THEME == "blue") R.string.child_peer_name
+            else R.string.parent_peer_name
+        )
+
+    private companion object {
+        const val SETUP_TIMEOUT_MS = 10_000L
+        const val AUTO_DISMISS_MS = 2_000L
+        const val LOST_GRACE_MS = 20_000L
     }
 }
 

@@ -1,5 +1,7 @@
 # BP-01 — Native app skeleton (Phase 1)
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 Goal: Studio-created `app/` that compiles its gates in this lane and installs from Studio by human.
 
 ## Human steps (operator in Android Studio)

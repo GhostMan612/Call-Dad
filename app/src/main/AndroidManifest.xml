@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Phase 3: mic/camera for the peer connection. Features NOT required
          so QA can install on camera-less emulators/tablets (audio-only fallback). -->
@@ -9,12 +10,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Normal permission (auto-granted): incoming-call buzz. -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- Phase 6: declared pre-emptively for background PTT (Phase 7).
-         MODIFY_AUDIO_SETTINGS is the second permission required by the
-         FOREGROUND_SERVICE_MICROPHONE service type on API 34+. No
-         microphone FGS is declared in this phase. -->
+    <!-- Audio routing (speakerphone + communication mode during calls). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- Phase 5: killed-app wakeup path (FCM → FGS phoneCall → full-screen). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -45,8 +42,12 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            tools:targetApi="27"
             android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density|locale|layoutDirection"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

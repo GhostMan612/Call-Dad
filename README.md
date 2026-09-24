@@ -1,11 +1,13 @@
-# Call-Dad (working title — undecided)
+# Call of Daddy (repo: Call-Dad)
 
 Simple, kid-safe Android app for a 6-year-old girl to reach her dad (operator):
-**big-button voice call, video call, text + voice-memo chat, photo sharing.**
+**one giant Call button for a video call, a walkie-talkie, games to play together, and an offline voice helper.** Chat and photo sharing are still roadmap.
 
-- 100% native Kotlin. Single-Activity + Compose Navigation + Hilt + ViewModel / StateFlow / SharedFlow.
-- Comms basis: `sovereign_mantle` sovereign-comms (donor, read-only) — transport-agnostic call signaling, UDP voice, E2EE frames, rendezvous hole-punch for remote, DTN fallback. No accounts, no cloud by default.
-- Firebase / Firestore (paid account available): **deferred to Phase 4** as optional push/signaling fallback. v0.1 is sovereign P2P-first for kid privacy. No `google-services.json` in repo yet — intentional.
+- 100% native Kotlin. Single Activity + Compose Navigation + ViewModel / StateFlow (hand-written factories, no Hilt).
+- Two flavors: `parent` (blue) and `child` (pink), installable side by side.
+- Calls: WebRTC video (stream-webrtc-android), Firestore signaling in a room only the two paired phones can touch, FCM push to wake the callee's phone (ADR-002/005/015). Anonymous Firebase auth; no analytics, no ads.
+- Pairing: the grown-ups gate, then both phones scan each other's QR code.
+- `app/google-services.json` is operator-placed and gitignored.
 - Targets: Moto G 2025 (primary truth device) + BLU View 5. Emulator ≠ device.
 
 ## Cold start (every session, in order)
@@ -25,8 +27,10 @@ C:\Call-Dad\
 ├── SPEC_SHEET.md / SPEC_SHEET.json   # v0.1 scope contract
 ├── blueprints/                       # MASTER (frozen v0.1) + ROADMAP + CURRENT_STATE + CHECKLIST + CHECKPOINTS + ARCHITECTURE + blueprint-sections/BP-*.md + decisions/ADR-*.md
 ├── docs/                             # setup-android-studio, device-profiles, firebase-firestore-plan, kid-safe-ux, sovereign-comms-reuse-map
-├── app/                              # NATIVE Kotlin app (created in Android Studio; see docs/setup-android-studio.md). Currently placeholder.
-├── tools/verify_project.py           # scaffold gate (no-build proof)
+├── app/                              # native Kotlin app (com.calldad), parent/child flavors
+├── functions/                        # Cloud Function: ring push (Node 22)
+├── firestore.rules                   # pair-scoped rooms; tests in tools/rules-test/
+├── tools/verify_project.py           # repo gate (no-build proof)
 ├── fixtures/                         # synthetic only — never real child data
 ├── assets/                           # placeholder art (synthetic)
 ├── .opencode/agents|commands/        # native-dev / comms-porter / kid-ux-guardian + verify/probe/smoke
@@ -42,7 +46,7 @@ C:\Call-Dad\
 
 Handoff files (`SESSION_HANDOFF.md`, `blueprints/CURRENT_STATE.md`) must stay Gemini/DeepSeek-readable: deltas + next actions + open decisions, no raw dumps.
 
-## Status (2026-09-19, scaffold session)
+## Status (2026-09-24)
 
-- Phase 0 scaffold: this directory tree + workflow docs. No app code yet.
-- Next (needs operator + architect + R&D alignment): lock ADR-001 (minSdk 30 vs 26), ADR-002 (P2P-first vs Firebase-first for v0.1 signaling), then BP-01 app skeleton authorization.
+- Video calling, ringing (including a killed app), walkie-talkie, games and the voice helper are all in code, and the host gates are green (see `blueprints/CURRENT_STATE.md`).
+- Next: the operator deploys rules + functions, installs both flavors, re-pairs the phones, and runs the device matrix (`blueprints/CHECKPOINTS.md` G-C8).

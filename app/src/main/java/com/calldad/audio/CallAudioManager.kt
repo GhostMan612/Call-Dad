@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// audio/CallAudioManager.kt — Phase 9: incoming-call ringtone + vibration
+// audio/CallAudioManager.kt — incoming ring, vibration, outgoing ringback
 // Location: app/src/main/java/com/calldad/audio/CallAudioManager.kt
 package com.calldad.audio
 
@@ -11,6 +11,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -19,96 +20,100 @@ import android.os.VibratorManager
 import com.calldad.webrtc.WebRtcLog
 
 /**
- * Owns the incoming-call ringtone and vibration.
+ * Process-wide SINGLE ringer. The in-app call screen and the killed-app
+ * foreground service both drive it; every call is idempotent, so the two
+ * paths can overlap without double-ringing (the "single TING" class of bug
+ * came from two independent ringers).
  *
- * LIFECYCLE:
- *   start() on CallState.Incoming.
- *   stop()  on InCall, Declined, Ended, or any transition out of Incoming.
- *
- * PRECONDITION: AudioManager.mode must be MODE_NORMAL. If a prior WebRTC
- * call left it in MODE_IN_COMMUNICATION, the ringtone plays as a single
- * short tone and vibration is suppressed by the system. The reset in
- * WebRTCClient.dispose() guarantees this precondition.
- *
- * SINGLE OWNER: the Phase 4 overlay-local ringtone was removed — this is
- * now the only ringer. Two ringers caused the "single TING" class of bug.
+ *   startRinging()  incoming ring: looping ringtone + repeating vibration
+ *   startRingback() outgoing "calling…" tone for the caller
+ *   stop()          stops whichever is playing
  */
-class CallAudioManager(private val context: Context) {
+object CallAudioManager {
 
     private var ringtone: Ringtone? = null
-    private var isPlaying = false
+    private var vibrator: Vibrator? = null
+    private var ringback: ToneGenerator? = null
 
-    fun start() {
-        if (isPlaying) return
-        isPlaying = true
+    @Synchronized
+    fun startRinging(context: Context) {
+        if (ringtone != null || vibrator != null) return
+        stopRingbackLocked()
+        val app = context.applicationContext
 
-        // ---- ringtone ----
-        try {
+        runCatching {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            ringtone = RingtoneManager.getRingtone(context, uri)?.apply {
+            ringtone = RingtoneManager.getRingtone(app, uri)?.apply {
                 audioAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    isLooping = true
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
                 play()
             }
             WebRtcLog.transition("Ringtone started")
-        } catch (t: Throwable) {
-            WebRtcLog.transition("Ringtone start failed")
-        }
+        }.onFailure { WebRtcLog.transition("Ringtone start failed") }
 
-        // ---- vibration ----
-        // Repeating waveform. Index 0 means "repeat from the start".
-        // Cancelled by stop().
-        try {
-            val vibrator = resolveVibrator() ?: return
-            if (!vibrator.hasVibrator()) return
-
-            val timings = longArrayOf(0L, 800L, 600L)
-            val amplitudes = intArrayOf(0, 180, 0)
-            val effect = VibrationEffect.createWaveform(timings, amplitudes, 0)
-
+        runCatching {
+            val v = resolveVibrator(app) ?: return@runCatching
+            if (!v.hasVibrator()) return@runCatching
+            val effect = VibrationEffect.createWaveform(
+                longArrayOf(0L, 800L, 600L), intArrayOf(0, 180, 0), 0
+            )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                vibrator.vibrate(
-                    effect,
-                    VibrationAttributes.createForUsage(
-                        VibrationAttributes.USAGE_RINGTONE
-                    )
-                )
+                v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_RINGTONE))
             } else {
-                vibrator.vibrate(effect)
+                @Suppress("DEPRECATION")
+                v.vibrate(effect)
             }
-            WebRtcLog.transition("Vibration started")
-        } catch (t: Throwable) {
-            WebRtcLog.transition("Vibration start failed")
+            vibrator = v
+        }.onFailure { WebRtcLog.transition("Vibration start failed") }
+    }
+
+    @Synchronized
+    fun startRingback() {
+        if (ringback != null) return
+        stopRingingLocked()
+        runCatching {
+            ringback = ToneGenerator(AudioManager.STREAM_VOICE_CALL, RINGBACK_VOLUME).also {
+                it.startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            }
+        }.onFailure {
+            ringback = null
+            WebRtcLog.transition("Ringback start failed")
         }
     }
 
+    @Synchronized
     fun stop() {
-        if (!isPlaying) return
-        isPlaying = false
+        stopRingingLocked()
+        stopRingbackLocked()
+    }
 
-        try {
-            ringtone?.stop()
-        } catch (_: Throwable) { /* ignore */ }
+    private fun stopRingingLocked() {
+        if (ringtone == null && vibrator == null) return
+        runCatching { ringtone?.stop() }
         ringtone = null
-
-        try {
-            resolveVibrator()?.cancel()
-        } catch (_: Throwable) { /* ignore */ }
-
+        runCatching { vibrator?.cancel() }
+        vibrator = null
         WebRtcLog.transition("Ringtone and vibration stopped")
     }
 
-    private fun resolveVibrator(): Vibrator? =
+    private fun stopRingbackLocked() {
+        val tg = ringback ?: return
+        runCatching { tg.stopTone() }
+        runCatching { tg.release() }
+        ringback = null
+    }
+
+    private fun resolveVibrator(context: Context): Vibrator? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE)
-                    as? VibratorManager)?.defaultVibrator
+                as? VibratorManager)?.defaultVibrator
         } else {
             @Suppress("DEPRECATION")
             context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
+
+    private const val RINGBACK_VOLUME = 60
 }

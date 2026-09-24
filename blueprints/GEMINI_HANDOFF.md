@@ -1,5 +1,7 @@
 # GEMINI HANDOFF — Call-Dad R&D request (consolidated 2026-09-19, Chief Executor)
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 > Copy/paste to Gemini (Chief R&D). Operator order: recursive live-internet research over similar apps (family/kid calling, WebRTC + Firestore signaling) for bulletproof fixes to the known issues below. Full detail: SESSION_HANDOFF.md, ADRs, CURRENT_STATE.md.
 
 ## What this is

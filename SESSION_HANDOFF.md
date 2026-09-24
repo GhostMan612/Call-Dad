@@ -19,6 +19,35 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-24, full-repo sweep + fix — ADR-015, executor lane, cloud session)
+
+- **Sweep:** 4 parallel read-only reviews (call core, security/pairing, tests/features, docs drift). Headline findings re-verified against source by the executor before any fix.
+- **Root causes fixed:**
+  - Hangup SIGSEGV: the factory was disposed under a sink-attached remote track. Fixed by the teardown order pc → tracks → factory.
+  - Try Again: it re-used a disposed WebRTCClient. Now a single-use client per attempt.
+  - No ringtone: the ringer was never instantiated.
+  - Games dead and rings missed off Home: `callViewModel()` was entry-scoped. It is now activity-scoped.
+  - Stuck ringing: no-answer never wrote ENDED.
+  - Black video: ICE candidates were lost on both sides. Now queued and buffered.
+  - Foreground service: it read the network before calling `startForeground`.
+- **Security fixed:**
+  - `family_channel` was world-readable, squattable and bricked after a reinstall. Replaced by pair-scoped rooms whose rules authorize from the id; 15 emulator tests.
+  - Rings went to a topic anyone could subscribe to. Now sent to the callee's token.
+  - Pairing could silently replace Dad. Now behind a grown-ups gate, and the peer is stored only after a mutual handshake.
+  - The BLU serial in this file is redacted.
+- **Features the kid will notice:**
+  - Ringtone plus caller ringback.
+  - Rings from any screen.
+  - Mute, flip camera, and a game door during a call.
+  - Games work solo too.
+  - "Missed call" / "Connection lost" labels.
+  - A screen for when permissions are denied.
+- **Gates (this lane):** 80 host tests PASS; lint 0 errors both flavors; Kotlin 0 warnings; functions 6/6; rules 15/15; verify PASS. Nothing built/installed; no device claims.
+- **Doc alignment:**
+  - Corrected: RULES §1.5 gate names (flavored tasks; the old names never existed) and §3 pin pointer, plus a new §1.7a recording the shipped architecture for operator ratification.
+  - Rewritten: AGENTS.md and CURRENT_STATE.
+  - Added: CHECKLIST Contract 8, the G-C8 checkpoints and ADR-015.
+
 ## Where we are (2026-09-22, night-firefight bundle pushed as b5c98a6 — first E2E call GREEN)
 
 - **Breakthrough:** Moto→BLU signaling completed live (OFFER published → ANSWER published → ICE trickle flowing). Per-call rules rewrite (auth-only get + party updates) unblocked publishes; stale seq-1 room (dead UIDs) deleted.
@@ -39,39 +68,39 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Earlier FAILED session explained:** simultaneous callers clobbered the single room (stale SDP pair) — choreography + wipe/poll fixes resolved it. Single-room clobbering still must go before real use (Phase 5 per-call rooms).
 - **Still unverified:** AUDIO both ways (operator ear-check needed); TURN/symmetric-NAT (K8); Firestore rules still dev-open; no call-history/ringtone.
 
-## Where we are (2026-09-19, stale-offer immunity — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, stale-offer immunity — executor lane, since committed)
 
 - **Lane read the live room (REST):** it holds an OFFER right now — Moto's "still ringing" is a genuine live offer (or an abandoned one; indistinguishable without timestamps — hence this fix).
 - **Fix:** offers carry `createdAt`; listener + fetch ignore anything >60s old or unstamped. Abandoned rings now die on their own instead of haunting the phones. Per-call rooms still the real answer (Phase 5).
 - **Retest choreography (strict one-caller-at-a-time):** hang up BOTH phones first (clears room) → BLU calls and waits → Moto answers within a minute. Simultaneous calling still clobbers — don't.
 
-## Where we are (2026-09-20, Phase 9 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-20, Phase 9 landed — executor lane, since committed)
 
 - **Architect prompt executed with 6 recorded deviations (ADR-011):** TURN_URLS multi-URL + alias, audio-mode set/reset, single-ringer doctrine (overlay player removed), answer-stops-ring, shared Helper VM (same crash class as 3/6), keyword order fix. KeywordBot host-tested (6 tests).
 - **Needs operator:** Studio sync (no new deps) → provision TURN_URLS or leave empty → §K matrix: ringtone loops post-call, vibration repeats, keyword jokes, airplane-mode STT (API 31+), multi-game sync, guardrail audit.
 
-## Where we are (2026-09-20, Phase 10 landed — BLOCKED on console step, UNCOMMITTED)
+## Where we are (2026-09-20, Phase 10 landed — BLOCKED on console step, since committed)
 
 - **Architect prompt executed (ADR-012):** parent/child flavors (blue/pink, APP_THEME-gated, dynamicColor never on), feature colors preserved, child keeps "Call of Daddy", full 3-game hub with c4 bounds guard, camera toggle verified present.
 - **BLOCKER before ANY Phase 10 verification:** suffixed IDs match no Firebase client → register `com.calldad.parent` + `com.calldad.child` in console, replace gitignored `google-services.json` with merged download. Builds fail until then (not a code bug).
 - **Also recorded:** Phase 9's game-hub replacement never landed (executor miss, superseded — no recovery needed).
 
-## Where we are (2026-09-20, Phase 11 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-20, Phase 11 landed — executor lane, since committed)
 
 - **Architect prompt executed with 6 recorded deviations (ADR-013):** static room + seq + status machine + structured rules + topic FCM (no callId) + FGS foreground-first. REJECTED twice, loudly: flavor role gates (would brick both directions — no differentiated UI exists) and child-only subscription (product direction is child→parent). Callee observes docs (prompt left it blind). Stale-snapshot guard restored.
 - **Needs operator:** Studio sync (no new deps) → `firebase deploy --only firestore:rules,functions` (rules REPLACED — old per-call paths deny by default) → §G matrix: rules proofs, 3× calls with seq check, restart recovery, clean logcat. NOTE: old `ring/dad` doc and per-call rooms orphaned in Firestore (dead data, nobody reads them).
 
-## Where we are (2026-09-20, Phase 8 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-20, Phase 8 landed — executor lane, since committed)
 
 - **Architect prompt executed with 6 recorded deviations (ADR-010):** debounce machine + `restartIce` (IceRestart constraint), `updateOffer` + callee offer-watcher (prompt's Phase 2 API is gone), role derived from state, auto-reconnect trigger + banner (prompt expects the logs, never wires the cause), callee `listenCall` (was blind post-answer), game.html + PiP card + media-overlay fix.
 - **Needs operator:** Studio sync (no new deps) → build → §H matrix: two-device game both directions, simultaneous-tap race, PiP-over-WebView, Wi-Fi toggle recovery, logcat guardrail audit.
 
-## Where we are (2026-09-20, Phase 7 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-20, Phase 7 landed — executor lane, since committed)
 
 - **Architect prompt executed with 5 recorded deviations (ADR-009):** no-override fix (wouldn't compile), shared activity-scoped CallViewModel for the bridge, WebViewAssetLoader hardening + nav-lock, 1KB cap + buffer-copy, game.html TAP shell, `webrtcClientOrNull()` accessor. No new host tests possible (native + JS engines) — device matrix per prompt §G is the gate.
 - **Needs operator:** Studio sync (androidx.webkit) → build → TWO-device game sync (TAP → "Game state TX" + remote title "Remote taps: N") → quote/backslash escaping test → logcat guardrail audit (no JSON/SDP/ICE).
 
-## Where we are (2026-09-19, Phase 6 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, Phase 6 landed — executor lane, since committed)
 
 - **Architect prompt executed with 5 recorded deviations (ADR-008):** ptt/ package (interface, simulated default, reflective adapter, focus+haptics, VM+factory+shared accessor), PttScreen replacement (tryAwaitRelease, 3 color states), CallScreen interlock, manifest mic-audio perms. Proprietary boundary holds: zero com.sovereign imports (reflection only), no Gradle dep, simulated default.
 - **Prompt bugs fixed:** shared activity-scoped PTT VM (prompt's sharing claim was wrong twice — crash + silent non-sharing); no fake receiving pulse (template confirms Idle-forever accepted); host-test infra (returnDefaultValues + coroutines-test) + 4 engine tests.
@@ -101,7 +130,7 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **No crashes** anywhere in either dump (only historical 09-19 tombstones).
 - **Still open:** Moto auth line; CALLEE_UID swap-build status; any actual Phase 5 call (no OFFER/ANSWER in these windows); full §L matrix (killed-app, rules proofs, TURN check).
 
-## Where we are (2026-09-19, Phase 5 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, Phase 5 landed — executor lane, since committed)
 
 - **Architect prompt executed with 7 recorded deviations (ADR-007):** no-KTX, BOM-managed versions, ring-pointer bridge (`ring/dad`, presence-only, strict-ish rules) so app-to-app stays testable pre-Phase-6, CALLEE_UID per-phone provisioning, POST_NOTIFICATIONS runtime ask, status-machine VM (45s ring timeout, 15s media watchdog, cancel-safe), FCM armed-but-untargeted (no tokens until Phase 6).
 - **New files:** CallDadApplication, CallDocument, OwnCallRegistry (replaces OwnOfferRegistry), fcm/×2, ic_call, functions/×3, firebase.json, firestore.rules. Deleted: OwnOfferRegistry.kt.
@@ -120,7 +149,7 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Executor closed the evidence gap:** ring-write failures now log (`Ring pointer write failed`); ring receipt logs (`Ring observed`). Both literals, guardrail-clean. If the next test shows publish WITHOUT observed on the parked phone, the fault is isolated to ring-write/rules; if observed WITHOUT popup, it's navigation.
 - **Retest (strict):** rebuild both → park Moto on the 4-card screen untouched → BLU calls once, waits → expect `Ring observed` on Moto + auto-popup.
 
-## Where we are (2026-09-20, back-button ghost path closed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-20, back-button ghost path closed — executor lane, since committed)
 
 - **Lane read of both tails:** rings observed BOTH ways (`Ring observed` BLU ×2, Moto ×1), publishes clean, teardowns clean — popup path fully proven. But zero Answer taps anywhere: every overlay exit was silent (no DECLINED line) → system back button escaping without room cleanup → ghost rooms + the lingering both-caller chaos. Fix: BackHandler = Hang Up (Decline on overlay), same awaited path.
 - **Retest that matters:** rebuild both → BLU calls → Moto overlay → tap ANSWER (green, the one untested button) → expect CONNECTED both sides.
@@ -131,22 +160,22 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **CRITICAL device intel (new):** BLU is a TEST MULE only. The daughter's real device is a tablet at home, currently inaccessible. Implications: minSdk 26 (ADR-001-B) must hold; tablet model + Android version + camera/mic behavior NEEDED before sign-off (operator to supply); emulator + BLU coverage does not equal tablet coverage.
 - **Still unproven (Gemini/Phase 6 territory):** killed-app FCM wakeup, TURN/mobile-data, token plumbing, rules proofs (§L), call history, tablet run.
 
-## Where we are (2026-09-20, no-remote-video root-caused — executor lane, UNCOMMITTED)
+## Where we are (2026-09-20, no-remote-video root-caused — executor lane, since committed)
 
 - **Operator report:** call connects UI-wise, local PiP only, drops ~14s (watchdog firing = peer never CONNECTED). Root cause: ICE gathering starts at createPeerConnection but the room only exists after the Firestore round-trip — early (host, LAN-critical) candidates were silently dropped while `currentCallId == null`. Fix: stash + flush on room creation; reset clears stash.
 - **Retest:** rebuild both → call → expect CONNECTED + remote video (not just PiP), no 15s drop.
 
-## Where we are (2026-09-19, stuck-overlay validated out — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, stuck-overlay validated out — executor lane, since committed)
 
 - **Operator report:** Incoming overlay hangs until another call+hangup cycle; both phones on v3 (lane-verified dumpsys) so NOT a stale build. Root cause: overlay opens on a possibly-stale snapshot and only watches for FUTURE deletions — an already-gone room strands it (nothing will ever fire). Fix: `watchIncomingRoom` validates entry (fetchOffer answerable? else bounce home at once) then watches. Covers stale-snapshot, own-ringback, and pre-hangup races.
 - **Retest:** rebuild both → BLU calls, hangs up BEFORE Moto answers → Moto's overlay should vanish by itself (or never wrongly appear).
 
-## Where we are (2026-09-19, self-ring + ghost-InCall — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, self-ring + ghost-InCall — executor lane, since committed)
 
 - **Operator bugs (both real, shared root):** (1) double-call + hangup → phone rings ITSELF (own OFFER heard by own Home listener); (2) answering own stale offer → InCall showing local video with no peer ("video without connecting" = local PiP renders immediately, remote black — by design). Fix: `OwnOfferRegistry` suppresses self-offers in listener + fetch; versionCode 3 fingerprints builds (dumpsys-checkable from lane, ends "which build is installed" confusion).
 - **Open question for retest:** whether the ghost-InCall persisted past 15s (watchdog build installed?) — new build settles it either way.
 
-## Where we are (2026-09-19, zombie-call guards — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, zombie-call guards — executor lane, since committed)
 
 - **Operator bug (confirmed design gap):** caller quick-hangups → callee answers a deleted room → sits InCall with a ghost forever. Guards: (1) 15s media watchdog on every InCall entry (no CONNECTED → silent Idle → auto-home, no scary card); (2) incoming overlay watches the room — vanishes pre-Answer → home. Peer-connected flag resets per call.
 - **Test:** BLU calls → hang up within 2s → Moto answers (or sits on overlay) → Moto should be home within ~15s, noRetry card, no crash. Then normal call to confirm the watchdog doesn't bite healthy calls.
@@ -156,12 +185,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Operator report:** hanging up one side strands the other (must hang up both). Root cause: `endCall` fired teardown into `viewModelScope` then navigated instantly — the pop clears the VM, cancels the scope, and the room delete usually dies with it, so the peer's room-deleted listener never fires. Fix: `endCallAndAwait()` (3s cap, offline-safe) awaited BEFORE navigation on local hangup/decline; fire-and-forget `endCall()` kept for the remote-triggered path.
 - **Test:** rebuild both → call → hang up ONE side → other should glide home ~1s later.
 
-## Where we are (2026-09-19, remote hangup + QA retired — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, remote hangup + QA retired — executor lane, since committed)
 
 - **Operator asked, executor built:** peer hangup/decline now mirrors home on both sides (`observeRoomDeleted` → `endCall`, auto-home on Idle-after-activity). Grey QA button REMOVED (auto-popup proven; route + `simulateIncomingCall` kept as Phase 5 FCM entry).
 - **Real-phone question answered:** yes — background/killed-app incoming is exactly Phase 5 (FCM wakeup). App-open popup is done; nothing more can ring a dead app without push.
 
-## Where we are (2026-09-19, auto-popup incoming call — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, auto-popup incoming call — executor lane, since committed)
 
 - **Operator asked, executor built:** Home listens for new OFFERs and jumps to the overlay itself (ringtone + buzz, silenced on leave). Grey QA button stays as fallback. Killed-app wakeup = Phase 5 FCM. Rebuild + test: BLU calls while Moto sits on the 4-card screen → overlay should pop WITH sound, no taps on Moto.
 - **Answer to the question:** yes, it should pop up — the grey button was scaffolding that overstayed. This fixes the app-open case now; FCM fixes the killed-app case later.
@@ -182,7 +211,7 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 - **Executor robustness fixes (committed next):** (1) caller wipes the room before publishing (stale ANSWER/candidates from prior QA runs or crashes no longer poison new calls — callee side never wipes); (2) callee polls `fetchOffer` ~15s on NOT_FOUND only (absorbs two-human tap timing; other failures still throw immediately).
 - **Correct choreography:** BLU taps Call Dad and WAITS on "Calling Dad…" → Moto taps gray QA button → overlay → Answer within ~15s → ANSWER published → both CONNECTED. Decline/hangup either side kills the room — start over if Retry appears.
 
-## Where we are (2026-09-19, Phase 4 landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, Phase 4 landed — executor lane, since committed)
 
 - **Architect prompt executed (1 created, 5 modified, package `com.calldad`):** `CallState.Incoming`, `VideoRenderer` (composable-owned init/release, client EGL only, null = black placeholder), `WebRtcConfig.iceServers` (STUN + REPLACE_ME-gated TURN), WebRTCClient (ctor iceServers, `eglContext`/`localVideoTrack` accessors, `buildRtcConfig()`, attach*/detach* + fields DELETED), VM (EGL/track flows, `simulateIncomingCall()`, cancel-safe), CallScreen (Incoming overlay + Answer/No ≥160dp, InCall video Box with remote/PiP/timer/controls, `mode` param), nav-arg `call?mode={mode}`, DEBUG-only Home QA button (`buildConfig=true`), `CallStateTest`.
 - **Executor scope call (ADR-006):** QA hook drives the REAL `answerCall()` (not a fake overlay) so two-device E2E is actually testable; production route untouched; decline-wipes-room accepted; per-call rooms → Phase 5.
@@ -217,32 +246,32 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 ## Where we are (2026-09-19, host gates GREEN — operator run, executor recorded)
 
 - **Evidence (operator pasted):** `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug` → **BUILD SUCCESSFUL in 2m17s, 33 tasks (31 executed, 2 cached)**. 8/8 host tests pass (Routes 3 + SignalingModels 5); lint clean apart from K2 Kotlin-analysis-API warnings (toolchain noise, pre-existing). Wrapper generation itself also BUILD SUCCESSFUL.
-- **Device seen from executor lane (read-only adb):** `7040016025040287 device` = **BLU View 5 (B160V, sdk 34)** — not the Moto G. Moto G remains truth device for sign-off.
+- **Device seen from executor lane (read-only adb):** `<serial redacted> device` = **BLU View 5 (B160V, sdk 34)** — not the Moto G. Moto G remains truth device for sign-off.
 - **Gates flipped:** G1, G2-host, G3-host GREEN. Still pending: `:app:assembleDebug` + install + `WebRTC:D` call sequence on device.
 - **Answer to operator's question (standing orders):** read-only adb from this lane is YES and already proven above. Installs / `connected*` / instrumented runs stay behind an explicit per-order authorization per RULES §1.5 — and there is no `androidTest` source set in repo yet, so the only device work available is the manual `/smoke` walkthrough (operator taps, pastes observations).
 
-## Where we are (2026-09-19, Phase 3 peer connection landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, Phase 3 peer connection landed — executor lane, since committed)
 
 - **Architect prompt executed (4 created, 5 modified, package `com.calldad`):** `webrtc/WebRtcConfig.kt` (Google STUN ×2, 640×480@24), `WebRtcLog.kt` guardrail (fixed-string/enum logging only — KDoc is a standing RULES-§2 exception per ADR-005), `WebRTCClient.kt` (trickle ICE, GATHER_CONTINUALLY, audio+front-camera tracks, Phase 4 renderer hooks), `ui/permissions/CallPermissions.kt`; catalog `webrtc 1.1.0`, module dep, Manifest mic/camera + `required=false` features.
 - **Executor fixes (soundness):** (1) prompt's `CallViewModel(application)` + bare `viewModel()` would CRASH on navigation — added `callViewModel()` factory; (2) package rewritten from `com.calldad.app.*`; (3) H.2 Connecting branch verified pre-existing — no-op; no renderers added.
 - **Architect's own flag confirmed fixed:** Phase 2 callee re-apply-OFFER bug gone (observation caller-scoped). STUN-only carried as K8 (Phase 4 TURN blocker).
 - **Gates:** verify re-run next. Operator runs `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (expected state sequence in prompt §J; NEVER paste SDP/ICE payloads). `google-services.json` confirmed present on disk (gitignored).
 
-## Where we are (2026-09-19, pipeline applied collaborator box — executor reconciled, UNCOMMITTED)
+## Where we are (2026-09-19, pipeline applied collaborator box — executor reconciled, since committed)
 
 - **Operator applied collaborator catalog verbatim:** `libs.versions.toml` now camelCase single-source-of-truth (AGP 8.7.2 / Kotlin 2.0.21 / google-services 4.5.0 / BOM 34.19.0 / non-KTX firestore); root `build.gradle.kts` pure-alias; `app/build.gradle.kts` verbatim §3 with `com.calldad` correctly kept.
 - **Executor reconciliations:** KTX fix applied (`getInstance()`, 4 dead imports removed incl. `FieldValue`/`QuerySnapshot`); junit restored (gates); versionCode held at 2 (avoids device downgrade-install failure); ADR-004 records the toolchain switch (operator-decided, DeepSeek retro-review invited); freeze + checklist updated.
 - **Open risk:** `app/build/` was generated under AGP 8.13.2 — Studio must clean re-sync under 8.7.2; BOM 34.19.0 proven only by sync. Human pastes sync result.
 - **Gates:** verify re-run next. Temp `Log.d` + `assembleDebug` from the box are OPERATOR-LOCAL ONLY (never committed by this lane).
 
-## Where we are (2026-09-19, Phase 2 signaling landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, Phase 2 signaling landed — executor lane, since committed)
 
 - **Operator Phase 2 WRITTEN under `com.calldad`:** `data/signaling/SignalingModels.kt` + `SignalingClient.kt` (Firestore `calls/dad_channel` OFFER/ANSWER + ICE trickle, `SignalingFailure` offline mapping), `ui/screens/CallState.kt` (Idle/Connecting/InCall/Error replaces `CallStatus` enum), `CallViewModel` rewire (startCall/answerCall/endCall + remoteDescription/remoteCandidates hand-off for Phase 3), `CallScreen` rewire (layout preserved + Error/Retry card), `SignalingModelsTest` (5 pure-JVM tests).
 - **Build deltas:** Firebase BOM 33.5.1 + google-services 4.4.2 + coroutines-play-services; Manifest INTERNET + ACCESS_NETWORK_STATE (RECORD_AUDIO/CAMERA still commented); versionName 0.2.0. **Kept frozen AGP 8.13.2 / Kotlin 2.1.0 — the draft's 8.7.2/2.0.21 downgrade was rejected** (no ADR authorizes it; DeepSeek to confirm). Unused `FieldValue`/`QuerySnapshot` imports dropped for lint.
 - **ADR-002 now DECIDED Firebase-for-signaling** (operator directive overrides P2P-first recommendation); sovereign P2P deferred to BP-04. `google-services.json` stays gitignored/verify-banned — operator must place it in `app/` before any device signaling test.
 - **Gates:** verify re-run next. Human Studio run needed: `testDebugUnitTest` (Routes + SignalingModels) + `lintDebug` + `google-services.json` placement + device signaling proof. This lane ran no Gradle.
 
-## Where we are (2026-09-19, Phase 1 scaffold landed — executor lane, UNCOMMITTED)
+## Where we are (2026-09-19, Phase 1 scaffold landed — executor lane, since committed)
 
 - **Operator Phase 1 scaffold WRITTEN to `app/`:** `com.calldad`, 15 `.kt` (MainActivity, Routes/AppNavHost, Color/Type/Theme, GiantComponents, Home+VM, Call+VM, Ptt+VM, Game, Helper+VM) with Genesis headers prepended per RULES §2, Manifest (portrait, no perms — Phase 2 uncomment block kept), `themes.xml`/`colors.xml` (Manifest `@style/Theme.CallDad` satisfied), `RoutesTest` (pure-JVM), module + root Gradle + `libs.versions.toml` + wrapper props (no `gradlew` binaries — Studio generates on sync).
 - **Deltas vs frozen spec (executable truth wins, DeepSeek/Gemini to rule):** package `com.calldad` (was `com.calldad` — SPEC amended); routes Home/Call/**Ptt/Game/Helper** (was Chat/Photo/Log — deferred to BP-03/04); minSdk **26** (ADR-001 DECIDED B); BOM **2024.10.01** (drift from frozen 2024.12.01 — flagged); no Hilt/Room/Hilt yet (BP-02+); placeholders: 1.5s fake connect, `cannedReply()`, PTT mic hooks, WebView hook.
@@ -258,19 +287,19 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 
 ## Next actions (for operator + Gemini + DeepSeek)
 
-1. Operator: review scaffold, confirm app name ("Call Dad" working title) + package (`com.calldad` proposed).
-2. DeepSeek (architect): rule on ADR-001 (minSdk 30 vs 26 for old kid tablet), ADR-002 (P2P-first vs Firebase-first v0.1 signaling), ADR-003 (Room+SQLCipher vs plain Room v0.1).
-3. Gemini (R&D): validate reuse map (mantle `CallSignalingManager`/`LiveCallSession`/`AudioFrameCipher`/`SovereignImageEngine`/`RendezvousClient+main.go`) + propose video-call approach (CameraX + custom UDP vs WebRTC — WebRTC NOT in donor; needs research).
-4. Joint: authorize BP-01 (native app skeleton in Android Studio — human creates `app/` via wizard, executor wires packages/manifest + first unit test).
-5. Human device step (later): Studio creates skeleton → installs debug on Moto G → pastes `adb devices` + launch proof → executor records in CURRENT_STATE (no build claims from this lane).
+1. **Operator: deploy the backend first.** `firebase deploy --only firestore:rules,functions`. Old builds use `calls/family_channel`, which the new rules deny: install BOTH new flavors on BOTH phones together.
+2. **Operator:** Studio sync (no new runtime deps) → install parent + child → open Pairing on both (gear → grown-ups question) → scan each other's code both ways.
+3. **Operator:** run the G-C8 device matrix (blueprints/CHECKPOINTS.md) and paste logcat `-s WebRTC:D` for any failure.
+4. **DeepSeek:** retro-review ADR-015 (pair-scoped rooms, token push, activity-scoped session, glare rule).
+5. **Gemini:** TURN provider + short-lived credential issuer options (K8), and a ZXing-only decode path if ML Kit is dropped (K9).
 
 ## Open decisions
 
-- D1: App name + launcher label + icon (kid-friendly, big-type). Owner: operator.
-- D2: minSdk 30 (donor default) vs 26 (old kid tablet reuse). Owner: DeepSeek (ADR-001).
-- D3: v0.1 signaling: sovereign P2P+LAN+rendezvous only (recommended) vs Firebase/FCM assist. Owner: DeepSeek + Gemini (ADR-002). Firebase paid account ready but unused.
-- D4: Video: extend `LiveCallSession` UDP pattern with CameraX frames (recommended spike) vs adopt WebRTC (new dep, needs ADR). Owner: Gemini research.
-- D5: GitHub repo init + remote: DONE local (`main`, origin `https://github.com/GhostMan612/Call-Dad`, commit `d6399d9`, NO push per RULES §1.4). Push only on operator order. Owner: operator.
+- **D6:** Ratify RULES §1.7a (Firebase/WebRTC/anonymous auth as shipped), or order a return to the LAN plan. Owner: operator.
+- **D7:** ML Kit keep vs ZXing-only (K9). Owner: operator.
+- **D8:** TURN provider + credential issuing (K8). Owner: operator + Gemini.
+- **D9:** The comments law (RULES §2.2) vs the codebase's rationale comments (about 850 lines, all Genesis headers present): loosen the law to allow short why-comments, or schedule a strip pass. Owner: operator.
+- **Closed:** D1 (app name "Call of Daddy"), D2 (ADR-001), D3 (ADR-002), D4 (ADR-005), D5 (repo on GitHub).
 
 ## Toolchain notes (2026-09-19, verified read-only)
 

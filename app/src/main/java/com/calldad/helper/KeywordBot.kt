@@ -26,7 +26,7 @@ object KeywordBot {
         // Specific-before-generic per the contract above: "another joke"
         // contains "joke", so it must win first or the second joke is
         // unreachable. Executor reorder; responses untouched.
-        Rule(listOf("another joke", "one more joke", "again"),
+        Rule(listOf("another joke", "one more joke", "joke again"),
             "What do you call a bear with no teeth? A gummy bear!"),
         Rule(listOf("joke", "funny", "laugh"),
             "Why did the teddy bear say no to dessert? Because she was stuffed!"),
@@ -59,17 +59,25 @@ object KeywordBot {
     private const val FALLBACK =
         "That's a great question! I don't know the answer yet, but I'm learning."
 
+    private val NON_WORD = Regex("[^a-z0-9' ]")
+    private val SPACES = Regex("\\s+")
+
     /**
      * Returns a kid-friendly response for the given transcript.
-     * Case-insensitive. Whitespace-normalized. Never returns null.
+     * Case-insensitive, punctuation-insensitive, and WHOLE-WORD: "this"
+     * never matches "hi", "using" never matches "sing". Never returns null.
      */
     fun getResponse(transcript: String?): String {
-        val q = transcript?.lowercase()?.trim()?.replace(Regex("\\s+"), " ") ?: ""
+        val q = transcript.orEmpty().lowercase()
+            .replace(NON_WORD, " ")
+            .replace(SPACES, " ")
+            .trim()
         if (q.isEmpty()) return "I didn't hear you. Try again?"
 
+        val padded = " $q "
         for (rule in RULES) {
             for (kw in rule.keywords) {
-                if (q.contains(kw)) return rule.response
+                if (padded.contains(" $kw ")) return rule.response
             }
         }
         return FALLBACK

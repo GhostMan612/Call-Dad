@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:">
 <meta name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Call Dad — Games</title>
@@ -54,10 +56,11 @@
 (function () {
   "use strict";
 
-  // ----- AUTHORITY MODEL (carried from Phase 8) -----
-  // Caller is authoritative for ALL games. Callee sends moves only.
-  // Caller validates, mutates, and broadcasts full state.
-  let role = "callee";
+  // ----- AUTHORITY MODEL -----
+  // In a call: caller is authoritative for ALL games. Callee sends moves
+  // only; caller validates, mutates, and broadcasts full state.
+  // No call: "solo" — pass-and-play on one phone, X and O alternate.
+  let role = "solo";
   let currentGame = null;   // 'ttt' | 'c4' | 'mem'
 
   const $menu = document.getElementById("menu");
@@ -83,7 +86,28 @@
     sendToNative({ type: "menu" });
   });
 
+  function isMyTurn(turn) {
+    return role === "solo" ||
+      (role === "caller" && turn === "X") ||
+      (role === "callee" && turn === "O");
+  }
+  function actsAsX(turn) {
+    return role === "caller" || (role === "solo" && turn === "X");
+  }
+  function winText(winner) {
+    if (role === "solo") return winner + " wins! 🎉";
+    return (winner === (role === "caller" ? "X" : "O")) ? "You win! 🎉" : "Dad wins!";
+  }
+  function turnText(turn) {
+    if (role === "solo") return turn + "'s turn";
+    return isMyTurn(turn) ? "Your turn" : "Waiting…";
+  }
+  function isIndex(v, n) {
+    return typeof v === "number" && Number.isInteger(v) && v >= 0 && v < n;
+  }
+
   function sendToNative(obj) {
+    if (role === "solo") return;
     if (window.AndroidRTC && window.AndroidRTC.sendGameStateToDad) {
       try { window.AndroidRTC.sendGameStateToDad(JSON.stringify(obj)); }
       catch (_) {}
@@ -113,23 +137,22 @@
       cell.className = "cell";
       cell.textContent = v;
       cell.dataset.v = v;
-      const myTurn = tttActive && !tttWinner &&
-        ((role === "caller" && tttTurn === "X") ||
-         (role === "callee" && tttTurn === "O"));
+      const myTurn = tttActive && !tttWinner && isMyTurn(tttTurn);
       if (v || !myTurn) cell.classList.add("disabled");
       bindTap(cell, function () { tttTap(i); });
       $board.appendChild(cell);
     });
     if (tttWinner === "draw") $status.textContent = "Tie game!";
-    else if (tttWinner) $status.textContent =
-      (tttWinner === (role === "caller" ? "X" : "O")) ? "You win! 🎉" : "Dad wins!";
-    else $status.textContent = (
-      (role === "caller" && tttTurn === "X") ||
-      (role === "callee" && tttTurn === "O")) ? "Your turn" : "Waiting…";
+    else if (tttWinner) $status.textContent = winText(tttWinner);
+    else $status.textContent = turnText(tttTurn);
   }
   function tttTap(i) {
     if (!tttActive || tttWinner || tttBoard[i]) return;
-    if (role === "caller") {
+    if (role === "solo" && tttTurn === "O") {
+      applyCalleeMove({ type: "move", game: "ttt", index: i });
+      return;
+    }
+    if (actsAsX(tttTurn)) {
       if (tttTurn !== "X") return;
       tttBoard[i] = "X";
       tttWinner = tttCheck(tttBoard);
@@ -180,23 +203,22 @@
       cell.textContent = v;
       cell.dataset.v = v;
       const col = i % C4_COLS;
-      const myTurn = c4Active && !c4Winner &&
-        ((role === "caller" && c4Turn === "X") ||
-         (role === "callee" && c4Turn === "O"));
+      const myTurn = c4Active && !c4Winner && isMyTurn(c4Turn);
       if (!myTurn) cell.classList.add("disabled");
       bindTap(cell, function () { c4Tap(col); });
       $board.appendChild(cell);
     });
     if (c4Winner === "draw") $status.textContent = "Tie game!";
-    else if (c4Winner) $status.textContent =
-      (c4Winner === (role === "caller" ? "X" : "O")) ? "You win! 🎉" : "Dad wins!";
-    else $status.textContent = (
-      (role === "caller" && c4Turn === "X") ||
-      (role === "callee" && c4Turn === "O")) ? "Your turn" : "Waiting…";
+    else if (c4Winner) $status.textContent = winText(c4Winner);
+    else $status.textContent = turnText(c4Turn);
   }
   function c4Tap(col) {
     if (!c4Active || c4Winner) return;
-    if (role === "caller") {
+    if (role === "solo" && c4Turn === "O") {
+      applyCalleeMove({ type: "move", game: "c4", col: col });
+      return;
+    }
+    if (actsAsX(c4Turn)) {
       if (c4Turn !== "X") return;
       if (c4Drop(c4Board, col, "X") < 0) return;
       c4Winner = c4Check(c4Board);
@@ -239,21 +261,21 @@
       cell.textContent = shown ? v : "?";
       if (!shown) cell.classList.add("hidden");
       if (memMatched[i]) cell.style.background = "rgba(255,255,255,.4)";
-      const myTurn = memActive && !memWinner &&
-        ((role === "caller" && memTurn === "X") ||
-         (role === "callee" && memTurn === "O"));
+      const myTurn = memActive && !memWinner && isMyTurn(memTurn);
       if (!myTurn || memRevealed[i] || memMatched[i]) cell.classList.add("disabled");
       bindTap(cell, function () { memTap(i); });
       $board.appendChild(cell);
     });
     if (memWinner) $status.textContent = "All matched! 🎉";
-    else $status.textContent = (
-      (role === "caller" && memTurn === "X") ||
-      (role === "callee" && memTurn === "O")) ? "Your turn" : "Waiting…";
+    else $status.textContent = turnText(memTurn);
   }
   function memTap(i) {
     if (!memActive || memWinner || memRevealed[i] || memMatched[i]) return;
-    if (role === "caller") {
+    if (role === "solo" && memTurn === "O") {
+      applyCalleeMove({ type: "move", game: "mem", index: i });
+      return;
+    }
+    if (actsAsX(memTurn)) {
       if (memTurn !== "X") return;
       callerApplyMemFlip(i);
     } else {
@@ -287,7 +309,7 @@
 
   // ----- DISPATCH -----
   function selectGame(g) {
-    if (role !== "caller") {
+    if (role === "callee") {
       // Callee asks the authority to switch.
       sendToNative({ type: "select-game", game: g });
       return;
@@ -295,6 +317,7 @@
     applyGameSelect(g);
   }
   function applyGameSelect(g) {
+    if (g !== "ttt" && g !== "c4" && g !== "mem") return;
     currentGame = g;
     $menu.classList.add("hidden");
     $game.classList.remove("hidden");
@@ -327,8 +350,13 @@
   // ----- NATIVE API -----
 
   window.setGameRole = function (r) {
-    role = (r === "caller") ? "caller" : "callee";
-    renderCurrent();
+    const next = (r === "caller" || r === "callee") ? r : "solo";
+    if (next === role) return;
+    role = next;
+    currentGame = null;
+    $game.classList.add("hidden");
+    $menu.classList.remove("hidden");
+    if (role === "callee") sendToNative({ type: "hello" });
   };
 
   window.receiveRemoteGameState = function (raw) {
@@ -336,6 +364,12 @@
     try { msg = (typeof raw === "string") ? JSON.parse(raw) : raw; }
     catch (_) { return; }
     if (!msg || typeof msg.type !== "string") return;
+
+    // Callee just opened the game: resync it to whatever is on the board.
+    if (msg.type === "hello" && role === "caller") {
+      if (currentGame) broadcast(currentGame);
+      return;
+    }
 
     // Callee asking to switch games.
     if (msg.type === "select-game" && role === "caller") {
@@ -345,7 +379,21 @@
 
     // Callee sending a move. Caller validates and applies.
     if (msg.type === "move" && role === "caller") {
+      applyCalleeMove(msg);
+      return;
+    }
+
+    // Full state broadcast from the authority.
+    if (msg.type === "state" && role === "callee") {
+      applyRemoteState(msg);
+    }
+  };
+
+  // O's move, validated at the boundary: from the peer in a call, or
+  // from the second player's tap in solo mode.
+  function applyCalleeMove(msg) {
       if (msg.game === "ttt" && currentGame === "ttt") {
+        if (!isIndex(msg.index, 9)) { tttRender(); broadcast("ttt"); return; }
         if (tttActive && !tttWinner && tttTurn === "O" && !tttBoard[msg.index]) {
           tttBoard[msg.index] = "O";
           tttWinner = tttCheck(tttBoard);
@@ -376,6 +424,7 @@
         }
         c4Render(); broadcast("c4");
       } else if (msg.game === "mem" && currentGame === "mem") {
+        if (!isIndex(msg.index, 16)) { memRender(); broadcast("mem"); return; }
         if (memActive && !memWinner && memTurn === "O" &&
             !memRevealed[msg.index] && !memMatched[msg.index]) {
           memRevealed[msg.index] = true;
@@ -397,11 +446,25 @@
         }
         memRender(); broadcast("mem");
       }
-      return;
-    }
+  }
 
-    // Full state broadcast from the authority.
-    if (msg.type === "state") {
+  function validBoard(b, n, allowed) {
+    return Array.isArray(b) && b.length === n &&
+      b.every(function (v) { return allowed.indexOf(v) >= 0; });
+  }
+  function validFlags(b, n) {
+    return Array.isArray(b) && b.length === n &&
+      b.every(function (v) { return v === true || v === false; });
+  }
+
+  function applyRemoteState(msg) {
+      const turnOk = msg.turn === "X" || msg.turn === "O";
+      if (!turnOk) return;
+      if (msg.game === "ttt" && !validBoard(msg.board, 9, ["", "X", "O"])) return;
+      if (msg.game === "c4" && !validBoard(msg.board, 42, ["", "X", "O"])) return;
+      if (msg.game === "mem" && !(validBoard(msg.board, 16, MEM_ICONS) &&
+          validFlags(msg.revealed, 16) && validFlags(msg.matched, 16))) return;
+      if (msg.game !== "ttt" && msg.game !== "c4" && msg.game !== "mem") return;
       currentGame = msg.game;
       $menu.classList.add("hidden");
       $game.classList.remove("hidden");
@@ -417,9 +480,7 @@
         memActive = !memWinner;
       }
       renderCurrent();
-      return;
-    }
-  };
+  }
 
   // Menu is visible by default. Authority selects first.
   $menu.classList.remove("hidden");

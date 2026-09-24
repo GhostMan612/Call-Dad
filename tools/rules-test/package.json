@@ -1,0 +1,10 @@
+{
+  "name": "call-dad-rules-test",
+  "private": true,
+  "description": "Firestore security-rules tests. Run: npx firebase emulators:exec --only firestore --project demo-calldad 'node --test'",
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.14.1",
+    "firebase-tools": "^13.35.1"
+  }
+}

@@ -1,62 +1,65 @@
 # CURRENT_STATE.md — Call-Dad verified map
 
 > Updated every session per RULES.md §4.2. Executable truth > prose.
+> Refreshed 2026-09-24 after the full-repo sweep + fix (ADR-015). Superseded history lives in git.
 
-## Toolchain freeze (2026-09-19, verified read-only)
+## Toolchain (source of truth: `gradle/libs.versions.toml`, ADR-004)
 
-AGP 8.7.2 / Kotlin 2.0.21 (ADR-004, catalog is source of truth) / Gradle 8.13 / JVM 17 / Room 2.6.1 (deferred to BP-02+) / OkHttp 4.12.0 / CBOR 1.7.3 / Concentus 1.0.2 / CameraX 1.3.4 / ZXing 3.5.3 / NDK 27.0.12077973 / cmake 3.22.1. App target: compileSdk 35 / target 35 / minSdk 26 (ADR-001 DECIDED B). Phase 1 scaffold pins Compose BOM 2024.10.01 + nav 2.8.4 + lifecycle 2.8.7 (donor-frozen BOM retired — ADR-004). Phase 2: google-services 4.5.0 + Firebase BOM 34.19.0 (KTX merged, `getInstance()`).
+AGP 8.7.2 / Kotlin 2.0.21 / Gradle 8.13 / JVM 17 / compileSdk 35 / targetSdk 35 / minSdk 26 (ADR-001 B).
+Compose BOM 2024.10.01, navigation 2.8.4, lifecycle 2.8.7, coroutines 1.10.2.
+Firebase BOM 34.19.0 (firestore, auth, messaging) + google-services 4.5.0. stream-webrtc-android 1.3.10.
+CameraX 1.4.2 (uniform), ML Kit barcode 18.3.1 (unbundled), ZXing 3.5.3, play-services-base 18.5.0, webkit 1.12.1, DataStore 1.1.1.
+Test-only: JUnit 4.13.2, coroutines-test 1.10.2, org.json 20240303. Every dependency goes through a catalog alias.
+Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher, KSP, OkHttp, CBOR, Concentus.
 
-## File map (scaffold session)
+## File map (`app/src/main/java/com/calldad/`)
 
-| Path | State | Notes |
-|------|-------|-------|
-| `AGENTS.md` / `RULES.md` / `SESSION_HANDOFF.md` / `CLAUDE.md` / `README.md` | WRITTEN, uncommitted | Vision-pattern workflow, Call-Dad tailored |
-| `SPEC_SHEET.md` / `.json` | WRITTEN | v0.1 contract |
-| `blueprints/` MASTER/ROADMAP/CURRENT_STATE/CHECKLIST/CHECKPOINTS/ARCHITECTURE | WRITTEN | BP-01..05 + ADR-001..003 |
-| `docs/` 5 guides | WRITTEN | setup, devices, firebase-plan, kid-ux, reuse-map |
-| `.opencode/` 3 agents + 3 commands | WRITTEN | native-dev, comms-porter, kid-ux-guardian; verify/probe/smoke |
-| `tools/verify_project.py` | WRITTEN, PENDING run | stdlib scaffold gate |
-| `fixtures/` + `assets/` | PLACEHOLDERS | synthetic only |
-| `app/` | PHASE 1 LANDED 2026-09-19 (uncommitted) | `com.calldad`: MainActivity + Routes/AppNavHost + theme(3) + GiantComponents + 4 screens w/ ViewModels + Manifest + themes/colors + `RoutesTest` + module/root Gradle + catalog + wrapper props (no `gradlew` binaries — Studio generates) |
-| `app/.../data/signaling/` | PHASE 2 LANDED 2026-09-19 (uncommitted) | `SignalingModels` + `SignalingClient` (Firestore `calls/dad_channel`) + `CallState` + VM rewire + Screen Error/Retry + `SignalingModelsTest` + Firebase Gradle/Manifest |
-| `app/.../webrtc/` + `ui/permissions/` | PHASE 3 LANDED (caller leg GREEN on device) | `WebRtcConfig` + `WebRtcLog` guardrail + `WebRTCClient` (Stream 1.3.10, trickle ICE, STUN-only) + `CallPermissions` + VM rewrite + factory fix + mic/camera perms |
-| `app/.../ui/components/VideoRenderer.kt` + overlay | PHASE 4 LANDED 2026-09-19 (uncommitted) | `CallState.Incoming`, composable-owned renderers, TURN-sentinel config, nav-arg `call?mode=` + DEBUG QA hook (real-path answer), `CallStateTest` |
-| `SPEC_SHEET.json` | AMENDED | package `com.calldad` (Phase 1 truth); routes Home/Call/Ptt/Game/Helper supersede Chat/Photo/Log for Phase 1; v0.2.0 Firebase-signaling-active |
-| `C:\venv-hub\call-dad\` | CREATED (empty) | isolated lane |
+| Path | Role |
+|------|------|
+| `MainActivity.kt` | Single activity (singleTop). Routes ring-notification taps, tracks foreground, one-time full-screen-intent ask |
+| `CallDadApplication.kt` | Firebase init, anonymous auth with retry, silent `incoming_call_v2` channel, token registration |
+| `navigation/AppNavigation.kt`, `Routes.kt` | Graph; pulls to the ring screen from any route; game ↔ call; grown-ups gate before pairing |
+| `data/session/FamilySession.kt` | Auth UID + paired peer → `FamilyPair(ownUid, peerUid, roomId)` |
+| `data/signaling/SignalingClient.kt` | Room ops: publishOffer (seq+1), publishAnswer(seq), finishCall(seq), ICE trickle, observe |
+| `data/signaling/SignalingModels.kt` | SdpType, SessionDescription, IceCandidate, `CallRoom` (ids, ring freshness, no-answer window) |
+| `webrtc/WebRTCClient.kt` | Single-use media stack per attempt; buffered remote ICE; safe dispose order; audio mode save/restore |
+| `webrtc/WebRtcConfig.kt`, `WebRtcLog.kt`, `ConnectionState.kt` | ICE servers (STUN + optional TURN), log guardrail, health enum |
+| `ui/screens/CallViewModel.kt` | Activity-scoped call session: room pipeline, generations, timers, teardown |
+| `ui/screens/CallState.kt` | 7-state machine + `canTransition` table (host-tested) |
+| `ui/screens/CallScreen.kt` | Ring / calling / in-call (camera, mic, flip, game, hang up) / no-answer / error / permission screens |
+| `ui/components/VideoRenderer.kt` | SurfaceViewRenderer host with keyed sink attach/detach |
+| `ui/components/ParentGate.kt` | Grown-ups-only multiplication gate |
+| `audio/CallAudioManager.kt` | Process-wide single ringer (ring + vibrate) and caller ringback |
+| `fcm/CallMessagingService.kt`, `CallForegroundService.kt`, `PushTokenRegistrar.kt` | Push receive → foreground-first ring service; token → `users/{uid}` |
+| `pairing/*`, `ui/screens/Pairing*` | QR payload v2, QR bitmap, DataStore peer store, ML Kit module check, mutual handshake |
+| `game/GameWebRtcBridge.kt`, `ui/screens/GameScreen.kt`, `assets/game.html` | 3 games; solo pass-and-play or synced over the call's data channel |
+| `ptt/*`, `ui/screens/Ptt*` | Walkie-talkie (simulated engine unless the private module is present) |
+| `helper/KeywordBot.kt`, `ui/screens/Helper*` | Offline voice helper (whole-word keyword matching) |
+
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `app/src/test/` (7 classes), `functions/ring.test.js`, `tools/rules-test/rules.test.js`.
 
 ## Known-issue registry
 
 | ID | Issue | Status |
 |----|-------|--------|
-| K1 | No `app/` Gradle skeleton yet — human Studio step required | CLOSED (scaffold written) → OPEN human Studio sync + `testDebugUnitTest`/`lintDebug` + Moto G install proof |
-| K2 | minSdk 30 vs 26 (old kid tablet?) | DECIDED B (26) per operator scaffold → ADR-001 |
-| K3 | Video approach: extend-UDP vs WebRTC | DECIDED WebRTC via Stream fork 1.1.0 → ADR-005; sovereign-UDP path retired |
-| K4 | P2P-first vs Firebase-first signaling | DECIDED Firebase-for-signaling (operator Phase 2 directive) → ADR-002; P2P deferred to BP-04 |
-| K5 | SQLCipher now vs later | OPEN → ADR-003 |
-| K8 | No TURN — symmetric-NAT calls will fail | OPEN Phase 4/5 blocker (provider decision before mobile-data field testing) → ADR-005 |
-| K6 | No `call-dad` keystore (debug only) | OPEN → operator provisions later |
-| K7 | `gh`/Firebase CLI not on PATH | ACCEPTED (not needed v0.1) |
+| K1 | Studio sync + device install proof | OPEN (operator) |
+| K2 | minSdk | DECIDED 26 (ADR-001) |
+| K3 | Video approach | DECIDED WebRTC, stream-webrtc-android 1.3.10 (ADR-005) |
+| K4 | Signaling | DECIDED Firestore (ADR-002), pair-scoped rooms (ADR-015) |
+| K5 | SQLCipher | MOOT: no Room/database in the app; ADR-003 stays unaccepted |
+| K6 | No release keystore | OPEN (operator) |
+| K7 | Firebase CLI on PATH | OPEN for deploys (operator runs `firebase deploy`) |
+| K8 | No TURN: symmetric-NAT / mobile-data calls can fail; TURN creds in BuildConfig can be extracted from the APK | OPEN: provider + short-lived credential issuer (operator decision) |
+| K9 | ML Kit phone-home vs RULES §1.7 | OPEN: keep, or ZXing-only decode (operator) |
+| K10 | Rules + function redeploy required: old `family_channel` clients cannot talk to new ones | OPEN: deploy, then re-pair both phones |
+| K11 | Device matrix for ADR-015 (ring from every screen, killed-app ring, glare, no-answer, lost-peer end, game sync, pairing gate) | OPEN (operator) |
 
-## Last gates
+## Last gates (2026-09-24, this lane, cloud container with a local Android SDK)
 
-- G0 scaffold gate: GREEN (2026-09-19: VERIFY PASS 10 dirs + 28 files).
-- G1 skeleton: GREEN 2026-09-19 (operator run: BUILD SUCCESSFUL, 33 tasks; `RoutesTest` 3/3).
-- G2 signaling host: GREEN same build (`SignalingModelsTest` 5/5; lint 0 errors, K2 warnings only).
-- G3-device FULL: GREEN 2026-09-19 (BLU + Moto: CONNECTED both, video + audio both ways lane-witnessed, clean hangup, zero crashes).
-- G4 rendering/device: GREEN same evidence (VideoRenderer both ways, overlay, auto-popup, ringtone).
-- G5 (Phase 5 code): LANDED 2026-09-19, UNPROVEN — needs Studio sync (auth/messaging/play-services-auth) + functions+rules deploy + Anonymous enable + CALLEE_UID swap-builds + killed-app test.
-- G6 (Phase 6 code): LANDED 2026-09-19, UNPROVEN — ptt/ + interlock + 4 host tests; needs Studio sync (code-only) + §K press/release/interlock/boundary matrix.
-- G7 (Phase 7 code): LANDED 2026-09-20, UNPROVEN — game_sync channel + bridge + hardened WebView + game.html; needs Studio sync (webkit) + TWO-device TAP sync + escaping test (no host coverage possible).
-- G8 (Phase 8 code): LANDED 2026-09-20, UNPROVEN — debounce + restartIce + renegotiation + banner + full game + PiP; needs Studio sync (no new deps) + §H matrix.
-- G11 (Phase 11 code): LANDED 2026-09-20, UNPROVEN — static room + topic wakeup + structured rules; needs Studio sync + rules/functions deploy (replaces old) + §G matrix.
-- G10 (Phase 10 code): LANDED 2026-09-20, BLOCKED — flavors + game hub + bounds guard; needs console app entries + merged json BEFORE any build, then §G matrix.
-- G9 (Phase 9 code): LANDED 2026-09-20, UNPROVEN — TURN_URLS + audio-mode + single ringer + voice helper + game hub + 6 bot tests; needs Studio sync (no new deps) + §K matrix.
-- G3 peer connection (Phase 3, architect prompt): CODE LANDED 2026-09-19 — `webrtc/` (Config/Log/Client) + `CallPermissions` + VM AndroidViewModel rewrite (callee fix) + factory fix + mic/camera perms; gates PENDING human `:app:assembleDebug` + `testDebugUnitTest`/`lintDebug` + `adb logcat -s WebRTC:D` (this lane ran no Gradle).
-
-## Contracts 2–7 delta (2026-09-21/22 — see SESSION_HANDOFF for the night log)
-
-- Signaling is per-call rooms (`calls/{id}`, STATIC_ROOM_ID family_channel) with seq/status machine, topic FCM, 7-state UI machine, ICE trickle into room arrays, setup timeouts, instruments. Tests: `CallStateTest` (fromDocument); `CallDocumentTest` deleted (model retired).
-- Pairing: QR both ways → DataStore; mutual handshake via `pairings/{uid}` presence docs (nonce-scoped, 20-min expiry); rules stanza pending DEPLOY (lane cannot deploy — operator console step).
-- Reliability: heartbeat (120s batch) keeps room fresh; stale-CONNECTED takeover (20-min threshold + peer-unreachability guard) ends the delete-doc ritual; hasPendingWrites guard skips optimistic echoes.
-- Known open: hangup-crash guard needs watched confirmation; FCM wakeup is blueprint-only (Contract 7 deferred implementation); TURN/tablet matrices; retired-test debt cleared this round.
-- G-C7 (Contract 7 code): LANDED, UNCOMMITTED — needs pairings-rules deploy + assemble both + takeover/handshake/heartbeat matrices.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: PASS (80 tests, 0 failures).
+- `:app:lintParentDebug :app:lintChildDebug`: 0 errors. Remaining warnings are dependency-version nags (frozen by ADR-004), portrait lock and missing launcher icon (pre-existing).
+- Kotlin compile: 0 warnings, both flavors.
+- `node --test functions/`: 6/6. Firestore rules emulator suite: 15/15.
+- `tools/verify_project.py`: PASS.
+- Game protocol: headless two-WebView simulation (solo, synced, validation, resync) PASS.
+- NOT claimed: assemble, install, any on-device behavior.

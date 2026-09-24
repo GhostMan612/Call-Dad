@@ -2,17 +2,16 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// Phase 2 host-side tests: dependency-free signaling models only.
-// SignalingClient (Firebase) and CallViewModel (ViewModel) run in Studio.
+// Host-side tests: dependency-free signaling models and room logic.
 package com.calldad
 
+import com.calldad.data.signaling.CallRoom
 import com.calldad.data.signaling.IceCandidate
-import com.calldad.data.signaling.OFFER_STALE_MS
 import com.calldad.data.signaling.SdpType
-import com.calldad.data.signaling.SessionDescription
-import com.calldad.data.signaling.SignalingErrorKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SignalingModelsTest {
@@ -39,23 +38,37 @@ class SignalingModelsTest {
     @Test
     fun iceCandidate_defaultsAreNull() {
         val c = IceCandidate(sdpCandidate = "candidate:1")
-        assertEquals(null, c.sdpMid)
-        assertEquals(null, c.sdpMLineIndex)
-        assertEquals(null, c.serverUrl)
+        assertNull(c.sdpMid)
+        assertNull(c.sdpMLineIndex)
+        assertNull(c.serverUrl)
     }
 
     @Test
-    fun errorKinds_coverOfflineContract() {
-        val kinds = SignalingErrorKind.entries.map { it.name }.toSet()
-        setOf("OFFLINE", "TIMEOUT", "NOT_FOUND", "PERMISSION_DENIED", "MALFORMED", "UNKNOWN")
-            .forEach { assert(kinds.contains(it)) }
+    fun roomId_isOrderIndependent() {
+        assertEquals(CallRoom.idFor("DADTEST0001", "KIDTEST0001"), CallRoom.idFor("KIDTEST0001", "DADTEST0001"))
+        assertEquals("DADTEST0001_KIDTEST0001", CallRoom.idFor("KIDTEST0001", "DADTEST0001"))
     }
 
     @Test
-    fun staleOffer_neverAnswerable() {
-        val now = System.currentTimeMillis()
-        assert(SessionDescription(SdpType.OFFER, "s", now).isStale(now).not())
-        assert(SessionDescription(SdpType.OFFER, "s", now - OFFER_STALE_MS - 1).isStale(now))
-        assert(SessionDescription(SdpType.OFFER, "s", null).isStale(now))
+    fun roomId_membersRoundTrip() {
+        val id = CallRoom.idFor("DADTEST0001", "KIDTEST0001")!!
+        assertEquals(setOf("DADTEST0001", "KIDTEST0001"), CallRoom.members(id).toSet())
+    }
+
+    @Test
+    fun roomId_rejectsSelfBlankAndSeparator() {
+        assertNull(CallRoom.idFor("DADTEST0001", "DADTEST0001"))
+        assertNull(CallRoom.idFor("", "KIDTEST0001"))
+        assertNull(CallRoom.idFor("DAD_TEST", "KIDTEST0001"))
+    }
+
+    @Test
+    fun freshRing_windowAndUnknownTimestamps() {
+        val now = 1_000_000_000L
+        assertTrue(CallRoom.isFreshRing(now, now))
+        assertTrue(CallRoom.isFreshRing(now - CallRoom.RING_FRESH_MS, now))
+        assertFalse(CallRoom.isFreshRing(now - CallRoom.RING_FRESH_MS - 1, now))
+        assertTrue(CallRoom.isFreshRing(now + 5_000, now))
+        assertFalse(CallRoom.isFreshRing(null, now))
     }
 }

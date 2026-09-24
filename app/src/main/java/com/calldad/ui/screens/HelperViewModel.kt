@@ -66,6 +66,9 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---- STT ----
     private var recognizer: SpeechRecognizer? = null
+    private var usingOnDevice = false
+    private var onDeviceUnavailable = false
+    private var lastIntent: Intent? = null
 
     /**
      * Builds the recognizer, preferring the on-device engine when available.
@@ -77,10 +80,13 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
         recognizer?.let { return it }
         val ctx = appContext
         val r = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+            && !onDeviceUnavailable
             && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) {
             WebRtcLog.transition("STT: using on-device recognizer")
+            usingOnDevice = true
             SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
         } else {
+            usingOnDevice = false
             WebRtcLog.transition("STT: using default recognizer")
             SpeechRecognizer.createSpeechRecognizer(ctx)
         }
@@ -121,6 +127,7 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
             error = null,
             lastHeard = null
         ) }
+        lastIntent = intent
         try {
             r.startListening(intent)
         } catch (t: Throwable) {
@@ -132,6 +139,13 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearError() {
+        _state.update { it.copy(status = HelperStatus.IDLE, error = null) }
+    }
+
+    /** Leaving the screen: mic off, voice off, back to a tappable button. */
+    fun stopAll() {
+        try { recognizer?.cancel() } catch (_: Throwable) {}
+        try { tts?.stop() } catch (_: Throwable) {}
         _state.update { it.copy(status = HelperStatus.IDLE, error = null) }
     }
 
@@ -166,6 +180,24 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
 
         override fun onError(error: Int) {
             WebRtcLog.transition("STT error code: $error")
+            val languageMissing =
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                    (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
+            val retryIntent = lastIntent
+            if (usingOnDevice && languageMissing && retryIntent != null) {
+                WebRtcLog.transition("STT: on-device language missing, using default")
+                onDeviceUnavailable = true
+                try { recognizer?.destroy() } catch (_: Throwable) {}
+                recognizer = null
+                val fallback = ensureRecognizer()
+                if (fallback != null) {
+                    try {
+                        fallback.startListening(retryIntent)
+                        return
+                    } catch (_: Throwable) {}
+                }
+            }
             _state.update { it.copy(
                 status = HelperStatus.ERROR,
                 error = "I didn't hear you. Tap and try again."
@@ -200,6 +232,9 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
     private val utteranceListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {}
         override fun onDone(utteranceId: String?) {
+            _state.update { it.copy(status = HelperStatus.IDLE) }
+        }
+        override fun onStop(utteranceId: String?, interrupted: Boolean) {
             _state.update { it.copy(status = HelperStatus.IDLE) }
         }
         @Deprecated("Deprecated in Java")

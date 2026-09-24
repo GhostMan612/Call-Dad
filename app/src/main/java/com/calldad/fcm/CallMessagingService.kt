@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// fcm/CallMessagingService.kt — Phase 11: topic receiver (no routing in payload)
+// fcm/CallMessagingService.kt — token-targeted ring receiver (ADR-015)
 // Location: app/src/main/java/com/calldad/fcm/CallMessagingService.kt
 package com.calldad.fcm
 
@@ -14,33 +14,28 @@ class CallMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val type = message.data["type"]
-
-        // Never log payload values beyond the type. No callId exists.
         WebRtcLog.transition("FCM received: type=$type")
+        if (type != "incoming_call") return
 
-        if (type != "incoming_call") {
-            WebRtcLog.transition("FCM ignored: not an incoming call")
+        if (AppVisibility.isForeground) {
+            WebRtcLog.transition("FCM ring skipped: app on screen, room listener rings")
             return
         }
 
+        val callId = message.data["callId"].orEmpty()
+        val seq = message.data["seq"]?.toIntOrNull() ?: -1
+        if (callId.isEmpty()) return
+
         try {
-            CallForegroundService.startIncomingCall(applicationContext)
-            WebRtcLog.transition("Foreground service start requested")
+            CallForegroundService.startIncomingCall(applicationContext, callId, seq)
         } catch (t: Throwable) {
-            // Android 14 can reject FGS starts even with high-priority
-            // FCM. Do not crash — the call can still be answered if the
-            // user opens the app manually.
             WebRtcLog.transition("Foreground service start rejected")
         }
     }
 
-    @Suppress("DEPRECATION")
-    // TODO: Defer to FID-based Admin SDK migration. Requires
-    // synchronized Cloud Function rewrite and Firestore schema
-    // migration (fcmToken -> fid). Do NOT partial-migrate.
+    @Deprecated("FCM registration tokens stay until the FID-based Admin SDK migration.")
     override fun onNewToken(token: String) {
-        // TODO: persist when per-device targeting returns (topic needs no
-        // token today). For now, log only — never the token itself.
         WebRtcLog.transition("FCM token refreshed")
+        PushTokenRegistrar.save(token)
     }
 }

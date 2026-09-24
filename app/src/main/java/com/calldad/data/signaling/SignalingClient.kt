@@ -2,20 +2,15 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// data/signaling/SignalingClient.kt — Contracts 2 & 3: per-call rooms
+// data/signaling/SignalingClient.kt — pair-scoped rooms (ADR-015)
 // Location: app/src/main/java/com/calldad/data/signaling/SignalingClient.kt
 package com.calldad.data.signaling
 
-import com.google.firebase.Timestamp
-import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.TransactionOptions
-import com.calldad.webrtc.WebRtcLog
-import java.util.Date
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -28,58 +23,25 @@ class SignalingClient(
     private val calls = firestore.collection("calls")
 
     private val txOptions = TransactionOptions.Builder()
-        .setMaxAttempts(5)
+        .setMaxAttempts(3)
         .build()
 
-    private val STALE_THRESHOLD_MS = 1_200_000L
-
+    /**
+     * Starts a new call generation: seq+1, RINGING, fresh offer, empty
+     * candidate arrays. The room belongs to exactly two people, so there
+     * is no "busy" state to guard: whatever generation was live is
+     * superseded (the peer observes the seq bump as a re-ring).
+     */
     suspend fun publishOffer(
         callId: String,
         offerSdp: String,
         callerUid: String,
         calleeUid: String
-    ): Result<Int> = try {
-        val newSeq = firestore.runTransaction(txOptions) { txn ->
+    ): Result<Int> = runCatching {
+        firestore.runTransaction(txOptions) { txn ->
             val ref = calls.document(callId)
             val snap = txn.get(ref)
-
-            if (snap.exists() && snap.getString("status") == "CONNECTED") {
-                val updatedAt = snap.getTimestamp("updatedAt")
-                val isStale = updatedAt == null ||
-                    (System.currentTimeMillis() -
-                        updatedAt.toDate().time) > STALE_THRESHOLD_MS
-                if (!isStale) {
-                    throw FirebaseFirestoreException(
-                        "Peer busy",
-                        FirebaseFirestoreException.Code.ABORTED
-                    )
-                }
-
-                // Peer-unreachability guard. The pairing rules allow
-                // reads of all pairing documents (expired or not), so
-                // this txn.get() returns the document even when
-                // expiresAt is in the past. The client checks expiry.
-                val peerPairing = txn.get(
-                    firestore.collection("pairings").document(calleeUid)
-                )
-                if (peerPairing.exists()) {
-                    val peerExpiresAt = peerPairing.getTimestamp("expiresAt")
-                    if (peerExpiresAt != null &&
-                        peerExpiresAt.toDate().time >
-                            System.currentTimeMillis()) {
-                        throw FirebaseFirestoreException(
-                            "Peer reachable",
-                            FirebaseFirestoreException.Code.ABORTED
-                        )
-                    }
-                }
-
-                WebRtcLog.transition("Stale CONNECTED room taken over")
-            }
-
-            val currentSeq = snap.getLong("seq")?.toInt() ?: 0
-            val nextSeq = currentSeq + 1
-
+            val nextSeq = (snap.getLong("seq")?.toInt() ?: 0) + 1
             txn.set(ref, mapOf(
                 "status" to "RINGING",
                 "seq" to nextSeq,
@@ -93,29 +55,22 @@ class SignalingClient(
             ))
             nextSeq
         }.await()
-        Result.success(newSeq)
-    } catch (t: FirebaseFirestoreException) {
-        Result.failure(
-            if (t.code == FirebaseFirestoreException.Code.ABORTED) {
-                PeerBusyException()
-            } else {
-                TransactionExhaustedException(t)
-            }
-        )
-    } catch (t: Throwable) {
-        Result.failure(t)
     }
 
+    /** Answers generation [seq]. Fails with [CallNoLongerRingingException] if it moved on. */
     suspend fun publishAnswer(
         callId: String,
+        seq: Int,
         answerSdp: String
     ): Result<Unit> = runCatching {
         firestore.runTransaction(txOptions) { txn ->
             val ref = calls.document(callId)
             val snap = txn.get(ref)
-            require(snap.exists()) { "Call document missing." }
-            require(snap.getString("status") == "RINGING") {
-                "Cannot answer: status is ${snap.getString("status")}"
+            if (!snap.exists() ||
+                snap.getString("status") != "RINGING" ||
+                snap.getLong("seq")?.toInt() != seq
+            ) {
+                throw CallNoLongerRingingException()
             }
             txn.update(ref, mapOf(
                 "status" to "CONNECTED",
@@ -126,59 +81,46 @@ class SignalingClient(
         Unit
     }
 
-    suspend fun declineCall(callId: String): Result<Unit> = runCatching {
-        calls.document(callId).update(
-            mapOf(
-                "status" to "DECLINED",
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-        ).await()
-        Unit
-    }
-
-    suspend fun endCall(callId: String): Result<Unit> = runCatching {
-        calls.document(callId).update(
-            mapOf(
-                "status" to "ENDED",
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-        ).await()
+    /**
+     * Moves generation [seq] to a terminal [status] (ENDED / DECLINED),
+     * only if that generation is still live. A late teardown can never
+     * kill a newer call.
+     */
+    suspend fun finishCall(
+        callId: String,
+        seq: Int,
+        status: String
+    ): Result<Unit> = runCatching {
+        firestore.runTransaction(txOptions) { txn ->
+            val ref = calls.document(callId)
+            val snap = txn.get(ref)
+            val live = snap.exists() &&
+                snap.getLong("seq")?.toInt() == seq &&
+                snap.getString("status") in LIVE_STATUSES
+            if (live) {
+                txn.update(ref, mapOf(
+                    "status" to status,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ))
+            }
+        }.await()
         Unit
     }
 
     /**
-     * Heartbeat: refreshes the room timestamp and keeps this device's
-     * pairing presence alive, atomically. Called every 120s while
-     * Connected; the 20-minute stale threshold gives margin against
-     * Doze throttling the loop.
+     * Fire-and-forget terminal write for teardown paths that cannot
+     * suspend (ViewModel cleared, process going away). Firestore queues
+     * the write locally and delivers it once online.
      */
-    suspend fun heartbeat(
-        callId: String,
-        ownUid: String
-    ): Result<Unit> = runCatching {
-        val batch = firestore.batch()
-
-        batch.update(
-            calls.document(callId),
-            "updatedAt", FieldValue.serverTimestamp()
-        )
-
-        // Use set(merge) instead of update(). The pairing document
-        // may not exist (fresh install, cleaned up). update() would
-        // fail with NOT_FOUND and abort the entire batch.
-        batch.set(
-            firestore.collection("pairings").document(ownUid),
-            mapOf(
-                "uid" to ownUid,
-                "expiresAt" to Timestamp(
-                    Date(System.currentTimeMillis() + 1_200_000L)
+    fun finishCallDetached(callId: String, status: String) {
+        runCatching {
+            calls.document(callId).update(
+                mapOf(
+                    "status" to status,
+                    "updatedAt" to FieldValue.serverTimestamp()
                 )
-            ),
-            SetOptions.merge()
-        )
-
-        batch.commit().await()
-        Unit
+            )
+        }
     }
 
     /**
@@ -202,70 +144,55 @@ class SignalingClient(
         val reg: ListenerRegistration = calls.document(callId)
             .addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
                 if (err != null) { close(err); return@addSnapshotListener }
-                if (snap == null || !snap.exists()) {
-                    trySend(CallDocument.EMPTY)
+                if (snap == null) return@addSnapshotListener
+                if (!snap.exists()) {
+                    trySend(CallDocument.empty(callId))
                     return@addSnapshotListener
                 }
-                val doc = snap.toCallDocumentOrNull()
-                if (doc != null) {
-                    trySend(doc.copy(isFromCache = snap.metadata.isFromCache))
-                }
+                snap.toCallDocumentOrNull()?.let { trySend(it) }
             }
         awaitClose { reg.remove() }
     }
 
-    suspend fun fetchCall(callId: String): Result<CallDocument> =
+    suspend fun fetchCall(callId: String): Result<CallDocument?> =
         runCatching {
             val snap = calls.document(callId).get().await()
-            if (!snap.exists()) throw IllegalStateException("Call not found.")
-            snap.toCallDocumentOrNull()
-                ?: throw IllegalStateException("Malformed call document.")
+            if (!snap.exists()) null else snap.toCallDocumentOrNull()
         }
 
     private fun com.google.firebase.firestore.DocumentSnapshot
         .toCallDocumentOrNull(): CallDocument? {
         // serverTimestamp() fires the listener twice: once optimistically
         // with hasPendingWrites=true and a null timestamp, then again
-        // with the server value. The optimistic snap has no usable clock
-        // (and a half-written shape); skip it and wait for the server ack.
-        // NOTE: spec text uses property syntax; the Java getter requires
-        // explicit parens to compile.
+        // with the server value. Skip the optimistic snap.
         if (metadata.hasPendingWrites()) return null
         val status = getString("status") ?: return null
-        val seq = getLong("seq")?.toInt() ?: 0
-        val callerUid = getString("callerUid").orEmpty()
-        val calleeUid = getString("calleeUid").orEmpty()
 
         val offerMap = get("offer") as? Map<*, *>
         val answerMap = get("answer") as? Map<*, *>
-        val offer = offerMap?.let {
-            SessionDescription(
-                SdpType.fromWire(it["type"] as? String) ?: return@let null,
-                it["sdp"] as? String ?: return@let null
-            )
-        }
-        val answer = answerMap?.let {
-            SessionDescription(
-                SdpType.fromWire(it["type"] as? String) ?: return@let null,
-                it["sdp"] as? String ?: return@let null
-            )
-        }
         return CallDocument(
             callId = id,
             status = status,
-            seq = seq,
-            callerUid = callerUid,
-            calleeUid = calleeUid,
-            offer = offer,
-            answer = answer,
+            seq = getLong("seq")?.toInt() ?: 0,
+            callerUid = getString("callerUid").orEmpty(),
+            calleeUid = getString("calleeUid").orEmpty(),
+            offer = offerMap?.toSessionDescriptionOrNull(),
+            answer = answerMap?.toSessionDescriptionOrNull(),
             callerCandidates = (get("callerCandidates") as? List<*>)
                 .orEmpty()
                 .mapNotNull { (it as? Map<*, *>)?.toIceCandidateOrNull() },
             calleeCandidates = (get("calleeCandidates") as? List<*>)
                 .orEmpty()
                 .mapNotNull { (it as? Map<*, *>)?.toIceCandidateOrNull() },
-            isFromCache = false
+            updatedAtMs = getTimestamp("updatedAt")?.toDate()?.time,
+            isFromCache = metadata.isFromCache
         )
+    }
+
+    private fun Map<*, *>.toSessionDescriptionOrNull(): SessionDescription? {
+        val type = SdpType.fromWire(this["type"] as? String) ?: return null
+        val sdp = this["sdp"] as? String ?: return null
+        return SessionDescription(type, sdp)
     }
 
     private fun Map<*, *>.toIceCandidateOrNull(): IceCandidate? {
@@ -284,11 +211,13 @@ class SignalingClient(
         "sdpMLineIndex" to sdpMLineIndex,
         "sdpCandidate" to sdpCandidate
     )
+
+    private companion object {
+        val LIVE_STATUSES = setOf("RINGING", "CONNECTED")
+    }
 }
 
-class PeerBusyException : Exception("Peer is already in a call.")
-class TransactionExhaustedException(cause: Throwable) :
-    Exception("Transaction retries exhausted.", cause)
+class CallNoLongerRingingException : Exception("The call is no longer ringing.")
 
 data class CallDocument(
     val callId: String,
@@ -300,9 +229,11 @@ data class CallDocument(
     val answer: SessionDescription?,
     val callerCandidates: List<IceCandidate> = emptyList(),
     val calleeCandidates: List<IceCandidate> = emptyList(),
-    val isFromCache: Boolean
+    val updatedAtMs: Long? = null,
+    val isFromCache: Boolean = false
 ) {
     companion object {
-        val EMPTY = CallDocument("", "IDLE", 0, "", "", null, null, emptyList(), emptyList(), false)
+        fun empty(callId: String) =
+            CallDocument(callId, "IDLE", 0, "", "", null, null)
     }
 }

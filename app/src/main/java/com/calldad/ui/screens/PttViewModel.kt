@@ -48,7 +48,9 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
      * UI works. On a production build with the module present, the real
      * engine is used transparently. Same binary, same source, no flags.
      */
-    private val audioManager = PttAudioManager(application)
+    private val audioManager = PttAudioManager(application) {
+        viewModelScope.launch { onRelease() }
+    }
 
     private val sovereign: PttEngine = SovereignPttAdapter(application)
     private var engine: PttEngine = sovereign
@@ -83,8 +85,11 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
 
     // -------- external signals --------
 
-    /** Called by the app when a WebRTC call becomes active. */
-    fun onCallStateChanged(active: Boolean) = audioManager.setCallActive(active)
+    /** Called by the app when a WebRTC call becomes active: the call owns the mic. */
+    fun onCallStateChanged(active: Boolean) {
+        if (active) onRelease()
+        audioManager.setCallActive(active)
+    }
 
     // -------- gesture handlers --------
 
@@ -106,6 +111,7 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
                 val f = result.exceptionOrNull() as? PttFailure
                 if (f?.kind == PttFailureKind.ENGINE_UNAVAILABLE) {
                     WebRtcLog.transition("PTT: falling back to simulated engine")
+                    runCatching { engine.release() }
                     engine = SimulatedPttEngine()
                     watchEngine()
                     engine.startTransmitting()

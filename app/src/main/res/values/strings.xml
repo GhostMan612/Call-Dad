@@ -4,4 +4,6 @@
          flavor sees "Dad". These are the names shown during a call. -->
     <string name="child_peer_name">Mama</string>
     <string name="parent_peer_name">Dad</string>
+    <string name="incoming_call_title">Incoming call</string>
+    <string name="incoming_call_text">Tap to answer</string>
 </resources>

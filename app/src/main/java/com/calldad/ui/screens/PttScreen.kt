@@ -230,11 +230,14 @@ private fun PttCenterButton(
                         onPress = {
                             currentOnPress()
                             // tryAwaitRelease() returns false if the gesture
-                            // was consumed by a parent. We treat BOTH outcomes
-                            // as a release — a child who drags off the button
-                            // must not leave the mic hot.
-                            tryAwaitRelease()
-                            currentOnRelease()
+                            // was consumed by a parent, and throws if the
+                            // button leaves composition mid-hold. Every
+                            // outcome is a release: the mic never stays hot.
+                            try {
+                                tryAwaitRelease()
+                            } finally {
+                                currentOnRelease()
+                            }
                         }
                     )
                 }

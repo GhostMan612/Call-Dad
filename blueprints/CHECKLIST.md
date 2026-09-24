@@ -89,9 +89,25 @@
 - [x] Operator-run clean assembleParentDebug+assembleChildDebug BUILD SUCCESSFUL; first E2E call GREEN (offer/answer live)
 - [ ] Human: fresh-install both flavors → pair both ways → strict one-caller test → hangup test (observer-guard confirmation)
 
-## Contract 7 — Stale takeover + mutual pairing + debt (code landed, uncommitted)
+## Contract 7 — Stale takeover + mutual pairing + debt (committed f52d9ea; takeover/heartbeat superseded by ADR-015)
 - [x] Heartbeat (120s batch: room updatedAt + pairings presence) + stale-CONNECTED takeover (20-min threshold + peer-unreachability guard) + hasPendingWrites guard
 - [x] Mutual handshake (QR-derived nonce, presence docs, 30s peer wait, 1.5s hold) + pairings rules stanza
 - [x] CallStateTest rewritten (7-state fromDocument); CallDocumentTest deleted (model retired); deprecation suppressions + FID TODO
 - [x] ADR-014 (pairing) + LESSONS_LEARNED.md + CURRENT_STATE/CHECKLIST updated
 - [ ] Human: deploy pairings rules (console — new stanza, lane cannot deploy) → assemble both → takeover matrix (§2) + handshake matrix (§3) + heartbeat check (§4)
+
+## Contract 8 — Full-repo sweep + fix (ADR-015, 2026-09-24)
+- [x] Pair-scoped rooms `calls/{uidA_uidB}`; rules authorize from the id (no eavesdrop, no squat, no reinstall brick); 15 emulator rules tests
+- [x] Token-targeted ring push (`users/{uid}.fcmToken`), function fires on create too, Node 22; 6 node tests
+- [x] Activity-scoped call session: rings from every screen, game shares the live call, Home listener retired
+- [x] WebRTCClient single-use per attempt + safe dispose order (hangup SIGSEGV root cause) + shared EglBase
+- [x] ICE ordering both sides (queue local until SDP published, buffer remote until description set)
+- [x] Seq-checked finishCall on hang up / decline / no-answer (45s) / lost peer (20s); publish-in-flight hangup cancels the ring; glare auto-answer
+- [x] Ringtone + vibration actually wired (single process ringer) + caller ringback; silent notification channel
+- [x] Foreground service: startForeground first, paired-room validation, self-dismiss
+- [x] Pairing: grown-ups gate, mutual handshake before storing, own-code rejection, QR v2
+- [x] In-call: mute, flip camera, play-a-game door; camera resume respects the kid's toggle; permission-denied screen
+- [x] Games: solo pass-and-play + validated synced play + late-join resync; WebView 403s all network; CSP
+- [x] PTT never stays hot (try/finally, focus loss, call start); Helper silenced on leave, TTS stop, on-device STT fallback, whole-word matching
+- [x] Gates: 80 host tests PASS, lint 0 errors both flavors, verify PASS
+- [ ] Operator: `firebase deploy --only firestore:rules,functions` → install both flavors → re-pair both phones → device matrix K11 (CURRENT_STATE)

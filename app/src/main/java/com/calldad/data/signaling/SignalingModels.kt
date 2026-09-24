@@ -6,9 +6,6 @@
 // Location: app/src/main/java/com/calldad/data/signaling/SignalingModels.kt
 package com.calldad.data.signaling
 
-/** Offers older than this are abandoned rings, never answered. */
-const val OFFER_STALE_MS = 60_000L
-
 /** The two SDP exchange roles permitted by the Firestore schema. */
 enum class SdpType {
     OFFER,
@@ -24,21 +21,10 @@ enum class SdpType {
     }
 }
 
-/** The value carried by the single call-room document. */
+/** The value carried by the call-room document. */
 data class SessionDescription(
     val type: SdpType,
-    val sdp: String,
-    /** Writer's clock at publish; null = pre-timestamp room (treated as stale). */
-    val createdAtMillis: Long? = null
-) {
-    fun isStale(nowMillis: Long = System.currentTimeMillis()): Boolean =
-        createdAtMillis == null || nowMillis - createdAtMillis > OFFER_STALE_MS
-}
-
-/** SDP paired with the static room's monotonic sequence (Phase 11). */
-data class SequencedDescription(
-    val description: SessionDescription,
-    val seq: Int
+    val sdp: String
 )
 
 /**
@@ -53,18 +39,38 @@ data class IceCandidate(
     val serverUrl: String? = null
 )
 
-/** Framework-agnostic error surfaced to the ViewModel / UI. */
-enum class SignalingErrorKind {
-    OFFLINE,
-    TIMEOUT,
-    NOT_FOUND,
-    PERMISSION_DENIED,
-    MALFORMED,
-    UNKNOWN
-}
+/**
+ * Pair-scoped call rooms (ADR-015). The room id is the two paired UIDs,
+ * sorted and joined with '_', so both phones derive the same id with no
+ * lookup and the Firestore rules can authorize by `callId.split('_')`.
+ */
+object CallRoom {
 
-data class SignalingError(
-    val kind: SignalingErrorKind,
-    val userMessage: String,
-    val cause: Throwable? = null
-)
+    /**
+     * On first attach, a ring older than this is an abandoned attempt and
+     * is never shown. Generous vs NO_ANSWER_MS: a live caller ends its own
+     * ring at 45s, so only a crashed caller leaves one behind.
+     */
+    const val RING_FRESH_MS = 90_000L
+
+    /** How long an outgoing ring waits before "No answer yet". */
+    const val NO_ANSWER_MS = 45_000L
+
+    fun idFor(uidA: String, uidB: String): String? {
+        if (uidA.isBlank() || uidB.isBlank() || uidA == uidB) return null
+        if ('_' in uidA || '_' in uidB) return null
+        return listOf(uidA, uidB).sorted().joinToString("_")
+    }
+
+    fun members(roomId: String): List<String> = roomId.split('_')
+
+    /**
+     * True when a RINGING doc is recent enough to ring for. Unknown
+     * timestamps are not fresh: a ring nobody can date is never shown.
+     * Clock skew tolerance: a timestamp slightly in the future is fresh.
+     */
+    fun isFreshRing(updatedAtMs: Long?, nowMs: Long): Boolean {
+        if (updatedAtMs == null) return false
+        return nowMs - updatedAtMs <= RING_FRESH_MS
+    }
+}

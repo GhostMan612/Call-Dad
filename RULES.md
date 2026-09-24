@@ -47,7 +47,7 @@ C:\Program Files\Microsoft Visual Studio
 
 ### 1.5 BUILD BOUNDARY — HARD RULE
 - NEVER run: `assemble*`, `install*`, `connected*`, `flutter build/run`, emulator installs. The human builds + installs in Android Studio on Moto G 2025 / BLU View 5.
-- Your lane ends at source correctness: `./gradlew testDebugUnitTest`, `./gradlew lintDebug`, `tools/verify_project.py`, `adb devices` / read-only `adb shell getprop`.
+- Your lane ends at source correctness: `./gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest :app:lintParentDebug :app:lintChildDebug` (run from the repo root; the parent/child flavors mean the unflavored `testDebugUnitTest`/`lintDebug` tasks do not exist), `tools/verify_project.py`, `node --test functions/`, the Firestore rules tests in `tools/rules-test/` (local emulator), `adb devices` / read-only `adb shell getprop`. Compiling via the unit-test tasks is source verification, not a build claim.
 - Device/instrumented suites under `app/src/androidTest/` exist for the human's manual runs — do NOT execute them here unless explicitly asked.
 - Debug device failures from the human's pasted output — never by rebuilding locally.
 - Source: Vision `§1.5`, Atlas `§1.6`, Recovery `§1.5`.
@@ -61,6 +61,14 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
 - No accounts, no analytics, no ads, no third-party SDKs phoning home in v0.1 (each new dep needs ADR justification).
 - Big-button UX: one giant Call Dad, one-tap hangup, auto-reconnect on LAN. Kid can never get stuck or lost.
 - Chat/PTT/photo events that would sync to any hub are redacted by default (mantle `hub_sync_bridge` posture: chat/PTT/telemetry/biometric never leave device without explicit parent opt-in).
+
+### 1.7a Recorded architecture deviations (operator to ratify)
+§1.7 and §2 were written for the original LAN/UDP donor-port plan. The shipped app took these routes by ADR; this block records them so the law matches the code until the operator amends §1.7/§2 directly:
+- **Accounts / network services:** Firebase anonymous Auth + Firestore signaling + FCM wakeup + Cloud Function (ADR-002, ADR-007, ADR-013, ADR-015). No analytics, no ads, no user-visible accounts. Calls need internet for signaling; LAN-only calling (§2.3) is not implemented.
+- **Media + crypto:** WebRTC (Stream fork) with DTLS-SRTP end-to-end media encryption (ADR-005) replaces the custom ECDH + AES-GCM frame cipher (§2.5).
+- **Call flow:** the 7-state machine in `CallState.kt` (§2.6's Invite→Accept/Decline→End, extended with NoAnswer/Error).
+- **Allowlist:** exactly one paired contact per phone, via a pair-scoped Firestore room that only those two UIDs can touch; pairing is parent-gated and mutual (ADR-015).
+- **Open:** ML Kit (Play Services barcode) sends usage metrics to Google — keep, or decode with ZXing only (operator).
 
 ---
 
@@ -104,8 +112,8 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
 | Storage | MediaStore / SAF + app-private files only. Temp under cache; clean up on failure too. Runtime media/camera/mic permissions via Accompanist/permissions; `createWriteRequest` on Android 11+ where needed. | tagger Storage law, Vision `§3` |
 | Audio | `AudioStreamingSession`/`LiveCallSession` socket template; Opus via Concentus; serialized executor for encode; jitter buffer on receive. Never log raw audio. | mantle comms |
 | Crypto | Non-exportable Keystore keys; SQLCipher passphrase wrapped by Keystore; per-call ECDH ephemeral; `MemoryScrubber` idiom for key bytes. | mantle security |
-| Dep ceiling | New deps need ADR justification. No major upgrades without dedicated session. Pins in AGENTS.md are load-bearing until ADR. | tagger/Atlas/Vision ceiling |
-| Analyzer scope | `lintDebug` + Kotlinc warnings stay at zero for touched modules. Don't loosen lint baselines to pass. | Recovery/Vision `§3` |
+| Dep ceiling | New deps need ADR justification. No major upgrades without dedicated session. Pins in `gradle/libs.versions.toml` are load-bearing until ADR (ADR-004); every dependency goes through a catalog alias. | tagger/Atlas/Vision ceiling |
+| Analyzer scope | `lintParentDebug`/`lintChildDebug` errors + Kotlinc warnings stay at zero for touched modules. Don't loosen lint baselines to pass. | Recovery/Vision `§3` |
 | Core/adapters boundary | Pure call/chat/photo domain logic dependency-free where possible; Android/MediaStore/Crypto/Net types stay in adapters. New modules need ADR. | Atlas `§2`, Vision arch |
 | Reference law | Sovereign-family trees are REFERENCE ONLY. Every line for Call-Dad is authored here. Credit donor pattern in docs where directly ported. | Vision `§4.5` |
 

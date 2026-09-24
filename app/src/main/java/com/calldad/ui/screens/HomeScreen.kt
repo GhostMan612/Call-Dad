@@ -28,7 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +39,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.calldad.navigation.Routes
 import com.calldad.ui.components.GiantActionCard
 import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.CallGreen
@@ -56,17 +54,11 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel()
 ) {
     val destinations by viewModel.destinations.collectAsStateWithLifecycle()
-
-    // Auto-popup: a NEW ring while Home is visible jumps straight to the
-    // incoming overlay (with ringtone). Single-top guarded.
-    LaunchedEffect(Unit) {
-        viewModel.incomingCall.collect {
-            onNavigate("${Routes.CALL}?mode=incoming")
-        }
-    }
+    val isPaired by callViewModel().isPaired.collectAsStateWithLifecycle()
 
     HomeContent(
         destinations = destinations,
+        showPairingHint = isPaired == false,
         onActionSelected = onNavigate,
         onOpenPairing = onOpenPairing,
         modifier = modifier
@@ -84,6 +76,7 @@ fun HomeScreen(
 @Composable
 private fun HomeContent(
     destinations: List<HomeDestination>,
+    showPairingHint: Boolean,
     onActionSelected: (String) -> Unit,
     onOpenPairing: () -> Unit,
     modifier: Modifier = Modifier
@@ -102,6 +95,13 @@ private fun HomeContent(
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )
+                if (showPairingHint) {
+                    Text(
+                        text = "Grown-ups: tap the gear to pair this phone first.",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
 
                 destinations.chunked(2).forEach { rowItems ->
                     Row(
@@ -166,6 +166,7 @@ private fun HomeContentPreview() {
     CallDadTheme {
         HomeContent(
             destinations = HomeDestination.entries.toList(),
+            showPairingHint = false,
             onActionSelected = {},
             onOpenPairing = {}
         )

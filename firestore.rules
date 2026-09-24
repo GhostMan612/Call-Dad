@@ -2,69 +2,87 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users collection: only the owner can read/write their doc.
-    // Needed for fcmToken storage in Phase 6.
+    // Users: owner-only. Holds this device's FCM token; the Cloud
+    // Function reads it with admin rights to ring exactly the callee.
     match /users/{userId} {
       allow read, write: if request.auth != null
                          && request.auth.uid == userId;
     }
 
-    // Calls: per-call documents (Contract 4 client). The call id is an
-    // opaque id per attempt (currently the static family_channel id);
-    // both parties' UIDs are recorded on the doc. Fresh installs mint
-    // new anon UIDs, orphaning old rooms -- orphan docs fail closed
-    // (no party match) and are harmless dead data.
+    // Calls: one room per paired couple (ADR-015). The doc id IS the two
+    // member UIDs, sorted and joined with '_', so every rule authorizes
+    // from the id alone: no resource.data read, which means the publish
+    // transaction's pre-read of a not-yet-existing room still works.
+    // Nobody outside the pair can read the SDP/ICE, create the room, or
+    // squat it; a reinstall (new UID) simply pairs into a new room.
     match /calls/{callId} {
 
-      // Get: any authenticated user. The publish path runs a transaction
-      // that reads the doc BEFORE it exists; a read rule referencing
-      // resource.data denies missing docs, which surfaces as
-      // PERMISSION_DENIED and bricks every first call as "line busy".
-      // Auth-only get keeps the pre-read working; all mutation stays
-      // party-restricted below. Doc ids are unguessable and SDP is no
-      // more sensitive than the consented call itself.
-      allow get: if request.auth != null;
+      function members() {
+        return callId.split('_');
+      }
 
-      // List: denied. Clients address docs by id; no query path exists,
-      // so none is opened.
+      function isMember() {
+        return request.auth != null
+            && members().size() == 2
+            && request.auth.uid in members();
+      }
+
+      // The written parties must be exactly the two members, distinct.
+      function partiesValid(data) {
+        return data.callerUid in members()
+            && data.calleeUid in members()
+            && data.callerUid != data.calleeUid;
+      }
+
+      function statusValid(data) {
+        return data.status in ['RINGING', 'CONNECTED', 'DECLINED', 'ENDED'];
+      }
+
+      allow get: if isMember();
+
+      // List: denied. Clients address their one room by id.
       allow list: if false;
 
-      // Create: caller must claim themselves; callee must be a string;
-      // every call starts RINGING. Prevents caller spoofing.
-      allow create: if request.auth != null
+      // Create: only a member, calling as themselves, starting RINGING.
+      allow create: if isMember()
+                    && partiesValid(request.resource.data)
                     && request.resource.data.callerUid == request.auth.uid
-                    && request.resource.data.calleeUid is string
-                    && request.resource.data.status == 'RINGING';
+                    && request.resource.data.status == 'RINGING'
+                    && request.resource.data.seq is int;
 
-      // Update: only the two parties recorded on the existing doc.
-      // Covers answer (callee), decline/end (either side), re-ring.
-      allow update: if request.auth != null
-                    && (request.auth.uid == resource.data.callerUid
-                        || request.auth.uid == resource.data.calleeUid);
+      // Update: members only. A new generation (seq bump) must be a
+      // RINGING offer by the writer; within a generation the parties are
+      // frozen and seq never moves backwards.
+      allow update: if isMember()
+                    && partiesValid(request.resource.data)
+                    && statusValid(request.resource.data)
+                    && request.resource.data.seq is int
+                    && request.resource.data.seq >= resource.data.seq
+                    && (request.resource.data.seq == resource.data.seq
+                          ? (request.resource.data.callerUid == resource.data.callerUid
+                             && request.resource.data.calleeUid == resource.data.calleeUid)
+                          : (request.resource.data.status == 'RINGING'
+                             && request.resource.data.callerUid == request.auth.uid));
 
       // Delete: forbidden. Teardown writes ENDED; the doc is the shared
-      // teardown signal the peer observes. Nobody deletes.
+      // teardown signal the peer observes.
       allow delete: if false;
     }
 
+    // Pairing handshake docs: pairings/{uid} = {uid, peerUid, sessionNonce,
+    // expiresAt}. Readable by id to any signed-in phone (the peer must
+    // see it to confirm the mutual scan); never listable, so nobody can
+    // enumerate who is paired with whom.
     match /pairings/{uid} {
-      // Read: any authenticated user. The peer must be able to read
-      // an EXPIRED pairing document to determine unreachability.
-      // Rules are not filters — a protected read would fail the
-      // transaction with PERMISSION_DENIED instead of returning null.
-      allow read: if request.auth != null;
+      allow get: if request.auth != null;
+      allow list: if false;
 
-      // Write: owner only, with bounded expiry. sessionNonce is
-      // intentionally NOT required here: the heartbeat's set(merge)
-      // creates the doc with only {uid, expiresAt} when missing, and
-      // a create evaluates this same rule — demanding sessionNonce
-      // would brick presence creation on fresh installs (the heartbeat
-      // never learns the handshake nonce). Handshake queries filter by
-      // nonce equality, so nonce-less presence docs are invisible to
-      // pairing logic. Owner + 25-minute upper bound still enforced.
       allow create, update: if request.auth != null
                             && request.auth.uid == uid
                             && request.resource.data.uid == uid
+                            && request.resource.data.peerUid is string
+                            && request.resource.data.peerUid != uid
+                            && request.resource.data.sessionNonce is string
                             && request.resource.data.expiresAt is timestamp
                             && request.resource.data.expiresAt > request.time
                             && request.resource.data.expiresAt <

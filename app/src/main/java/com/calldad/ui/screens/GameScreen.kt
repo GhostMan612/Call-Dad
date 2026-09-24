@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/GameScreen.kt — Phase 8: game + PiP video card
+// ui/screens/GameScreen.kt — game hub: solo, or synced over the live call
 // Location: app/src/main/java/com/calldad/ui/screens/GameScreen.kt
 package com.calldad.ui.screens
 
@@ -22,16 +22,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,26 +47,24 @@ import com.calldad.game.GameWebRtcBridge
 import com.calldad.ui.components.GiantButton
 import com.calldad.ui.components.VideoRenderer
 import com.calldad.ui.theme.GameBlue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
+
+private const val ASSET_HOST = "appassets.androidplatform.net"
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun GameScreen(
-    onBackHome: () -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CallViewModel = callViewModel()
 ) {
-    BackHandler(onBack = onBackHome)
+    BackHandler(onBack = onBack)
 
-    val webrtc = viewModel.webrtcClientOrNull()
-    val eglContext by viewModel.eglContext.collectAsStateWithLifecycle()
     val localTrack by viewModel.localVideoTrack.collectAsStateWithLifecycle()
     val remoteTrack by viewModel.remoteVideoTrack.collectAsStateWithLifecycle()
-    val callState by viewModel.state.collectAsStateWithLifecycle()
-    val currentOnBackHome by rememberUpdatedState(onBackHome)
+    val inCall by viewModel.canPlayTogether.collectAsStateWithLifecycle()
+    val currentOnBack by rememberUpdatedState(onBack)
 
     val context = LocalContext.current
     val assetLoader = remember {
@@ -78,42 +77,34 @@ fun GameScreen(
     }
 
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
+    var pageReady by remember { mutableStateOf(false) }
 
-    // Push role to the JS layer once the WebView and call state are ready.
-    // The caller is authoritative in the Tic-Tac-Toe protocol. Role is
-    // derived from the flavor: parent (blue) hosts as caller.
-    LaunchedEffect(webViewRef.value, callState) {
+    // Role: in a call the parent flavor is the authority ("caller" in the
+    // game protocol); with no call both sides play solo, pass-and-play.
+    // Re-sent whenever the page (re)loads or the call state flips.
+    LaunchedEffect(webViewRef.value, pageReady, inCall) {
         val wv = webViewRef.value ?: return@LaunchedEffect
-        val role = when (callState) {
-            is CallState.Connected ->
-                if (BuildConfig.APP_THEME == "blue") "caller" else "callee"
-            else -> return@LaunchedEffect
+        if (!pageReady) return@LaunchedEffect
+        val role = when {
+            !inCall -> "solo"
+            BuildConfig.APP_THEME == "blue" -> "caller"
+            else -> "callee"
         }
-        wv.evaluateJavascript(
-            "window.setGameRole && window.setGameRole('$role')",
-            null
-        )
+        wv.evaluateJavascript("window.setGameRole && window.setGameRole('$role')", null)
     }
 
-    // Inbound: WebRTC → JS.
-    DisposableEffect(webrtc, webViewRef.value) {
-        val wv = webViewRef.value
-        val client = webrtc
-        if (wv == null || client == null) return@DisposableEffect onDispose { }
-
-        val scope = CoroutineScope(Dispatchers.Main)
-        val job = scope.launch {
-            client.gameSyncMessages.collect { json ->
-                // JSONObject.quote produces a correctly escaped JS string
-                // literal. Do NOT hand-roll quote escaping.
-                val quoted = JSONObject.quote(json)
-                wv.evaluateJavascript(
-                    "window.receiveRemoteGameState && window.receiveRemoteGameState($quoted)",
-                    null
-                )
-            }
+    // Inbound: WebRTC data channel → JS. Follows whichever call is live.
+    LaunchedEffect(webViewRef.value, pageReady) {
+        val wv = webViewRef.value ?: return@LaunchedEffect
+        if (!pageReady) return@LaunchedEffect
+        viewModel.gameMessages.collect { json ->
+            // JSONObject.quote produces a correctly escaped JS string literal.
+            val quoted = JSONObject.quote(json)
+            wv.evaluateJavascript(
+                "window.receiveRemoteGameState && window.receiveRemoteGameState($quoted)",
+                null
+            )
         }
-        onDispose { job.cancel() }
     }
 
     Box(modifier = modifier.fillMaxSize().background(GameBlue)) {
@@ -139,22 +130,33 @@ fun GameScreen(
                             WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     }
                     webViewClient = object : WebViewClient() {
+                        // Local assets only. Anything else (any other host,
+                        // any scheme) gets an empty 403: the game can never
+                        // reach the network.
                         override fun shouldInterceptRequest(
                             view: WebView,
                             request: WebResourceRequest
-                        ): WebResourceResponse? =
+                        ): WebResourceResponse =
                             assetLoader.shouldInterceptRequest(request.url)
+                                ?: WebResourceResponse(
+                                    "text/plain", "utf-8", 403, "Forbidden",
+                                    emptyMap(), ByteArrayInputStream(ByteArray(0))
+                                )
 
                         override fun shouldOverrideUrlLoading(
                             view: WebView,
                             request: WebResourceRequest
-                        ): Boolean =
-                            request.url.host != "appassets.androidplatform.net"
+                        ): Boolean = request.url.host != ASSET_HOST
+
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            pageReady = true
+                        }
                     }
-                    webrtc?.let {
-                        addJavascriptInterface(GameWebRtcBridge(it), "AndroidRTC")
-                    }
-                    loadUrl("https://appassets.androidplatform.net/assets/game.html")
+                    addJavascriptInterface(
+                        GameWebRtcBridge { json -> viewModel.sendGameData(json) },
+                        "AndroidRTC"
+                    )
+                    loadUrl("https://$ASSET_HOST/assets/game.html")
                     webViewRef.value = this
                 }
             },
@@ -162,6 +164,7 @@ fun GameScreen(
                 view.removeJavascriptInterface("AndroidRTC")
                 view.destroy()
                 webViewRef.value = null
+                pageReady = false
             }
         )
 
@@ -174,7 +177,7 @@ fun GameScreen(
         // which keeps the video above the WebView's surface but still
         // inside the window's view hierarchy. setZOrderOnTop(true) would
         // put it above dialogs and the status bar; do not use that.
-        Card(
+        if (inCall) Card(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(12.dp)
@@ -186,14 +189,14 @@ fun GameScreen(
                 // Remote fills the card.
                 VideoRenderer(
                     track = remoteTrack,
-                    eglContext = eglContext,
+                    eglContext = viewModel.eglContext,
                     mirror = false,
                     modifier = Modifier.fillMaxSize()
                 )
                 // Local as a small self-view in the corner.
                 VideoRenderer(
                     track = localTrack,
-                    eglContext = eglContext,
+                    eglContext = viewModel.eglContext,
                     mirror = true,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -206,12 +209,12 @@ fun GameScreen(
 
         // ------ Layer 3: persistent escape hatch ------
         GiantButton(
-            label = "Back to Home",
-            icon = Icons.Filled.Home,
+            label = if (inCall) "Back to Call" else "Back to Home",
+            icon = if (inCall) Icons.Filled.Call else Icons.Filled.Home,
             containerColor = Color.White,
             contentColor = GameBlue,
             minHeight = 100.dp,
-            onClick = { currentOnBackHome() },
+            onClick = { currentOnBack() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()

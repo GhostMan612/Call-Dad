@@ -14,8 +14,8 @@ class RoutesTest {
 
     @Test
     fun routes_areDistinct() {
-        val all = setOf(Routes.HOME, Routes.CALL, Routes.PTT, Routes.GAME, Routes.HELPER)
-        assertEquals(5, all.size)
+        val all = setOf(Routes.HOME, Routes.CALL, Routes.PTT, Routes.GAME, Routes.HELPER, Routes.PAIRING)
+        assertEquals(6, all.size)
     }
 
     @Test
@@ -25,7 +25,7 @@ class RoutesTest {
 
     @Test
     fun allRoutes_nonBlank() {
-        listOf(Routes.HOME, Routes.CALL, Routes.PTT, Routes.GAME, Routes.HELPER)
+        listOf(Routes.HOME, Routes.CALL, Routes.PTT, Routes.GAME, Routes.HELPER, Routes.PAIRING)
             .forEach { assertTrue(it.isNotBlank()) }
     }
 }

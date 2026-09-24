@@ -4,7 +4,9 @@
 # ============================================================
 """Call-Dad scaffold gate (stdlib only). Run with hub python as-is:
 C:\\venv-hub\\venv\\Scripts\\python.exe tools\\verify_project.py
-Checks tree + required docs + bans secrets/real-child-data markers. Never builds.
+Checks tree + required files, bans secret files and secret markers in every
+tracked text file, and enforces the Genesis header on tracked .kt/.py files.
+Never builds.
 
 Studio-note: the human builds in Android Studio, so Studio-generated local
 artifacts (build/, .gradle/, local.properties, gradle-daemon-jvm.properties,
@@ -13,6 +15,7 @@ check therefore targets git-TRACKED files (index + HEAD via `git ls-files`);
 only when git is unavailable does it fall back to a strict on-disk scan that
 skips known Studio output dirs.
 """
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -44,7 +47,28 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "blueprints/decisions/ADR-007-phase5.md",
                   "blueprints/GEMINI_HANDOFF.md",
                   "app/src/main/java/com/calldad/pairing/SecurePeerStore.kt",
-                  "app/src/main/java/com/calldad/data/signaling/OwnSdpRegistry.kt",
+                  "app/src/main/java/com/calldad/data/signaling/SignalingModels.kt",
+                  "app/src/main/java/com/calldad/data/session/FamilySession.kt",
+                  "app/src/main/java/com/calldad/fcm/PushTokenRegistrar.kt",
+                  "app/src/main/java/com/calldad/pairing/PairingPayload.kt",
+                  "app/src/main/java/com/calldad/ui/components/ParentGate.kt",
+                  "app/src/main/java/com/calldad/ui/components/VideoRenderer.kt",
+                  "app/src/main/java/com/calldad/ui/screens/CallState.kt",
+                  "app/src/main/java/com/calldad/navigation/AppNavigation.kt",
+                  "app/src/main/java/com/calldad/navigation/Routes.kt",
+                  "app/src/main/java/com/calldad/MainActivity.kt",
+                  "app/build.gradle.kts", "gradle/libs.versions.toml",
+                  "settings.gradle.kts", "build.gradle.kts",
+                  "app/src/test/java/com/calldad/CallStateTest.kt",
+                  "app/src/test/java/com/calldad/CallStateTransitionTest.kt",
+                  "app/src/test/java/com/calldad/SignalingModelsTest.kt",
+                  "app/src/test/java/com/calldad/PairingPayloadTest.kt",
+                  "app/src/test/java/com/calldad/KeywordBotTest.kt",
+                  "app/src/test/java/com/calldad/RoutesTest.kt",
+                  "app/src/test/java/com/calldad/SimulatedPttEngineTest.kt",
+                  "functions/ring.js", "functions/ring.test.js",
+                  "tools/rules-test/rules.test.js", "tools/rules-test/package.json",
+                  "blueprints/decisions/ADR-015-pair-rooms.md",
                   "app/src/main/java/com/calldad/data/signaling/SignalingClient.kt",
                   "app/src/main/java/com/calldad/webrtc/WebRTCClient.kt",
                   "app/src/main/java/com/calldad/ui/screens/CallViewModel.kt",
@@ -86,7 +110,13 @@ REQUIRED_FILES = ["AGENTS.md", "RULES.md", "SESSION_HANDOFF.md", "CLAUDE.md",
                   "app/src/main/res/xml/data_extraction_rules.xml"]
 BANNED_NAMES = ["google-services.json", "local.properties", ".env"]
 BANNED_SUFFIXES = (".keystore", ".jks")
-BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY", "RELEASE_STORE_PASSWORD="]
+BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY"]
+# A signing password ASSIGNED a value (the template's empty placeholder is fine).
+BANNED_PATTERNS = [re.compile(r"RELEASE_STORE_PASSWORD=[^\s#]")]
+TEXT_SUFFIXES = {".md", ".kt", ".kts", ".py", ".js", ".json", ".toml", ".xml",
+                 ".html", ".rules", ".properties", ".template", ".txt", ".yml", ".yaml"}
+GENESIS = "As Above, So Below. As Within, So Without."
+SELF = "tools/verify_project.py"
 # Studio output dirs skipped by the fallback on-disk scan.
 SKIP_DIRS = {"build", ".gradle", ".cxx", ".idea", "captures",
              ".externalNativeBuild", "__pycache__", ".git"}
@@ -132,13 +162,22 @@ def main() -> int:
                 errors.append(f"banned file TRACKED by git: {rel}")
             if Path(rel).suffix in BANNED_SUFFIXES:
                 errors.append(f"banned keystore TRACKED by git: {rel}")
-    for f in REQUIRED_FILES:
-        p = ROOT / f
-        if p.is_file() and p.suffix == ".md":
-            text = p.read_text(encoding="utf-8", errors="strict")
-            for s in BANNED_STRINGS:
-                if s in text:
-                    errors.append(f"banned string {s!r} in {f}")
+    scan = tracked if tracked is not None else REQUIRED_FILES
+    for rel in scan:
+        p = ROOT / rel
+        if rel == SELF or not p.is_file():
+            continue
+        if p.suffix not in TEXT_SUFFIXES and p.name not in {".gitignore", ".gitattributes"}:
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for s in BANNED_STRINGS:
+            if s in text:
+                errors.append(f"banned string {s!r} in {rel}")
+        for pat in BANNED_PATTERNS:
+            if pat.search(text):
+                errors.append(f"banned secret pattern in {rel}")
+        if p.suffix in {".kt", ".py"} and GENESIS not in text[:400]:
+            errors.append(f"missing Genesis header: {rel}")
     if errors:
         print("VERIFY FAIL:")
         for e in errors:

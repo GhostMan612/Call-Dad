@@ -1,5 +1,7 @@
 # BP-02 — Voice call, LAN-first E2EE (Phase 2)
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 Goal: Kid taps giant button → Dad rings on LAN <3s → E2EE voice → one-tap hangup.
 
 ## Port (adapt from donor, author here)

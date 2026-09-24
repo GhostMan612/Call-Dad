@@ -36,7 +36,10 @@ import com.calldad.webrtc.WebRtcLog
  *   Short 40ms vibration on press, 25ms on release. The AudioManager chirp
  *   is left as a Phase 7 TODO (requires a bundled raw resource).
  */
-class PttAudioManager(private val context: Context) {
+class PttAudioManager(
+    private val context: Context,
+    private val onFocusLost: () -> Unit = {}
+) {
 
     private val audioManager: AudioManager =
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -84,10 +87,10 @@ class PttAudioManager(private val context: Context) {
                 if (change == AudioManager.AUDIOFOCUS_LOSS ||
                     change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
                 ) {
-                    // The VM is responsible for actually stopping TX.
-                    // We only flip our internal flag so the next request
-                    // re-acquires cleanly.
+                    // Another app (or a call) took the speaker: flip our
+                    // flag and tell the VM, which stops transmitting.
                     focusGranted = false
+                    onFocusLost()
                 }
             }
             .build()

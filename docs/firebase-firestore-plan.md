@@ -1,6 +1,11 @@
 # Firebase / Firestore plan (paid account — Phase 5: per-call rooms + locked rules)
 
-> Supersedes the Phase 2 dad_channel design below (kept for history). Current: `calls/{callId}` status machine + `ring/dad` pointer + strict rules in `firestore.rules`; anonymous auth required. See ADR-002/ADR-007.
+> **Current schema (ADR-015, 2026-09-24):**
+> - `calls/{uidA_uidB}` (sorted UIDs): {status, seq, callerUid, calleeUid, offer, answer, callerCandidates, calleeCandidates, updatedAt}. Only the two UIDs in the id can read or write it.
+> - `users/{uid}.fcmToken`: owner-only.
+> - `pairings/{uid}`: handshake {peerUid, sessionNonce, expiresAt}; get by id only, no list.
+> - Cloud Function `onCallRoomWritten` pushes to the callee's token.
+> - Everything below is history (`dad_channel`, `ring/dad`, `family_channel` + topic).
 
 - Status: ACTIVE for call signaling (2026-09-19 operator directive, ADR-002 DECIDED). Operator places `google-services.json` into `app/` (gitignored, verify-banned) — without it the first Firestore call throws `IllegalStateException: Default FirebaseApp is not initialized`.
 - Phase 2 scope: Firestore `calls/dad_channel` SDP OFFER/ANSWER + `candidates` ICE trickle via `SignalingClient`; INTERNET + ACCESS_NETWORK_STATE granted; RECORD_AUDIO/CAMERA stay commented until Phase 3 peer connection. No FCM/auth/analytics.

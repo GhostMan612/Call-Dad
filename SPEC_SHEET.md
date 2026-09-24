@@ -1,5 +1,7 @@
 # SPEC_SHEET.md — Call-Dad v0.1 scope contract
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 > Human-readable companion to `SPEC_SHEET.json` (machine truth). RULES.md wins conflicts.
 
 ## 1. Product

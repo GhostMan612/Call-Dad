@@ -20,40 +20,33 @@ private val Context.peerStore: DataStore<Preferences> by
     preferencesDataStore("peer_store")
 
 /**
- * Plaintext peer persistence.
+ * Plaintext peer persistence: the single allowlisted contact's UID.
  *
- * ARCHITECTURAL DECISION (Executor Override, Phase 11):
- *   Tink AEAD is NOT used. The threat model for a two-person
- *   sideloaded family app does not include rooted devices or adb
- *   backup.
- *
- * MITIGATIONS:
- *   - allowBackup="false" (blocks adb backup)
- *   - data_extraction_rules.xml (blocks D2D transfer on Android 12+)
- *   - pairing_token is NEVER persisted. Held in ViewModel memory only.
+ * Tink AEAD is NOT used. The threat model for a two-person sideloaded
+ * family app does not include rooted devices; allowBackup="false" and
+ * data_extraction_rules.xml keep the store on this device. The peer is
+ * written only after a mutual handshake (PairingViewModel).
  */
 class SecurePeerStore(private val context: Context) {
 
-    suspend fun storePeer(uid: String, fcmToken: String) {
+    suspend fun storePeer(uid: String) {
         context.peerStore.edit { prefs ->
-            prefs[stringPreferencesKey("peer_uid")] = uid
-            prefs[stringPreferencesKey("peer_fcm_token")] = fcmToken
-            prefs[longPreferencesKey("paired_at")] =
-                System.currentTimeMillis()
+            prefs[PEER_UID] = uid
+            prefs.remove(LEGACY_PEER_FCM)
+            prefs[PAIRED_AT] = System.currentTimeMillis()
         }
     }
 
     fun observePeerUid(): Flow<String?> =
-        context.peerStore.data.map {
-            it[stringPreferencesKey("peer_uid")]
-        }
-
-    fun observePeerFcmToken(): Flow<String?> =
-        context.peerStore.data.map {
-            it[stringPreferencesKey("peer_fcm_token")]
-        }
+        context.peerStore.data.map { it[PEER_UID] }
 
     suspend fun clear() {
         context.peerStore.edit { it.clear() }
+    }
+
+    private companion object {
+        val PEER_UID = stringPreferencesKey("peer_uid")
+        val LEGACY_PEER_FCM = stringPreferencesKey("peer_fcm_token")
+        val PAIRED_AT = longPreferencesKey("paired_at")
     }
 }

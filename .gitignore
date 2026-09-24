@@ -10,6 +10,7 @@ RELEASE_*.txt
 
 # Gradle / Android build outputs (human builds in Studio; this lane never builds)
 .gradle/
+.kotlin/
 gradle/gradle-daemon-jvm.properties
 build/
 app/build/
@@ -42,3 +43,9 @@ __pycache__/
 # Phase 5: Cloud Functions + local env (never commit installs or secrets)
 functions/node_modules/
 functions/.env
+
+# Firestore rules test harness (npm install locally) + emulator debug logs
+tools/rules-test/node_modules/
+tools/rules-test/package-lock.json
+firestore-debug.log
+*-debug.log

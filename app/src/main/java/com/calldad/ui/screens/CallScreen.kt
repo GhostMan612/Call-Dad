@@ -2,16 +2,16 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/CallScreen.kt — Phase 4: video rendering + incoming overlay
+// ui/screens/CallScreen.kt — video call UI + incoming overlay
 // Location: app/src/main/java/com/calldad/ui/screens/CallScreen.kt
 //
-// Phase 1 hierarchy preserved. Phase 4 deltas: VideoRenderer-backed InCall,
-// full-screen Incoming overlay, nav-arg QA hook (mode=incoming, DEBUG only).
-// No swipe/long-press anywhere; every target >= 100dp.
+// No swipe/long-press anywhere; every primary target >= 96dp.
 package com.calldad.ui.screens
 
-import android.app.Application
+import android.content.Context
+import android.content.ContextWrapper
 import android.view.WindowManager
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -33,6 +33,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Face
@@ -65,7 +69,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -76,12 +79,15 @@ import com.calldad.ui.theme.CallGreen
 import com.calldad.ui.theme.CallGreenDark
 import com.calldad.ui.theme.HangUpRed
 import com.calldad.webrtc.ConnectionHealth
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 
 @Composable
 fun CallScreen(
     onFinished: () -> Unit,
+    onOpenGame: () -> Unit,
     modifier: Modifier = Modifier,
     mode: String = "caller",
     viewModel: CallViewModel = callViewModel()
@@ -89,144 +95,124 @@ fun CallScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val elapsed by viewModel.elapsedSeconds.collectAsStateWithLifecycle()
     val isCameraOn by viewModel.isCameraOn.collectAsStateWithLifecycle()
+    val isMicOn by viewModel.isMicOn.collectAsStateWithLifecycle()
     val remoteVideoTrack by viewModel.remoteVideoTrack.collectAsStateWithLifecycle()
     val localVideoTrack by viewModel.localVideoTrack.collectAsStateWithLifecycle()
-    val eglContext by viewModel.eglContext.collectAsStateWithLifecycle()
     val health by viewModel.connectionHealth.collectAsStateWithLifecycle()
 
-    LifecycleResumeEffect(Unit) {
-        viewModel.onResume()
-        onPauseOrDispose {
-            viewModel.onPause()
-        }
-    }
-
     val context = LocalContext.current
-    val shouldKeepOn = viewModel.shouldKeepScreenOn()
+    val shouldKeepOn = state.isLive
 
     DisposableEffect(shouldKeepOn) {
         val window = (context as? android.app.Activity)?.window
         if (window == null) return@DisposableEffect onDispose { }
-
         if (shouldKeepOn) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-
         onDispose {
-            // Safety net: if the composable leaves composition while the
-            // flag is set, clear it so the screen can sleep normally.
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 
-    // Caller (production path): permission-gated auto-start, exactly once.
-    // Incoming QA path: permissions only; overlay drives answerCall().
+    // Caller: permission-gated auto-start, exactly once. Incoming: the
+    // shared ViewModel already holds the ring (or will within a moment,
+    // on a cold start from the notification); nothing ringing → home.
     var started by remember { mutableStateOf(false) }
+    var permissionDenied by remember { mutableStateOf(false) }
     val requestPermissions = rememberCallPermissionRequest(
         onGranted = {
+            permissionDenied = false
             if (mode != "incoming" && !started) {
                 started = true
                 viewModel.startCall()
             }
         },
-        onDenied = { /* Phase 4: route to a parent-facing helper screen */ }
+        onDenied = { permissionDenied = true }
     )
     LaunchedEffect(Unit) {
         requestPermissions()
         if (mode == "incoming") {
-            // Real ring check: live answerable offer → overlay; anything
-            // else (stale snapshot, own echo, dead room) → straight home.
-            // No overlay without a room behind it (device-proven strandings).
-            if (!viewModel.checkIncomingCall()) onFinished()
+            val ringing = withTimeoutOrNull(INCOMING_WAIT_MS) {
+                viewModel.state.first { it is CallState.Ringing && it.isIncoming }
+            }
+            if (ringing == null && !viewModel.state.value.isLive) onFinished()
         }
     }
 
-    // Lock-screen polish: camera track follows the foreground. Disabling
-    // (not disposing) lets the HAL re-open cleanly on resume; the peer
-    // connection — and the call — survive the lock.
+    // Lock-screen polish: the camera pauses while the call is not on
+    // screen and comes back only if the kid left it on.
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, localVideoTrack) {
-        val track = localVideoTrack ?: return@DisposableEffect onDispose { }
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            // The track reference is captured at composition: after a
-            // hangup the native track is already disposed while this
-            // observer is still registered, and the navigate-home
-            // transition fires one last ON_PAUSE into it. Swallow that
-            // (device-proven FATAL: "MediaStreamTrack has been disposed").
-            runCatching {
-                when (event) {
-                    Lifecycle.Event.ON_PAUSE -> track.setEnabled(false)
-                    Lifecycle.Event.ON_RESUME -> track.setEnabled(true)
-                    else -> Unit
-                }
+            when (event) {
+                Lifecycle.Event.ON_STOP -> viewModel.onUiHidden()
+                Lifecycle.Event.ON_START -> viewModel.onUiVisible()
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // PTT interlock: WebRTC owns the mic during a call. Shared
-    // activity-scoped PTT VM (same instance PttScreen uses — see
-    // rememberPttViewModel; default viewModel() would be entry-scoped
-    // AND crash on the AndroidViewModel constructor).
+    // PTT interlock: WebRTC owns the mic during a call.
     val pttViewModel: PttViewModel = rememberPttViewModel()
     LaunchedEffect(state) {
-        pttViewModel.onCallStateChanged(
-            state is CallState.Ringing || state is CallState.Connected
-        )
+        pttViewModel.onCallStateChanged(state.isLive)
     }
 
-    // Any return to Idle after real activity (ringing, incoming, in-call,
-    // or failed-and-retried) follows home so neither side strands on a dead
-    // screen — including a peer's decline while we were still ringing.
-    // Initial Idle never triggers (wasActive starts false).
+    // Any return to Idle after real activity follows home so neither side
+    // strands on a dead screen. Initial Idle never triggers.
     var wasActive by remember { mutableStateOf(false) }
     LaunchedEffect(state) {
-        if (state is CallState.Ringing ||
-            state is CallState.Connected ||
-            state is CallState.NoAnswer ||
-            state is CallState.Declined ||
-            state is CallState.Ended ||
-            state is CallState.Error
-        ) {
+        if (state !is CallState.Idle) {
             wasActive = true
-        } else if (state is CallState.Idle && wasActive) {
+        } else if (wasActive) {
             wasActive = false
             onFinished()
         }
     }
 
-    // System back = Hang Up (or Decline on an incoming ring). Without this
-    // the back gesture pops navigation silently: no room update, peer
-    // strands, ghost rings. Same direct path as the buttons.
+    // System back = Hang Up (or Decline on an incoming ring): the peer is
+    // always told, never left ringing.
     BackHandler {
-        val s = state
-        if (s is CallState.Ringing && s.isIncoming) viewModel.declineCall()
-        else viewModel.endCall()
+        viewModel.endCall()
         onFinished()
     }
 
-    // Local hangup/decline awaits the room delete BEFORE navigating:
-    // popping the screen clears the VM and would cancel a fire-and-forget
-    // teardown, stranding the peer (device-proven). 3s cap inside.
+    if (permissionDenied && !state.isLive) {
+        PermissionContent(
+            onRetry = requestPermissions,
+            onClose = onFinished,
+            modifier = modifier
+        )
+        return
+    }
+
     CallContent(
         state = state,
         elapsedSeconds = elapsed,
         isCameraOn = isCameraOn,
+        isMicOn = isMicOn,
         remoteVideoTrack = remoteVideoTrack,
         localVideoTrack = localVideoTrack,
-        eglContext = eglContext,
+        eglContext = viewModel.eglContext,
         health = health,
         onToggleCamera = viewModel::onToggleCamera,
-        onAnswer = { viewModel.answerCall() },
+        onToggleMic = viewModel::onToggleMic,
+        onSwitchCamera = viewModel::onSwitchCamera,
+        onOpenGame = onOpenGame,
+        onAnswer = viewModel::answerCall,
         onDecline = {
             viewModel.declineCall()
             onFinished()
         },
         onReRing = viewModel::onReRing,
-        onDismissError = viewModel::clearError,
+        onDismissError = {
+            viewModel.clearError()
+            onFinished()
+        },
         onHangUp = {
             viewModel.endCall()
             onFinished()
@@ -235,14 +221,19 @@ fun CallScreen(
     )
 }
 
+private const val INCOMING_WAIT_MS = 6_000L
+
 /**
- * Shared accessor (was private Phase 3 helper): GameScreen needs the same
- * activity-scoped CallViewModel for the WebRTC data-channel bridge.
+ * THE call session accessor. Activity-scoped on purpose: the call must
+ * survive leaving the call screen (game during a call, rings on any
+ * screen), so every caller shares one CallViewModel per activity.
  */
 @Composable
 fun callViewModel(): CallViewModel {
-    val application = LocalContext.current.applicationContext as Application
+    val activity = LocalContext.current.findComponentActivity()
+    val application = activity.application
     return viewModel(
+        viewModelStoreOwner = activity,
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -252,16 +243,77 @@ fun callViewModel(): CallViewModel {
     )
 }
 
+private fun Context.findComponentActivity(): ComponentActivity {
+    var ctx: Context = this
+    while (ctx is ContextWrapper) {
+        if (ctx is ComponentActivity) return ctx
+        ctx = ctx.baseContext
+    }
+    error("CallViewModel needs a ComponentActivity host")
+}
+
+@Composable
+private fun PermissionContent(
+    onRetry: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxSize()
+            .background(CallGreenDark).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.MicOff,
+            contentDescription = null,
+            modifier = Modifier.size(140.dp),
+            tint = Color.White
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(
+            text = "The phone needs the camera and microphone to call. Ask a grown-up to allow them.",
+            style = MaterialTheme.typography.headlineSmall,
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(40.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            GiantCallButton(
+                label = "Go Home",
+                icon = Icons.Filled.Close,
+                containerColor = HangUpRed,
+                onClick = onClose,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+            GiantCallButton(
+                label = "Allow",
+                icon = Icons.Filled.Refresh,
+                containerColor = CallGreen,
+                onClick = onRetry,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+        }
+    }
+}
+
 @Composable
 private fun CallContent(
     state: CallState,
     elapsedSeconds: Int,
     isCameraOn: Boolean,
+    isMicOn: Boolean,
     remoteVideoTrack: VideoTrack?,
     localVideoTrack: VideoTrack?,
     eglContext: EglBase.Context?,
     health: ConnectionHealth,
     onToggleCamera: () -> Unit,
+    onToggleMic: () -> Unit,
+    onSwitchCamera: () -> Unit,
+    onOpenGame: () -> Unit,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
     onReRing: () -> Unit,
@@ -294,7 +346,11 @@ private fun CallContent(
             health = health,
             elapsedSeconds = elapsedSeconds,
             isCameraOn = isCameraOn,
+            isMicOn = isMicOn,
             onToggleCamera = onToggleCamera,
+            onToggleMic = onToggleMic,
+            onSwitchCamera = onSwitchCamera,
+            onOpenGame = onOpenGame,
             onHangUp = onHangUp,
             modifier = modifier
         )
@@ -329,8 +385,7 @@ private fun IncomingContent(
     modifier: Modifier = Modifier
 ) {
     // Visual only. Ringtone + vibration are owned SOLELY by CallAudioManager
-    // (driven from CallViewModel); the overlay-local player was removed to
-    // end double-ringing. See ADR-011.
+    // (driven from CallViewModel and CallForegroundService). See ADR-011.
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -423,7 +478,11 @@ private fun InCallContent(
     health: ConnectionHealth,
     elapsedSeconds: Int,
     isCameraOn: Boolean,
+    isMicOn: Boolean,
     onToggleCamera: () -> Unit,
+    onToggleMic: () -> Unit,
+    onSwitchCamera: () -> Unit,
+    onOpenGame: () -> Unit,
     onHangUp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -472,23 +531,48 @@ private fun InCallContent(
             )
         }
 
-        // Controls row, bottom. Camera toggle + Hang Up.
-        Row(
+        // Controls, bottom: small toggles row above a giant Hang Up.
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(24.dp)
-                .height(140.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            CameraToggleButton(
-                isCameraOn = isCameraOn,
-                onClick = onToggleCamera,
-                modifier = Modifier.size(140.dp).fillMaxHeight()
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().height(96.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CameraToggleButton(
+                    isCameraOn = isCameraOn,
+                    onClick = onToggleCamera,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                RoundControl(
+                    icon = if (isMicOn) Icons.Filled.Mic else Icons.Filled.MicOff,
+                    description = if (isMicOn) "Mute microphone" else "Unmute microphone",
+                    active = isMicOn,
+                    onClick = onToggleMic,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                RoundControl(
+                    icon = Icons.Filled.Cameraswitch,
+                    description = "Flip camera",
+                    active = true,
+                    onClick = onSwitchCamera,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+                RoundControl(
+                    icon = Icons.Filled.SportsEsports,
+                    description = "Play a game together",
+                    active = true,
+                    onClick = onOpenGame,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+            }
             HangUpButton(
                 onClick = onHangUp,
-                modifier = Modifier.weight(1f).fillMaxHeight()
+                modifier = Modifier.fillMaxWidth().height(120.dp)
             )
         }
     }
@@ -505,11 +589,15 @@ private fun ConnectedContent(
 ) {
     val statusLabel = when (state) {
         CallState.Idle -> "Ready"
-        is CallState.Ringing -> if (state.isIncoming) "" else "Calling Dad…"
-        is CallState.Connected -> "Dad is here!"
+        is CallState.Ringing -> if (state.isIncoming) "" else "Calling ${state.peerName}…"
+        is CallState.Connected -> "Connected!"
         is CallState.NoAnswer -> ""
-        is CallState.Declined -> "Declined"
-        is CallState.Ended -> "Call ended"
+        is CallState.Declined -> "They can't talk right now"
+        is CallState.Ended -> when (state.reason) {
+            EndReason.MISSED -> "Missed call"
+            EndReason.NETWORK_FAILURE -> "Connection lost"
+            else -> "Call ended"
+        }
         is CallState.Error -> "" // handled by ErrorContent
     }
 
@@ -639,16 +727,7 @@ private fun ErrorContent(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isRecoverable = when (kind) {
-        CallErrorKind.PEER_BUSY,
-        CallErrorKind.TRANSACTION_EXHAUSTED,
-        CallErrorKind.SIGNALING_FAILED,
-        CallErrorKind.WEBRTC_FAILED,
-        CallErrorKind.LISTENER_DISCONNECTED -> true
-        CallErrorKind.PERMISSION_DENIED,
-        CallErrorKind.MALFORMED,
-        CallErrorKind.UNKNOWN -> false
-    }
+    val isRecoverable = kind.isRecoverable
 
     Column(
         modifier = modifier.fillMaxSize()
@@ -684,7 +763,7 @@ private fun ErrorContent(
                 )
             }
             GiantCallButton(
-                label = "Dismiss",
+                label = "Go Home",
                 icon = Icons.Filled.Close,
                 containerColor = HangUpRed,
                 onClick = onDismiss,
@@ -720,6 +799,32 @@ private fun CameraToggleButton(
             imageVector = if (isCameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
             contentDescription = null,
             modifier = Modifier.size(64.dp),
+            tint = Color.White
+        )
+    }
+}
+
+@Composable
+private fun RoundControl(
+    icon: ImageVector,
+    description: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(28.dp)
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(Color.White.copy(alpha = if (active) 0.22f else 0.08f))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
             tint = Color.White
         )
     }
@@ -764,11 +869,15 @@ private fun CallContentPreview() {
             state = CallState.Connected(seq = 1),
             elapsedSeconds = 42,
             isCameraOn = true,
+            isMicOn = true,
             remoteVideoTrack = null,
             localVideoTrack = null,
             eglContext = null,
             health = ConnectionHealth.HEALTHY,
             onToggleCamera = {},
+            onToggleMic = {},
+            onSwitchCamera = {},
+            onOpenGame = {},
             onAnswer = {},
             onDecline = {},
             onReRing = {},

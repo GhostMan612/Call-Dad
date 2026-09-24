@@ -1,5 +1,7 @@
 # CALL_DAD_MASTER_BLUEPRINT.md — frozen v0.1 product spec
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 > Frozen v0.1 target (2026-09-19 scaffold). Changes require ADR + operator sign-off.
 > Pattern source: Vision Engine MASTER (frozen) + pathfinder KOTLIN_PORT_SPEC + mantle comms donor.
 

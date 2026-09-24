@@ -48,4 +48,18 @@ class KeywordBotTest {
         listOf("tell me a joke", "tell me a story", "how are you", "quantum banana")
             .forEach { assertTrue(KeywordBot.getResponse(it).length < 140) }
     }
+
+    @Test
+    fun matching_isWholeWord() {
+        val fallback = KeywordBot.getResponse("quantum banana")
+        assertEquals(fallback, KeywordBot.getResponse("this is something"))
+        assertEquals(fallback, KeywordBot.getResponse("they are using it"))
+        assertEquals(fallback, KeywordBot.getResponse("say that again"))
+    }
+
+    @Test
+    fun punctuation_isIgnored() {
+        assertTrue(KeywordBot.getResponse("Hi!").contains("Hi there"))
+        assertTrue(KeywordBot.getResponse("tell me a joke, please?").contains("teddy bear"))
+    }
 }

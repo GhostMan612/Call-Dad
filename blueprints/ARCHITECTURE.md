@@ -1,5 +1,7 @@
 # ARCHITECTURE.md — Call-Dad
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 > Structural truth. Code > prose on conflict.
 
 ## UI (pathfinder KOTLIN_PORT_SPEC §1 pattern)

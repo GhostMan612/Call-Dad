@@ -1,4 +1,4 @@
-// Call-Dad app module. Phase 5 — BuildConfig fields injected from local.properties (gitignored).
+// Call-Dad app module. BuildConfig fields injected from local.properties (gitignored).
 // Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.1.
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 
@@ -94,20 +94,20 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.navigation:navigation-compose:2.8.4")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     // ---- Phase 2 ----
     implementation(platform(libs.firebase.bom))
@@ -125,7 +125,7 @@ dependencies {
     // ---- Phase 7: WebViewAssetLoader (hardened asset serving) ----
     implementation(libs.androidx.webkit)
 
-    // ---- Phase 12: peer persistence (SecurePeerStore, plaintext per catalog note) ----
+    // ---- Contracts 2&3 (ADR-014): peer persistence (SecurePeerStore, plaintext per catalog note) ----
     implementation(libs.datastore.preferences)
 
     // ---- Contract 4: QR pairing (CameraX + unbundled ML Kit + ZXing) ----
@@ -141,7 +141,9 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.play.services.base)
 
-    // Host-side unit tests (G1/G2 gates — restored; the pasted draft dropped this)
-    testImplementation("junit:junit:4.13.2")
+    // Host-side unit tests. org.json: the android.jar stub returns
+    // defaults for JSONObject, so pairing-payload tests need the real one.
+    testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.json)
 }

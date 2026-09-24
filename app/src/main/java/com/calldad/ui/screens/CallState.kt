@@ -8,33 +8,21 @@ package com.calldad.ui.screens
 
 /**
  * The seven-state call machine. This is the ONLY state type the UI
- * observes. The ViewModel maps every Firestore document change to exactly
- * one of these states via CallState.fromDocument(...).
+ * observes. CallViewModel maps every room document to one of these via
+ * [fromDocument] and commits it only when [canTransition] allows.
  *
- * TRANSITION TABLE (enforced in CallViewModel via canTransition):
+ * TRANSITION TABLE:
  *
- *   Idle           + USER_CALL       -> Ringing(isIncoming=false)
- *   Idle           + DOC_RINGING     -> Ringing(isIncoming=true)
+ *   Idle      -> Ringing                       (user call / fresh doc ring)
+ *   Ringing   -> Connected | Declined | NoAnswer | Ended | Error | Ringing
+ *   Connected -> Ringing (new generation) | Ended | Error
+ *   NoAnswer  -> Ringing (try again) | Ended | Idle
+ *   Declined  -> Idle | Ringing
+ *   Ended     -> Idle | Ringing
+ *   Error     -> Idle | Ringing
  *
- *   Ringing(false) + DOC_ANSWER      -> Connected
- *   Ringing(false) + TIMEOUT_15S     -> NoAnswer(seq)
- *   Ringing(false) + DOC_DECLINED    -> Declined
- *   Ringing(false) + USER_HANGUP     -> Ended(LOCAL_HANGUP)
- *
- *   Ringing(true)  + USER_ANSWER     -> Connected
- *   Ringing(true)  + USER_DECLINE    -> Declined
- *   Ringing(true)  + DOC_ENDED       -> Ended(REMOTE_HANGUP)
- *
- *   Connected      + USER_HANGUP     -> Ended(LOCAL_HANGUP)
- *   Connected      + DOC_ENDED       -> Ended(REMOTE_HANGUP)
- *   Connected      + DOC_SEQ_CHANGED -> Ringing(isIncoming=true)
- *
- *   NoAnswer(seq)  + USER_RERING     -> Ringing(isIncoming=false)
- *   NoAnswer(seq)  + USER_HANGUP     -> Ended(LOCAL_HANGUP)
- *
- *   Declined       + AUTO_DISMISS    -> Idle
- *   Ended          + AUTO_DISMISS    -> Idle
- *   Error          + USER_DISMISS    -> Idle
+ * Every state other than Idle has a way out, so the kid can never be
+ * stranded on a screen: terminal states auto-dismiss, Error has Dismiss.
  */
 sealed interface CallState {
 
@@ -76,23 +64,46 @@ sealed interface CallState {
             "IDLE"      -> Idle
             else        -> Error(CallErrorKind.MALFORMED, "Unknown status.", seq)
         }
+
+        fun canTransition(from: CallState, to: CallState): Boolean {
+            if (from::class == to::class) return true
+            return when (from) {
+                is Idle -> to is Ringing
+                is Ringing ->
+                    to is Connected || to is Declined || to is NoAnswer ||
+                        to is Ended || to is Error
+                is Connected -> to is Ringing || to is Ended || to is Error
+                is NoAnswer -> to is Ringing || to is Ended || to is Idle
+                is Declined -> to is Idle || to is Ringing
+                is Ended -> to is Idle || to is Ringing
+                is Error -> to is Idle || to is Ringing
+            }
+        }
     }
 }
+
+/** True while media should be live (ringing either way, or in the call). */
+val CallState.isLive: Boolean
+    get() = this is CallState.Ringing || this is CallState.Connected
 
 enum class EndReason {
     LOCAL_HANGUP,
     REMOTE_HANGUP,
     NETWORK_FAILURE,
-    TIMEOUT
+    MISSED
 }
 
 enum class CallErrorKind {
     LISTENER_DISCONNECTED,
     SIGNALING_FAILED,
-    TRANSACTION_EXHAUSTED,
     WEBRTC_FAILED,
     PERMISSION_DENIED,
-    PEER_BUSY,
+    NOT_PAIRED,
     MALFORMED,
-    UNKNOWN
+    UNKNOWN;
+
+    /** Recoverable kinds get a Try Again button. */
+    val isRecoverable: Boolean
+        get() = this == LISTENER_DISCONNECTED || this == SIGNALING_FAILED ||
+            this == WEBRTC_FAILED || this == UNKNOWN
 }

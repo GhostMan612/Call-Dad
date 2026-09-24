@@ -1,5 +1,7 @@
 # Sovereign-comms reuse map (donor: C:\sovereign_mantle — READ-ONLY)
 
+> **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
+
 > Copy out + adapt into `C:\Call-Dad\app`. Never edit donor. Credit pattern in code headers/docs.
 
 ## Direct ports (BP-02..04)

@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// webrtc/WebRTCClient.kt
+// webrtc/WebRTCClient.kt — one instance per call attempt (ADR-015)
 // Location: app/src/main/java/com/calldad/webrtc/WebRTCClient.kt
 package com.calldad.webrtc
 
@@ -48,15 +48,27 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.nio.ByteBuffer
 
+/**
+ * One call attempt's media stack: factory, peer connection, local tracks,
+ * camera, game data channel.
+ *
+ * SINGLE USE: construct → [start] → offer/answer → [dispose]. A retry or
+ * a new generation gets a NEW instance; nothing here is ever re-armed
+ * after dispose (the old reuse path built on released native objects).
+ *
+ * The [eglBase] is owned by the caller (CallViewModel) and outlives every
+ * instance, so renderers initialised with it never see a released context.
+ */
 class WebRTCClient(
     context: Context,
-    private val iceServers: List<IceServerConfig> = WebRtcConfig.iceServers,
+    private val eglBase: EglBase,
     private val onLocalIceCandidate: (DomainIceCandidate) -> Unit,
     private val onRemoteVideoTrack: (VideoTrack) -> Unit,
-    private val onConnectionStateChanged: (String) -> Unit
+    private val iceServers: List<IceServerConfig> = WebRtcConfig.iceServers
 ) {
     private val appContext = context.applicationContext
-    private val eglBase: EglBase = EglBase.create()
+    private val audioManager =
+        appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var factory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
@@ -69,13 +81,15 @@ class WebRTCClient(
     private var surfaceHelper: SurfaceTextureHelper? = null
     private var gameChannel: DataChannel? = null
 
-    private companion object {
-        const val MAX_GAME_MESSAGE_BYTES = 1024
-        const val DISCONNECTED_DEBOUNCE_MS = 3_000L
-    }
+    private var capturing = false
+    private var disposed = false
 
-    private var micEnabled = true
-    private var cameraEnabled = true
+    private var savedAudioMode: Int? = null
+    private var savedSpeakerOn: Boolean? = null
+
+    private val remoteLock = Any()
+    private var remoteDescriptionSet = false
+    private val pendingRemoteCandidates = mutableListOf<RtcIceCandidate>()
 
     private val _connectionHealth = MutableStateFlow(ConnectionHealth.HEALTHY)
     val connectionHealth: StateFlow<ConnectionHealth> =
@@ -84,73 +98,207 @@ class WebRTCClient(
     private var disconnectionDebounceJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    /**
-     * The EGL context the renderer MUST init with. Passed into
-     * VideoRenderer(eglContext = ...). Do not create a second EglBase.
-     */
-    val eglContext: EglBase.Context
-        get() = eglBase.eglBaseContext
-
-    /** Local camera track. Non-null after createPeerConnection(). */
-    val localVideoTrack: VideoTrack?
-        get() = videoTrack
-
-    fun isInitialized(): Boolean =
-        factory != null && peerConnection != null
-
-    /**
-     * Hot flow of inbound game-sync messages, decoded to UTF-8 strings.
-     *
-     * Buffer is COPIED inside the DataChannel.Observer callback before
-     * emission — org.webrtc frees the ByteBuffer when onMessage returns,
-     * so passing the raw buffer through a Flow produces intermittent
-     * garbage. See the Observer reference.
-     */
     private val _gameMessages = MutableSharedFlow<String>(
         replay = 0,
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
+
+    /** Inbound game-sync messages, copied out of the native buffer. */
     val gameSyncMessages: Flow<String> = _gameMessages.asSharedFlow()
 
-    /**
-     * Send a JSON string over the "game_sync" data channel.
-     * No-op if the channel is not open. Returns true if queued.
-     */
-    fun sendGameData(json: String): Boolean {
-        val channel = gameChannel ?: return false
-        if (channel.state() != DataChannel.State.OPEN) return false
-
-        // Guard against SCTP head-of-line blocking. WebRTC fragments at
-        // ~1200 bytes MTU; a single large message monopolizes the send
-        // queue and delays all subsequent control traffic.
-        val bytes = json.toByteArray(Charsets.UTF_8)
-        if (bytes.size > MAX_GAME_MESSAGE_BYTES) {
-            WebRtcLog.transition("Game message rejected: exceeds 1 KB cap")
-            return false
-        }
-
-        val buffer = DataChannel.Buffer(ByteBuffer.wrap(bytes), false)
-        return channel.send(buffer)
-    }
+    /** Local camera track. Non-null after [start] on a device with a camera. */
+    val localVideoTrack: VideoTrack?
+        get() = videoTrack
 
     // -------- lifecycle --------
 
-    fun initialize() {
+    /**
+     * Builds factory, peer connection and local media, then starts the
+     * camera. Switches audio into call mode (speakerphone on: a
+     * 6-year-old never holds the phone to her ear); [dispose] restores
+     * whatever mode and route were active before.
+     */
+    fun start(cameraEnabled: Boolean) {
+        check(!disposed) { "WebRTCClient is single-use" }
         if (factory != null) return
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(appContext)
                 .setEnableInternalTracer(false)
                 .createInitializationOptions()
         )
-        val encoder = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
-        val decoder = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
-        factory = PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(encoder)
-            .setVideoDecoderFactory(decoder)
+        val f = PeerConnectionFactory.builder()
+            .setVideoEncoderFactory(
+                DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
+            )
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
             .createPeerConnectionFactory()
-        WebRtcLog.transition("PeerConnectionFactory initialized")
+        factory = f
+
+        val pc = f.createPeerConnection(buildRtcConfig(), observer)
+            ?: error("createPeerConnection returned null")
+        peerConnection = pc
+
+        enterCallAudioMode()
+        createGameDataChannel(pc)
+        attachLocalTracks(f, pc)
+        videoTrack?.setEnabled(cameraEnabled)
+        startCapture()
+        WebRtcLog.transition("WebRTCClient started")
     }
+
+    /**
+     * Idempotent teardown. Order matters (the hangup SIGSEGV):
+     *  1. peer connection dispose — disposes its transceivers, and with them
+     *     the Java wrapper of the remote track, detaching every renderer
+     *     sink cleanly. A later removeSink on that track is a no-op.
+     *  2. local tracks/sources/capturer, each via its Java dispose().
+     *  3. factory last.
+     * The shared EglBase is NOT released here.
+     */
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        disconnectionDebounceJob?.cancel()
+        scope.cancel()
+        stopCapture()
+
+        gameChannel?.let { ch ->
+            runCatching { ch.unregisterObserver() }
+            runCatching { ch.close() }
+            runCatching { ch.dispose() }
+        }
+        gameChannel = null
+
+        peerConnection?.let { pc ->
+            runCatching { pc.close() }
+            runCatching { pc.dispose() }
+        }
+        peerConnection = null
+
+        runCatching { videoTrack?.dispose() }; videoTrack = null
+        runCatching { audioTrack?.dispose() }; audioTrack = null
+        runCatching { videoSource?.dispose() }; videoSource = null
+        runCatching { audioSource?.dispose() }; audioSource = null
+        runCatching { videoCapturer?.dispose() }; videoCapturer = null
+        runCatching { surfaceHelper?.dispose() }; surfaceHelper = null
+        runCatching { factory?.dispose() }; factory = null
+
+        restoreAudioMode()
+        WebRtcLog.transition("WebRTCClient disposed")
+    }
+
+    // -------- signaling operations --------
+
+    suspend fun createOffer(): DomainSessionDescription {
+        val sdp = setLocalAndAwait(RtcSessionDescription.Type.OFFER)
+        WebRtcLog.transition("Local OFFER created")
+        return sdp
+    }
+
+    suspend fun createAnswer(): DomainSessionDescription {
+        val sdp = setLocalAndAwait(RtcSessionDescription.Type.ANSWER)
+        WebRtcLog.transition("Local ANSWER created")
+        return sdp
+    }
+
+    /**
+     * Applies the peer's SDP and, on success, drains candidates that
+     * arrived before it (a candidate added before the remote description
+     * is rejected by libwebrtc and would be lost for good).
+     */
+    suspend fun setRemoteDescription(remote: DomainSessionDescription): Boolean {
+        val pc = peerConnection ?: return false
+        val type = when (remote.type) {
+            SdpType.OFFER -> RtcSessionDescription.Type.OFFER
+            SdpType.ANSWER -> RtcSessionDescription.Type.ANSWER
+        }
+        val done = CompletableDeferred<Boolean>()
+        pc.setRemoteDescription(object : SdpObserver {
+            override fun onSetSuccess() { done.complete(true) }
+            override fun onSetFailure(err: String?) { done.complete(false) }
+            override fun onCreateSuccess(p0: RtcSessionDescription?) {}
+            override fun onCreateFailure(p0: String?) {}
+        }, RtcSessionDescription(type, remote.sdp))
+        val ok = done.await()
+        if (!ok) {
+            WebRtcLog.transition("Remote description failed")
+            return false
+        }
+        WebRtcLog.transition("Remote description applied")
+        val drained = synchronized(remoteLock) {
+            remoteDescriptionSet = true
+            pendingRemoteCandidates.toList().also { pendingRemoteCandidates.clear() }
+        }
+        drained.forEach { runCatching { peerConnection?.addIceCandidate(it) } }
+        return true
+    }
+
+    fun addRemoteIceCandidate(candidate: DomainIceCandidate) {
+        if (disposed) return
+        val rtc = RtcIceCandidate(
+            candidate.sdpMid,
+            candidate.sdpMLineIndex ?: 0,
+            candidate.sdpCandidate
+        )
+        val applyNow = synchronized(remoteLock) {
+            if (!remoteDescriptionSet) pendingRemoteCandidates.add(rtc)
+            remoteDescriptionSet
+        }
+        if (applyNow) runCatching { peerConnection?.addIceCandidate(rtc) }
+    }
+
+    // -------- media controls --------
+
+    fun setCameraEnabled(enabled: Boolean) {
+        videoTrack?.setEnabled(enabled)
+        WebRtcLog.transition(if (enabled) "Camera enabled" else "Camera disabled")
+    }
+
+    fun setMicEnabled(enabled: Boolean) {
+        audioTrack?.setEnabled(enabled)
+        WebRtcLog.transition(if (enabled) "Mic enabled" else "Mic muted")
+    }
+
+    fun switchCamera() {
+        runCatching { videoCapturer?.switchCamera(null) }
+        WebRtcLog.transition("Camera switched")
+    }
+
+    fun startCapture() {
+        if (capturing || disposed) return
+        val capturer = videoCapturer ?: return
+        runCatching {
+            capturer.startCapture(
+                WebRtcConfig.VIDEO_WIDTH,
+                WebRtcConfig.VIDEO_HEIGHT,
+                WebRtcConfig.VIDEO_FPS
+            )
+            capturing = true
+            WebRtcLog.transition("Camera capture started")
+        }
+    }
+
+    fun stopCapture() {
+        if (!capturing) return
+        runCatching { videoCapturer?.stopCapture() }
+        capturing = false
+        WebRtcLog.transition("Camera capture stopped")
+    }
+
+    /** Sends a JSON string over "game_sync". False if not open or over 1 KB. */
+    fun sendGameData(json: String): Boolean {
+        val channel = gameChannel ?: return false
+        if (channel.state() != DataChannel.State.OPEN) return false
+        val bytes = json.toByteArray(Charsets.UTF_8)
+        if (bytes.size > MAX_GAME_MESSAGE_BYTES) {
+            WebRtcLog.transition("Game message rejected: exceeds 1 KB cap")
+            return false
+        }
+        return channel.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), false))
+    }
+
+    // -------- internals --------
 
     private fun buildRtcConfig(): PeerConnection.RTCConfiguration {
         val rtcIceServers = iceServers.map { cfg ->
@@ -169,54 +317,41 @@ class WebRTCClient(
         }
     }
 
-    fun createPeerConnection() {
-        if (peerConnection != null) return
-        val f = factory ?: error("initialize() must be called first")
-        val rtcConfig = buildRtcConfig()
-        peerConnection = f.createPeerConnection(rtcConfig, observer)
-            ?: error("createPeerConnection returned null")
-        // WebRTC requires MODE_IN_COMMUNICATION for proper AEC and
-        // routing. Set here, reset in dispose(): without the reset Android
-        // treats future ringtones as "already in a call" (single TING, no
-        // vibration — device-proven class of bug). Deprecated constant is
-        // still the only reliable path across API 26–35.
-        // Speakerphone is forced ON for the same reason a 6-year-old never
-        // holds a phone to her ear: without it all call audio routes to the
-        // earpiece and a video call sounds dead (device-reported 09-23).
-        // Restored in dispose() alongside the mode reset.
-        @Suppress("DEPRECATION")
-        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager).also { audio ->
-            audio.mode = AudioManager.MODE_IN_COMMUNICATION
-            audio.isSpeakerphoneOn = true
-        }
-        createGameDataChannel()
-        attachLocalTracks()
-        WebRtcLog.transition("PeerConnection created")
+    @Suppress("DEPRECATION")
+    private fun enterCallAudioMode() {
+        savedAudioMode = audioManager.mode
+        savedSpeakerOn = audioManager.isSpeakerphoneOn
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioManager.isSpeakerphoneOn = true
     }
 
-    private fun createGameDataChannel() {
-        val pc = peerConnection ?: return
-        // Caller-side: this triggers onDataChannel on the remote peer.
-        // Callee-side: the channel arrives via onDataChannel (below),
-        // and this call is a no-op because gameChannel is already set.
-        if (gameChannel != null) return
+    @Suppress("DEPRECATION")
+    private fun restoreAudioMode() {
+        val mode = savedAudioMode ?: return
+        runCatching {
+            audioManager.mode =
+                if (mode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.MODE_NORMAL else mode
+            audioManager.isSpeakerphoneOn = savedSpeakerOn ?: false
+        }
+        savedAudioMode = null
+        savedSpeakerOn = null
+    }
 
+    private fun createGameDataChannel(pc: PeerConnection) {
+        if (gameChannel != null) return
         val init = DataChannel.Init().apply {
             ordered = true
-            maxRetransmits = -1       // reliable
-            maxRetransmitTimeMs = -1  // reliable
+            maxRetransmits = -1
+            maxRetransmitTimeMs = -1
             protocol = ""
-            negotiated = false        // let WebRTC negotiate the ID
+            negotiated = false
         }
-        gameChannel = pc.createDataChannel("game_sync", init)
-        gameChannel?.registerObserver(gameChannelObserver)
-        WebRtcLog.transition("DataChannel 'game_sync' created")
+        gameChannel = pc.createDataChannel(GAME_CHANNEL_LABEL, init)?.also {
+            it.registerObserver(gameChannelObserver)
+        }
     }
 
-    private fun attachLocalTracks() {
-        val f = factory ?: return
-        val pc = peerConnection ?: return
-
+    private fun attachLocalTracks(f: PeerConnectionFactory, pc: PeerConnection) {
         audioSource = f.createAudioSource(MediaConstraints())
         audioTrack = f.createAudioTrack(WebRtcConfig.AUDIO_TRACK_ID, audioSource).also {
             pc.addTrack(it, listOf(WebRtcConfig.LOCAL_STREAM_ID))
@@ -227,10 +362,12 @@ class WebRTCClient(
             return
         }
         videoCapturer = capturer
-        surfaceHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
-        videoSource = f.createVideoSource(capturer.isScreencast)
-        capturer.initialize(surfaceHelper, appContext, videoSource!!.capturerObserver)
-        videoTrack = f.createVideoTrack(WebRtcConfig.VIDEO_TRACK_ID, videoSource).also {
+        val helper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
+        surfaceHelper = helper
+        val source = f.createVideoSource(capturer.isScreencast)
+        videoSource = source
+        capturer.initialize(helper, appContext, source.capturerObserver)
+        videoTrack = f.createVideoTrack(WebRtcConfig.VIDEO_TRACK_ID, source).also {
             pc.addTrack(it, listOf(WebRtcConfig.LOCAL_STREAM_ID))
         }
     }
@@ -246,44 +383,6 @@ class WebRTCClient(
     } catch (t: Throwable) {
         WebRtcLog.transition("Camera capturer creation failed")
         null
-    }
-
-    // -------- signaling operations --------
-
-    suspend fun createOffer(): DomainSessionDescription {
-        val sdp = setLocalAndAwait(RtcSessionDescription.Type.OFFER)
-        WebRtcLog.transition("Local OFFER created")
-        return sdp
-    }
-
-    suspend fun createAnswer(): DomainSessionDescription {
-        val sdp = setLocalAndAwait(RtcSessionDescription.Type.ANSWER)
-        WebRtcLog.transition("Local ANSWER created")
-        return sdp
-    }
-
-    fun setRemoteDescription(remote: DomainSessionDescription) {
-        val pc = peerConnection ?: return
-        val type = when (remote.type) {
-            SdpType.OFFER -> RtcSessionDescription.Type.OFFER
-            SdpType.ANSWER -> RtcSessionDescription.Type.ANSWER
-        }
-        pc.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() { WebRtcLog.transition("Remote description applied") }
-            override fun onSetFailure(err: String?) { WebRtcLog.transition("Remote description failed") }
-            override fun onCreateSuccess(p0: RtcSessionDescription?) {}
-            override fun onCreateFailure(p0: String?) {}
-        }, RtcSessionDescription(type, remote.sdp))
-    }
-
-    fun addRemoteIceCandidate(candidate: DomainIceCandidate) {
-        peerConnection?.addIceCandidate(
-            RtcIceCandidate(
-                candidate.sdpMid,
-                candidate.sdpMLineIndex ?: 0,
-                candidate.sdpCandidate
-            )
-        )
     }
 
     private suspend fun setLocalAndAwait(
@@ -328,176 +427,29 @@ class WebRTCClient(
     }
 
     private val gameChannelObserver = object : DataChannel.Observer {
-
-        override fun onBufferedAmountChange(previousAmount: Long) {
-            // No-op. The Flow's DROP_OLDEST handles backpressure.
-        }
+        override fun onBufferedAmountChange(previousAmount: Long) {}
 
         override fun onStateChange() {
-            val state = gameChannel?.state()
-            WebRtcLog.transition("DataChannel state: $state")
+            WebRtcLog.transition("DataChannel state: ${gameChannel?.state()}")
         }
 
         override fun onMessage(buffer: DataChannel.Buffer) {
-            // CRITICAL: copy before returning. The ByteBuffer is freed
-            // when this method returns.
-            val bytes = ByteArray(buffer.data.remaining())
+            // Copy before returning: the native buffer is freed afterwards.
+            val remaining = buffer.data.remaining()
+            if (remaining > MAX_GAME_MESSAGE_BYTES) return
+            val bytes = ByteArray(remaining)
             buffer.data.get(bytes)
-            val json = String(bytes, Charsets.UTF_8)
-            _gameMessages.tryEmit(json)
+            _gameMessages.tryEmit(String(bytes, Charsets.UTF_8))
         }
     }
 
-    // -------- media controls --------
+    private var remoteTrackDelivered = false
 
-    fun startCapture() {
-        videoCapturer?.startCapture(
-            WebRtcConfig.VIDEO_WIDTH,
-            WebRtcConfig.VIDEO_HEIGHT,
-            WebRtcConfig.VIDEO_FPS
-        )
-        WebRtcLog.transition("Camera capture started")
+    private fun handleRemoteTrack(track: VideoTrack) {
+        if (remoteTrackDelivered || disposed) return
+        remoteTrackDelivered = true
+        scope.launch { if (!disposed) onRemoteVideoTrack(track) }
     }
-
-    fun stopCapture() {
-        videoCapturer?.stopCapture()
-        WebRtcLog.transition("Camera capture stopped")
-    }
-
-    fun toggleCamera() {
-        cameraEnabled = !cameraEnabled
-        videoTrack?.setEnabled(cameraEnabled)
-        WebRtcLog.transition(if (cameraEnabled) "Camera enabled" else "Camera disabled")
-    }
-
-    fun toggleMic() {
-        micEnabled = !micEnabled
-        audioTrack?.setEnabled(micEnabled)
-        WebRtcLog.transition(if (micEnabled) "Mic enabled" else "Mic muted")
-    }
-
-    fun switchCamera() {
-        videoCapturer?.switchCamera(null)
-        WebRtcLog.transition("Camera switched")
-    }
-
-    /**
-     * Initiates an ICE restart. Android's org.webrtc has no restartIce() —
-     * the documented workaround is to set the IceRestart constraint and
-     * create a fresh offer. The caller must publish the new offer via
-     * SignalingClient so the peer can answer it.
-     */
-    suspend fun restartIce(): DomainSessionDescription? {
-        val pc = peerConnection ?: return null
-        _connectionHealth.value = ConnectionHealth.RECONNECTING
-
-        val constraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
-        }
-
-        val deferred = CompletableDeferred<DomainSessionDescription>()
-        pc.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(created: RtcSessionDescription) {
-                pc.setLocalDescription(object : SdpObserver {
-                    override fun onSetSuccess() {
-                        val local = pc.localDescription ?: created
-                        WebRtcLog.transition("ICE restart offer created")
-                        deferred.complete(local.toDomain(RtcSessionDescription.Type.OFFER))
-                    }
-                    override fun onSetFailure(err: String?) {
-                        deferred.completeExceptionally(
-                            IllegalStateException("ICE restart setLocal failed")
-                        )
-                    }
-                    override fun onCreateSuccess(p0: RtcSessionDescription?) {}
-                    override fun onCreateFailure(p0: String?) {}
-                }, created)
-            }
-            override fun onCreateFailure(err: String?) {
-                deferred.completeExceptionally(
-                    IllegalStateException("ICE restart createOffer failed")
-                )
-            }
-            override fun onSetSuccess() {}
-            override fun onSetFailure(p0: String?) {}
-        }, constraints)
-
-        return try {
-            deferred.await()
-        } catch (t: Throwable) {
-            WebRtcLog.transition("ICE restart failed")
-            null
-        }
-    }
-
-    /**
-     * Drops the current PeerConnection and builds a fresh one on the
-     * existing factory, so a re-ring at a higher seq gets a clean
-     * signaling state. Defense-in-depth: no factory (never initialized
-     * or already disposed) → skip instead of crashing startup.
-     */
-    suspend fun resetPeerConnection() {
-        if (factory == null) {
-            WebRtcLog.transition("Reset skipped: not initialized")
-            return
-        }
-        runCatching { peerConnection?.close() }
-        peerConnection = null
-        gameChannel?.unregisterObserver()
-        runCatching { gameChannel?.close() }
-        gameChannel = null
-        remoteTrackDelivered = false
-        disconnectionDebounceJob?.cancel()
-        disconnectionDebounceJob = null
-        _connectionHealth.value = ConnectionHealth.HEALTHY
-        createPeerConnection()
-        WebRtcLog.transition("PeerConnection reset for new generation")
-    }
-
-    // -------- teardown --------
-
-    private var disposed = false
-
-    /**
-     * Idempotent: endCall() and onCleared() both call this (hangup pops the
-     * nav destination, clearing the VM). A second eglBase.release() throws —
-     * that was the post-hangup crash (executor fix, device-proven).
-     */
-    fun dispose() {
-        if (disposed) return
-        disposed = true
-        runCatching { videoCapturer?.stopCapture() }
-        videoCapturer?.dispose(); videoCapturer = null
-        surfaceHelper?.dispose(); surfaceHelper = null
-        videoSource?.dispose(); videoSource = null
-        videoTrack?.dispose(); videoTrack = null
-        audioSource?.dispose(); audioSource = null
-        audioTrack?.dispose(); audioTrack = null
-        gameChannel?.unregisterObserver()
-        gameChannel?.close()
-        gameChannel = null
-        disconnectionDebounceJob?.cancel()
-        disconnectionDebounceJob = null
-        scope.cancel()
-        // Audio-mode reset FIRST among native teardowns: must precede
-        // peerConnection.close() so no callback observes a half-torn-down
-        // stack in call mode. See the MODE_IN_COMMUNICATION note above.
-        // Speakerphone from createPeerConnection() is released here too so
-        // the next ringtone/call starts from the platform default (earpiece).
-        @Suppress("DEPRECATION")
-        (appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager).also { audio ->
-            audio.mode = AudioManager.MODE_NORMAL
-            audio.isSpeakerphoneOn = false
-        }
-        peerConnection?.close(); peerConnection = null
-        factory?.dispose(); factory = null
-        eglBase.release()
-        WebRtcLog.transition("WebRTCClient disposed")
-    }
-
-    // -------- observer --------
 
     private val observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: RtcIceCandidate?) {
@@ -519,32 +471,7 @@ class WebRTCClient(
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
             WebRtcLog.transition("ICE connection state: $state")
-            when (state) {
-                PeerConnection.IceConnectionState.CONNECTED,
-                PeerConnection.IceConnectionState.COMPLETED -> {
-                    disconnectionDebounceJob?.cancel()
-                    disconnectionDebounceJob = null
-                    _connectionHealth.value = ConnectionHealth.HEALTHY
-                }
-                PeerConnection.IceConnectionState.DISCONNECTED -> {
-                    if (disconnectionDebounceJob?.isActive == true) return
-                    _connectionHealth.value = ConnectionHealth.DEGRADED
-                    disconnectionDebounceJob = scope.launch {
-                        delay(DISCONNECTED_DEBOUNCE_MS)
-                        // Still disconnected after the window? Escalate.
-                        if (peerConnection?.iceConnectionState() ==
-                            PeerConnection.IceConnectionState.DISCONNECTED) {
-                            _connectionHealth.value = ConnectionHealth.LOST
-                            WebRtcLog.transition("ICE debounce expired: LOST")
-                        }
-                    }
-                }
-                PeerConnection.IceConnectionState.FAILED -> {
-                    disconnectionDebounceJob?.cancel()
-                    _connectionHealth.value = ConnectionHealth.LOST
-                }
-                else -> Unit
-            }
+            scope.launch { onIceState(state) }
         }
 
         override fun onIceConnectionReceivingChange(receiving: Boolean) {}
@@ -561,20 +488,21 @@ class WebRTCClient(
 
         override fun onDataChannel(channel: DataChannel?) {
             channel ?: return
-            if (channel.label() != "game_sync") return
-            if (gameChannel != null) {
-                // Already have a channel (caller side). Close the duplicate.
-                channel.close()
-                return
+            if (channel.label() != GAME_CHANNEL_LABEL) return
+            scope.launch {
+                val existing = gameChannel
+                if (existing != null && existing.state() == DataChannel.State.OPEN) {
+                    runCatching { channel.close() }
+                    return@launch
+                }
+                existing?.let { runCatching { it.unregisterObserver(); it.close() } }
+                gameChannel = channel
+                channel.registerObserver(gameChannelObserver)
+                WebRtcLog.transition("DataChannel 'game_sync' accepted from peer")
             }
-            gameChannel = channel
-            channel.registerObserver(gameChannelObserver)
-            WebRtcLog.transition("DataChannel 'game_sync' accepted from peer")
         }
 
-        override fun onRenegotiationNeeded() {
-            WebRtcLog.transition("Renegotiation needed")
-        }
+        override fun onRenegotiationNeeded() {}
 
         override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
             (receiver?.track() as? VideoTrack)?.let { handleRemoteTrack(it) }
@@ -586,15 +514,41 @@ class WebRTCClient(
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
             WebRtcLog.transition("Peer connection state: $newState")
-            onConnectionStateChanged(newState?.name ?: "UNKNOWN")
         }
     }
 
-    private var remoteTrackDelivered = false
-    private fun handleRemoteTrack(track: VideoTrack) {
-        if (remoteTrackDelivered) return
-        remoteTrackDelivered = true
-        onRemoteVideoTrack(track)
+    private fun onIceState(state: PeerConnection.IceConnectionState?) {
+        if (disposed) return
+        when (state) {
+            PeerConnection.IceConnectionState.CONNECTED,
+            PeerConnection.IceConnectionState.COMPLETED -> {
+                disconnectionDebounceJob?.cancel()
+                disconnectionDebounceJob = null
+                _connectionHealth.value = ConnectionHealth.HEALTHY
+            }
+            PeerConnection.IceConnectionState.DISCONNECTED -> {
+                if (disconnectionDebounceJob?.isActive == true) return
+                _connectionHealth.value = ConnectionHealth.DEGRADED
+                disconnectionDebounceJob = scope.launch {
+                    delay(DISCONNECTED_DEBOUNCE_MS)
+                    if (_connectionHealth.value == ConnectionHealth.DEGRADED) {
+                        _connectionHealth.value = ConnectionHealth.LOST
+                        WebRtcLog.transition("ICE debounce expired: LOST")
+                    }
+                }
+            }
+            PeerConnection.IceConnectionState.FAILED -> {
+                disconnectionDebounceJob?.cancel()
+                _connectionHealth.value = ConnectionHealth.LOST
+            }
+            else -> Unit
+        }
+    }
+
+    private companion object {
+        const val GAME_CHANNEL_LABEL = "game_sync"
+        const val MAX_GAME_MESSAGE_BYTES = 1024
+        const val DISCONNECTED_DEBOUNCE_MS = 3_000L
     }
 }
 
