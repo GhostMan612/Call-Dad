@@ -67,6 +67,23 @@ service cloud.firestore {
       // Delete: forbidden. Teardown writes ENDED; the doc is the shared
       // teardown signal the peer observes.
       allow delete: if false;
+
+      // Walkie-talkie voice clips (ADR-016). Same two members only. The
+      // sender stamps itself and the server time; clips are small AAC
+      // bytes. The listener plays then deletes; either member may delete.
+      match /ptt/{clipId} {
+        allow read: if isMember();
+        allow create: if isMember()
+                      && request.resource.data.from == request.auth.uid
+                      && request.resource.data.audio is bytes
+                      && request.resource.data.audio.size() <= 200000
+                      && request.resource.data.durationMs is int
+                      && request.resource.data.createdAt == request.time
+                      && request.resource.data.keys().hasOnly(
+                           ['from', 'audio', 'durationMs', 'createdAt']);
+        allow update: if false;
+        allow delete: if isMember();
+      }
     }
 
     // Pairing handshake docs: pairings/{uid} = {uid, peerUid, sessionNonce,

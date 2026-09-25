@@ -19,11 +19,9 @@ import com.calldad.ptt.PttAudioManager
 import com.calldad.ptt.PttAudioState
 import com.calldad.ptt.PttEngine
 import com.calldad.ptt.PttFailure
-import com.calldad.ptt.PttFailureKind
-import com.calldad.ptt.SimulatedPttEngine
-import com.calldad.ptt.SovereignPttAdapter
-import com.calldad.webrtc.WebRtcLog
+import com.calldad.ptt.VoiceClipPttEngine
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,28 +30,24 @@ import kotlinx.coroutines.launch
 data class PttUiState(
     val isTransmitting: Boolean = false,
     val isReceiving: Boolean = false,
+    val justSent: Boolean = false,
     val lastError: String? = null
 )
 
 class PttViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
-     * ENGINE SELECTION.
-     *
-     * SovereignPttAdapter is constructed first; if Sovereign Mantle is not
-     * on the classpath, its startTransmitting() returns ENGINE_UNAVAILABLE
-     * and the VM falls back to SimulatedPttEngine on the FIRST failure.
-     *
-     * This means: on a developer machine without the private module, the
-     * UI works. On a production build with the module present, the real
-     * engine is used transparently. Same binary, same source, no flags.
+     * ENGINE: [VoiceClipPttEngine] — hold to record, release to send over
+     * the pair's private room; the peer plays clips on any screen (ADR-016).
+     * The Sovereign Mantle adapter was a placeholder for a module that was
+     * never on this app's classpath; it is retired.
      */
     private val audioManager = PttAudioManager(application) {
         viewModelScope.launch { onRelease() }
     }
 
-    private val sovereign: PttEngine = SovereignPttAdapter(application)
-    private var engine: PttEngine = sovereign
+    private val voiceClips = VoiceClipPttEngine(application, viewModelScope)
+    private val engine: PttEngine = voiceClips
     private var inboundJob: Job? = null
 
     private val _state = MutableStateFlow(PttUiState())
@@ -89,6 +83,7 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
     fun onCallStateChanged(active: Boolean) {
         if (active) onRelease()
         audioManager.setCallActive(active)
+        voiceClips.setPlaybackBlocked(active)
     }
 
     // -------- gesture handlers --------
@@ -103,25 +98,17 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         audioManager.vibratePress()
-        _state.value = _state.value.copy(isTransmitting = true, lastError = null)
+        _state.value = _state.value.copy(isTransmitting = true, justSent = false, lastError = null)
 
         viewModelScope.launch {
             val result = engine.startTransmitting()
             if (result.isFailure) {
                 val f = result.exceptionOrNull() as? PttFailure
-                if (f?.kind == PttFailureKind.ENGINE_UNAVAILABLE) {
-                    WebRtcLog.transition("PTT: falling back to simulated engine")
-                    runCatching { engine.release() }
-                    engine = SimulatedPttEngine()
-                    watchEngine()
-                    engine.startTransmitting()
-                } else {
-                    _state.value = _state.value.copy(
-                        isTransmitting = false,
-                        lastError = f?.userMessage ?: "Couldn't start talking."
-                    )
-                    audioManager.abandonFocus()
-                }
+                _state.value = _state.value.copy(
+                    isTransmitting = false,
+                    lastError = f?.userMessage ?: "Couldn't start talking."
+                )
+                audioManager.abandonFocus()
             }
         }
     }
@@ -132,8 +119,18 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = _state.value.copy(isTransmitting = false)
 
         viewModelScope.launch {
-            engine.stopTransmitting()
+            val result = engine.stopTransmitting()
             audioManager.abandonFocus()
+            val f = result.exceptionOrNull() as? PttFailure
+            _state.value = if (result.isSuccess) {
+                _state.value.copy(justSent = true, lastError = null)
+            } else {
+                _state.value.copy(lastError = f?.userMessage ?: "Couldn't send. Try again.")
+            }
+            if (result.isSuccess) {
+                delay(SENT_FLASH_MS)
+                _state.value = _state.value.copy(justSent = false)
+            }
         }
     }
 
@@ -148,6 +145,8 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 }
+
+private const val SENT_FLASH_MS = 2_000L
 
 /** Manual factory: AndroidViewModel has no zero-arg constructor. */
 class PttViewModelFactory(

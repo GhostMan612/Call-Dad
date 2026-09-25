@@ -111,3 +111,9 @@
 - [x] PTT never stays hot (try/finally, focus loss, call start); Helper silenced on leave, TTS stop, on-device STT fallback, whole-word matching
 - [x] Gates: 80 host tests PASS, lint 0 errors both flavors, verify PASS
 - [ ] Operator: `firebase deploy --only firestore:rules,functions` → install both flavors → re-pair both phones → device matrix K11 (CURRENT_STATE)
+
+## Contract 9 — Real walkie-talkie (ADR-016, 2026-09-25)
+- [x] Device evidence: first call on new code CONNECTED both ways, clean hangup; PTT proven fake ("Sovereign Mantle not on classpath")
+- [x] VoiceClipPttEngine: hold-to-record AAC clips → pair room `ptt/` → auto-play on any screen, paused during calls, deleted after play
+- [x] Rules stanza + 2 emulator tests (17/17); mic permission asked on the walkie screen; "SENT!" confirmation
+- [ ] Operator: redeploy rules (`firebase deploy --only firestore:rules`) → install both → hold, talk, release on each phone; hear it on the other (also from Home/Game screens)

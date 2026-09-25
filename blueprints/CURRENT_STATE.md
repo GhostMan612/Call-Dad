@@ -33,7 +33,7 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `fcm/CallMessagingService.kt`, `CallForegroundService.kt`, `PushTokenRegistrar.kt` | Push receive → foreground-first ring service; token → `users/{uid}` |
 | `pairing/*`, `ui/screens/Pairing*` | QR payload v2, QR bitmap, DataStore peer store, ML Kit module check, mutual handshake |
 | `game/GameWebRtcBridge.kt`, `ui/screens/GameScreen.kt`, `assets/game.html` | 3 games; solo pass-and-play or synced over the call's data channel |
-| `ptt/*`, `ui/screens/Ptt*` | Walkie-talkie (simulated engine unless the private module is present) |
+| `ptt/*`, `ui/screens/Ptt*` | Walkie-talkie: VoiceClipPttEngine (hold-to-record clips over the pair room, ADR-016); simulated engine for host tests only |
 | `helper/KeywordBot.kt`, `ui/screens/Helper*` | Offline voice helper (whole-word keyword matching) |
 
 Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `app/src/test/` (7 classes), `functions/ring.test.js`, `tools/rules-test/rules.test.js`.
@@ -52,6 +52,7 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `
 | K8 | No TURN: symmetric-NAT / mobile-data calls can fail; TURN creds in BuildConfig can be extracted from the APK | OPEN: provider + short-lived credential issuer (operator decision) |
 | K9 | ML Kit phone-home vs RULES §1.7 | OPEN: keep, or ZXing-only decode (operator) |
 | K10 | Rules + function redeploy required: old `family_channel` clients cannot talk to new ones | OPEN: deploy, then re-pair both phones |
+| K12 | Voice clips have no push yet: a killed app hears them on next open (≤30 min) | OPEN (ADR-016 next step) |
 | K11 | Device matrix for ADR-015 (ring from every screen, killed-app ring, glare, no-answer, lost-peer end, game sync, pairing gate) | OPEN (operator) |
 
 ## Last gates (2026-09-24, this lane, cloud container with a local Android SDK)

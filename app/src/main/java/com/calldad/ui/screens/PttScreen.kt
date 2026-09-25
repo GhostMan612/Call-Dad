@@ -2,7 +2,7 @@
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
-// ui/screens/PttScreen.kt — Phase 6: engine-driven TX/RX visuals
+// ui/screens/PttScreen.kt — walkie talkie: hold to record, release to send
 // Location: app/src/main/java/com/calldad/ui/screens/PttScreen.kt
 //
 // Phase 1 dimensions preserved (320/280dp center button, 100dp Home).
@@ -10,6 +10,13 @@
 // finger that drifts off the button still releases the mic.
 package com.calldad.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -80,14 +87,29 @@ fun PttScreen(
 
     val statusLabel = when {
         state.isTransmitting -> "TALKING…"
-        state.isReceiving -> "DAD IS TALKING…"
+        state.isReceiving -> "LISTEN…"
+        state.justSent -> "SENT!"
         else -> "HOLD TO TALK"
     }
 
     val hintLabel = when {
         state.isTransmitting -> "Let go when you're done"
-        state.isReceiving -> "Wait for Dad to finish"
+        state.isReceiving -> "Listen!"
+        state.justSent -> "Dad will hear it right away"
         else -> "Press and hold the big button"
+    }
+
+    // The walkie talkie records a voice clip: it needs the microphone.
+    val context = LocalContext.current
+    val micLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     Box(modifier = modifier.fillMaxSize().background(background)) {
@@ -245,7 +267,7 @@ private fun PttCenterButton(
                     role = Role.Button
                     contentDescription = when {
                         isTransmitting -> "Talking. Let go to stop."
-                        isReceiving -> "Dad is talking. Please wait."
+                        isReceiving -> "Playing a message. Please wait."
                         else -> "Hold to talk to Dad"
                     }
                 },

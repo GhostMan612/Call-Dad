@@ -10,7 +10,7 @@ const {
 } = require("@firebase/rules-unit-testing");
 const {
   doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs,
-  Timestamp, serverTimestamp,
+  Timestamp, serverTimestamp, Bytes, addDoc,
 } = require("firebase/firestore");
 
 const DAD = "DADTEST0001";
@@ -132,4 +132,28 @@ test("users: token doc is owner-only", async () => {
   await assertSucceeds(setDoc(doc(db(KID), "users", KID), { fcmToken: "synthetic" }));
   await assertFails(getDoc(doc(db(EVE), "users", KID)));
   await assertFails(setDoc(doc(db(EVE), "users", KID), { fcmToken: "evil" }));
+});
+
+const clip = (from, size = 1000) => ({
+  from, audio: Bytes.fromUint8Array(new Uint8Array(size)), durationMs: 1200,
+  createdAt: serverTimestamp(),
+});
+
+test("ptt: members send, read and delete voice clips; outsiders cannot", async () => {
+  const kidClips = collection(db(KID), "calls", ROOM, "ptt");
+  const ref = await assertSucceeds(addDoc(kidClips, clip(KID)));
+  await assertSucceeds(getDocs(collection(db(DAD), "calls", ROOM, "ptt")));
+  await assertFails(getDocs(collection(db(EVE), "calls", ROOM, "ptt")));
+  await assertFails(addDoc(collection(db(EVE), "calls", ROOM, "ptt"), clip(EVE)));
+  await assertFails(deleteDoc(doc(db(EVE), "calls", ROOM, "ptt", ref.id)));
+  await assertSucceeds(deleteDoc(doc(db(DAD), "calls", ROOM, "ptt", ref.id)));
+});
+
+test("ptt: no spoofed sender, no oversized clip, no extra fields, no edits", async () => {
+  const kidClips = collection(db(KID), "calls", ROOM, "ptt");
+  await assertFails(addDoc(kidClips, clip(DAD)));
+  await assertFails(addDoc(kidClips, clip(KID, 250000)));
+  await assertFails(addDoc(kidClips, { ...clip(KID), note: "x" }));
+  const ref = await addDoc(kidClips, clip(KID));
+  await assertFails(updateDoc(ref, { durationMs: 1 }));
 });

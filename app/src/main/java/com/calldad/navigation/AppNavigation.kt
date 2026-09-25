@@ -30,6 +30,8 @@ import com.calldad.ui.screens.HomeScreen
 import com.calldad.ui.screens.PairingScreen
 import com.calldad.ui.screens.PttScreen
 import com.calldad.ui.screens.callViewModel
+import com.calldad.ui.screens.isLive
+import com.calldad.ui.screens.rememberPttViewModel
 
 private const val CALL_ROUTE = "${Routes.CALL}?mode={mode}"
 private const val INCOMING_CALL = "${Routes.CALL}?mode=incoming"
@@ -52,6 +54,12 @@ fun AppNavHost(
 ) {
     val callViewModel = callViewModel()
     val callState by callViewModel.state.collectAsStateWithLifecycle()
+
+    // Walkie-talkie session lives app-wide too: Dad's voice clips play on
+    // any screen, and a live video call owns the mic and speaker.
+    val pttViewModel = rememberPttViewModel()
+    val callLive = callState.isLive
+    LaunchedEffect(callLive) { pttViewModel.onCallStateChanged(callLive) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 

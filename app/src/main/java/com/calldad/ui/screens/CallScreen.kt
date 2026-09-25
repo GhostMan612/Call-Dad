@@ -156,12 +156,6 @@ fun CallScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // PTT interlock: WebRTC owns the mic during a call.
-    val pttViewModel: PttViewModel = rememberPttViewModel()
-    LaunchedEffect(state) {
-        pttViewModel.onCallStateChanged(state.isLive)
-    }
-
     // Any return to Idle after real activity follows home so neither side
     // strands on a dead screen. Initial Idle never triggers.
     var wasActive by remember { mutableStateOf(false) }

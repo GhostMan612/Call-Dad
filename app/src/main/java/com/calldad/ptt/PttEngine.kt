@@ -12,9 +12,9 @@ import kotlinx.coroutines.flow.Flow
  * Transport-agnostic PTT engine.
  *
  * Implementations:
- *   - SimulatedPttEngine  (default; loopback for QA and CI)
- *   - SovereignPttAdapter (production; wraps the private Sovereign Mantle
- *                          module when it is on the classpath)
+ *   - VoiceClipPttEngine (production; hold-to-record clips over the
+ *                         pair's private room, ADR-016)
+ *   - SimulatedPttEngine (loopback for host tests; no mic, no network)
  *
  * Threading: all methods are safe to call from the main thread. Implementations
  * are responsible for dispatching to whatever background executor they need.
