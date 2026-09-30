@@ -25,11 +25,13 @@ check has repeatedly been the thing that explained an "impossible" crash.
 ## 3. Hand back the operator commands
 ```powershell
 cd C:\Call-Dad
-.\gradlew clean assembleParentDebug assembleChildDebug --no-daemon
-Get-Item .\app\build\outputs\apk\parent\debug\app-parent-debug.apk, .\app\build\outputs\apk\child\debug\app-child-debug.apk | Select-Object Name, LastWriteTime, Length
+.\gradlew.bat clean assembleParentDebug assembleChildDebug --no-daemon --console=plain
 C:\android\sdk\platform-tools\adb.exe -s <PARENT_SERIAL> install -r .\app\build\outputs\apk\parent\debug\app-parent-debug.apk
 C:\android\sdk\platform-tools\adb.exe -s <CHILD_SERIAL>  install -r .\app\build\outputs\apk\child\debug\app-child-debug.apk
 ```
+(That block is for the OPERATOR to run. The agent does not execute it — RULES §1.5.
+The agent's own verification is `dumpsys` via the `device-evidence` tool.)
+
 PARENT = Moto G 2025 (ask the operator for its serial; it is a wireless ADB
 pairing and will drop). CHILD = BLU View 5 (ask the operator for its serial).
 

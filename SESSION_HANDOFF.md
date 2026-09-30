@@ -19,6 +19,40 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-30, tool-use correction — RULES §1.4a added)
+
+- **Operator correction, second one this contract.** A three-day plan was being
+  dominated by shell round-trips for things `read`/`grep`/`glob`/`edit` already do,
+  to the point the operator had to sit at the laptop watching it happen every 5–10
+  seconds. Root cause, and it was a *documentation* defect rather than a discipline
+  one: **no document in this repo said how to READ or EDIT a file.** They all listed
+  commands to RUN. An agent following the docs literally had no instruction that
+  shelling for a file read was wrong — and `opencode.json` had `bash: {"*": "allow"}`,
+  which permitted it by default. No rule, no signal, no chance.
+- **Fixed in three layers, because a rule in only one of them drifts:**
+  1. `RULES.md` §1.4a — hard rule with an explicit instead-of table (cat/type/
+     `Get-Content` → `read`; `Select-String`/rg/`Get-ChildItem` → `grep`/`glob`;
+     `Set-Content`/`Out-File` → `edit`/`write`), mandatory batching, and "gate ONCE at
+     the END of a phase, not per edit".
+  2. `opencode.json` — the read/search/edit commands are now `"deny"`, not merely
+     absent. The wildcard `"*": "allow"` is kept as the default but the specific
+     denies are what actually stop the habit. Existing build-boundary denies verified intact.
+  3. Propagation — `AGENTS.md` (tool rule now appears BEFORE the command list, which is
+     the order that matters on cold start), `CLAUDE.md`, the `calldad-conventions` skill,
+     `gate-runner` (told it is a phase-closing step, not a per-edit one), `/verify`,
+     `/sweep`, `/flash`, `CHECKPOINTS.md`, and `doc-drift-auditor` (now audits for
+     tool-use drift, so this is caught if it comes back).
+- **Removed the `| Select-Object -Last 5` idiom** from `AGENTS.md` and `CHECKPOINTS.md`.
+  That idiom is how the habit was taught: it tells an agent to reach for the shell to
+  inspect output. Operator runbooks in `/flash` keep their PowerShell — a human runs those.
+- **`ToolUseDisciplineTest`** (10 tests) pins both layers: the deny list, the presence and
+  position of the law, the absence of the pipe idiom, the skill/gate-runner statements,
+  and that the six read-only auditors still hold `bash: deny`. A rule that is only
+  written down is a rule that will drift; this makes it fail loudly instead.
+- **Confirmed not the cause:** the six read-only auditors already had `bash: deny`, so
+  subagent fan-out was never the leak. `gate-runner` was the only fleet agent with shell
+  access and is now constrained.
+
 ## Where we are (2026-09-30, Contract 10 — FIRST DEVICE-PROVEN CALL, both flavors installed)
 
 This supersedes the 2026-09-24 block below. Read this first; the older blocks are

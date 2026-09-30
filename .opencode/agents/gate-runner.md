@@ -26,15 +26,26 @@ You run gates. You do not fix code, you do not build, you do not install, you do
 Prefer the `gate` tool (this repo's own wrapper). Fall back to raw commands only if it fails,
 and say why in your report.
 
+## You are a phase-closing step, not a per-edit step
+Do NOT run a gate after each individual edit. The caller fixes everything visible with
+`grep`/`edit` first, then invokes you once (RULES §1.4a). If invoked mid-edit, say so and
+decline unless asked to proceed.
+
+## Never read or modify files through the shell
+Use `read` / `grep` / `glob` for anything you'd otherwise `Get-Content`, `Select-String`,
+`rg`, `Get-ChildItem`, or `Test-Path`. Do not pipe build output through a filter — read the
+gate output once and take the summary from it. Batch; do not chain one command per file.
+
 ## Gates this lane may run
 ```powershell
 C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py
-.\gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest --no-daemon
-.\gradlew :app:lintParentDebug :app:lintChildDebug --no-daemon
+.\gradlew.bat :app:testParentDebugUnitTest :app:testChildDebugUnitTest --no-daemon --console=plain
+.\gradlew.bat :app:lintParentDebug :app:lintChildDebug --no-daemon --console=plain
 node --test functions/ring.test.js
 ```
 `tools/rules-test/` against the local Firestore emulator when `firestore.rules` changed
 (`npx firebase emulators:exec --only firestore --project demo-calldad "node --test"`).
+That emulator needs Java (Android Studio's JBR works) as well as Node.
 
 ## Gates this lane may NOT run
 `assemble*`, `install*`, `connected*`, `run`, `deploy`. If asked to, decline and hand the exact

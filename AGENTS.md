@@ -37,12 +37,30 @@ Call-Dad/
 
 ## Key commands
 
+### READ, SEARCH, AND EDIT WITH THE DEDICATED TOOLS — NOT THE SHELL (RULES §1.4a)
+
+This is the first rule of every session, ahead of every command below.
+
+- Read a file → **`read`**
+- Search file contents → **`grep`**
+- Find files by name → **`glob`**
+- Change a file → **`edit`** (exact string) or **`write`** (whole file)
+- **Never** `cat` / `type` / `Get-Content` / `Select-String` / `findstr` / `rg` /
+  `Get-ChildItem` / `Test-Path` / `Set-Content` / `Out-File` via the shell. Those
+  are denied in `opencode.json`.
+- **Batch every lookup.** Issue independent reads/searches as one parallel batch, not
+  a sequential chain.
+- **Run the gate ONCE at the END of a phase, not after each edit.** Fix everything
+  visible first via `grep`/`edit`, then close the phase with one gate run.
+
 ### Native app gates (human builds/installs in Android Studio — NEVER assemble/install here)
+
+Run these ONCE, as the closing step of a phase:
 
 ```powershell
 # repo root. Flavored task names: the unflavored testDebugUnitTest/lintDebug do not exist.
-.\gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest --no-daemon 2>&1 | Select-Object -Last 5
-.\gradlew :app:lintParentDebug :app:lintChildDebug --no-daemon 2>&1 | Select-Object -Last 5
+.\gradlew.bat :app:testParentDebugUnitTest :app:testChildDebugUnitTest --no-daemon --console=plain
+.\gradlew.bat :app:lintParentDebug :app:lintChildDebug --no-daemon --console=plain
 ```
 
 ### Repo, function and rules gates (this lane may run)
@@ -52,6 +70,9 @@ C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py
 node --test functions/ring.test.js
 cd tools\rules-test; npm install; npx firebase emulators:exec --only firestore --project demo-calldad "node --test"
 ```
+
+Node gates need Node on PATH **and** Java for the emulator. If either is missing they
+are **SKIPPED, not failed** — say so; never carry a previous run's count forward.
 
 ### Operator deploy steps (console / CLI — never from this lane)
 

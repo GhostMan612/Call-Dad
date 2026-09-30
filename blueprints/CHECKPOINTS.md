@@ -3,7 +3,7 @@
 > No checklist tick without its gate passing. Evidence before status.
 
 - **G0 scaffold:** `C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py` exits 0 (tree + required docs + no secrets + no real-child-data strings). Evidence: pasted tail output.
-- **G1 skeleton:** `.\gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest` (≥1 test PASS) + `:app:lintParentDebug :app:lintChildDebug` (0 errors for touched modules). Evidence: pasted `Select-Object -Last 5` blocks. No `assemble*` claims.
+- **G1 skeleton:** `.\gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest` (≥1 test PASS) + `:app:lintParentDebug :app:lintChildDebug` (0 errors for touched modules). Evidence: the gate's own final summary block, pasted. No `assemble*` claims. (Evidence is the operator's paste or the agent's single end-of-phase gate run — never a re-run per edit; RULES §1.4a.)
 - **G2 voice (host):** signaling state-machine unit tests (Invite→Accept/Decline→End + replay/echo guards) + cipher round-trip (encrypt→decrypt, tamper→drop) + Opus encode/decode smoke. Evidence: test counts.
 - **G2-device:** human on Moto G: LAN ring <3s, intelligible voice ≥30s, hangup + redial. Evidence: human pasted `adb devices` + narrative (never claimed by this lane).
 - **G3 chat+remote:** receipt transitions (sent→delivered→read) unit-proven; idempotent ingest (duplicate→single); remote signaling via relay (human proof both networks).

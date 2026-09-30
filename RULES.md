@@ -45,6 +45,43 @@ C:\Program Files\Microsoft Visual Studio
 - No push unless operator explicitly says so.
 - Source: pathfinder `§1.3`, Atlas `§1.4`, Vision `§1.4`.
 
+### 1.4a Tool use — the shell is a LAST resort, not a default (HARD RULE)
+
+Added 2026-09-30 after three days of a plan being dominated by shell round-trips
+for things `read`/`grep`/`glob`/`edit` already do. This is the single biggest
+time sink in the repo's history. It is a hard rule because the failure mode is
+silent: shelling does not look wrong, it just burns a round trip and the
+operator's attention every 5–10 seconds for a file read.
+
+**NEVER use the shell to read, search, inspect, or edit files. Dedicated tools exist.**
+
+| Instead of | Use |
+|---|---|
+| `Get-Content`, `type`, `cat <file>` | **`read`** tool |
+| `Select-String`, `grep`, `findstr`, `rg`, `Get-ChildItem -Recurse` | **`grep`** tool (content) / **`glob`** tool (filenames) |
+| `Set-Content`, `>>`, `Out-File`, `-replace` | **`edit`** tool (exact string) or **`write`** tool (full file) |
+| `Test-Path` | **`glob`** tool, or just `read` it |
+| `git status` / `git diff` / `git log` to *read* | `git` is a legitimate shell use, but batch it — never one call per file |
+| Piping Gradle/npm output through `Select-String` | Run the gate, accept full output, read it once |
+
+**Batching is mandatory.** When a task needs many lookups, plan them and issue
+them as ONE batch of parallel tool calls. A sequential chain of single-purpose
+shell commands is the failure this section exists to prevent.
+
+**The shell is for:** running a gate (test / lint / verify / emulator / functions
+test / build), `git` mutations the operator ordered, `adb` read-only evidence, and
+`winget`/`npm -g` installs. It is **not** for reading or writing files.
+
+**Test/analyze once, at the very END of a phase — not per edit.** Do not run a
+gate after every single edit. Fix everything you can see, using `grep`/`edit`,
+then run the gate once as the phase's closing step. Interleaving one gate per
+edit is what turned a one-phase task into three days.
+
+Corollary: if you catch yourself shelling to look at a file you have already
+read, or to check whether an edit you just made landed, **stop and use `read`/`grep`.**
+
+- Source: operator correction 2026-09-30 (Contract 10/11, after the PTT phase).
+
 ### 1.5 BUILD BOUNDARY — HARD RULE
 - NEVER run: `assemble*`, `install*`, `connected*`, `flutter build/run`, emulator installs. The human builds + installs in Android Studio on Moto G 2025 / BLU View 5.
 - **Printing** an `assemble*` / `install*` command inside a runbook handed to the operator is permitted; **running** one is not. The `.opencode/commands/flash.md` command (`/flash`) is the sanctioned form.

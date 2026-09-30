@@ -20,10 +20,14 @@ require `file:line` evidence. After all return:
 
 1. **De-duplicate** — many findings will be the same root cause wearing different hats.
 2. **Re-verify** — before you write anything down, spot-check at least the top 3 findings
-   yourself in source. A subagent's claim is not evidence until you have seen the line.
+   yourself in source, using `read`/`grep` (never the shell). A subagent's claim is not
+   evidence until you have seen the line.
 3. **Rank** by blast radius, not by novelty: crash > data loss > kid-safety > stuck call >
    missing feature > smell.
 4. **Order the fix list** so each step is the smallest coherent unit with a host test beside it.
+5. **Plan the whole fix pass up front** and then work it with `edit`/`write` only. One gate
+   run at the END of the pass, not one per finding. Shelling out to read or re-check a file
+   between edits is the failure mode RULES §1.4a exists to stop.
 
 ## Output format
 ```

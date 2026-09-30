@@ -32,7 +32,12 @@ prose says?
 4. **Command coherence**: every command quoted in docs actually exists/runs — flavored Gradle
    task names, `tools/verify_project.py`, `node --test functions/ring.test.js`, rules-emulator
    invocation, and any `/slash-command` referenced by `AGENTS.md` (must exist in
-   `.opencode/commands/`).
+   `.opencode/commands/`). Also flag commands quoted with the `| Select-Object -Last N` filter
+   idiom, which encourages piping tool output and contradicts RULES §1.4a.
+5. **Tool-use drift**: no doc should tell a reader to `cat`/`type`/`Get-Content`/
+   `Select-String`/`rg`/`Get-ChildItem`/`Test-Path` a repo file, or to run a gate after
+   every edit. The correct instruction is `read`/`grep`/`glob`/`edit`, with the gate run
+   once at the end of a phase (RULES §1.4a). Report any doc that still says otherwise.
 5. **Architecture coherence**: the file map's description of a module matches the module. If
    `SignalingClient` is documented as static-room but the code builds pair-scoped rooms, that is
    a top finding — every future session will be misled.
