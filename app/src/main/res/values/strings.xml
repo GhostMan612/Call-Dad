@@ -6,4 +6,9 @@
     <string name="parent_peer_name">Dad</string>
     <string name="incoming_call_title">Incoming call</string>
     <string name="incoming_call_text">Tap to answer</string>
+
+    <!-- Shown app-wide (above the NavHost) while a voice clip from the paired
+         grown-up is playing, so a message heard on the Game or Home screen is
+         always attributable. -->
+    <string name="ptt_receiving_banner">%1$s is talking…</string>
 </resources>

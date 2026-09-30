@@ -108,18 +108,32 @@ class SignalingClient(
     }
 
     /**
-     * Fire-and-forget terminal write for teardown paths that cannot
-     * suspend (ViewModel cleared, process going away). Firestore queues
-     * the write locally and delivers it once online.
+     * Fire-and-forget terminal write for teardown paths that cannot suspend
+     * (ViewModel cleared, process going away). Firestore queues the write
+     * locally and delivers it once online.
+     *
+     * GENERATION-CHECKED. It used to take no `seq` and write ENDED
+     * unconditionally, so a ViewModel clearing for generation n could
+     * overwrite generation n+1's RINGING — cancelling a call the peer was
+     * actively ringing, for a generation this device never owned. That is
+     * the exact outcome ADR-015 says is impossible. Same transaction guard
+     * as [finishCall], just not awaited.
      */
-    fun finishCallDetached(callId: String, status: String) {
+    fun finishCallDetached(callId: String, seq: Int, status: String) {
         runCatching {
-            calls.document(callId).update(
-                mapOf(
-                    "status" to status,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            )
+            firestore.runTransaction(txOptions) { txn ->
+                val ref = calls.document(callId)
+                val snap = txn.get(ref)
+                val live = snap.exists() &&
+                    snap.getLong("seq")?.toInt() == seq &&
+                    snap.getString("status") in LIVE_STATUSES
+                if (live) {
+                    txn.update(ref, mapOf(
+                        "status" to status,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    ))
+                }
+            }
         }
     }
 

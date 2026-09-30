@@ -90,7 +90,7 @@
 - [ ] Human: fresh-install both flavors → pair both ways → strict one-caller test → hangup test (observer-guard confirmation)
 
 ## Contract 7 — Stale takeover + mutual pairing + debt (committed f52d9ea; takeover/heartbeat superseded by ADR-015)
-- [x] Heartbeat (120s batch: room updatedAt + pairings presence) + stale-CONNECTED takeover (20-min threshold + peer-unreachability guard) + hasPendingWrites guard
+- [ ] ~~Heartbeat (120s batch: room updatedAt + pairings presence) + stale-CONNECTED takeover (20-min threshold + peer-unreachability guard)~~ **NOT SHIPPED — removed by ADR-015:18 ("no busy/takeover logic any more").** No heartbeat writer exists anywhere in `app/src`. This line was ticked by mistake; leave it unticked. `hasPendingWrites` guards DO ship (see Contract 8).
 - [x] Mutual handshake (QR-derived nonce, presence docs, 30s peer wait, 1.5s hold) + pairings rules stanza
 - [x] CallStateTest rewritten (7-state fromDocument); CallDocumentTest deleted (model retired); deprecation suppressions + FID TODO
 - [x] ADR-014 (pairing) + LESSONS_LEARNED.md + CURRENT_STATE/CHECKLIST updated
@@ -113,7 +113,31 @@
 - [ ] Operator: `firebase deploy --only firestore:rules,functions` → install both flavors → re-pair both phones → device matrix K11 (CURRENT_STATE)
 
 ## Contract 9 — Real walkie-talkie (ADR-016, 2026-09-25)
-- [x] Device evidence: first call on new code CONNECTED both ways, clean hangup; PTT proven fake ("Sovereign Mantle not on classpath")
-- [x] VoiceClipPttEngine: hold-to-record AAC clips → pair room `ptt/` → auto-play on any screen, paused during calls, deleted after play
-- [x] Rules stanza + 2 emulator tests (17/17); mic permission asked on the walkie screen; "SENT!" confirmation
-- [ ] Operator: redeploy rules (`firebase deploy --only firestore:rules`) → install both → hold, talk, release on each phone; hear it on the other (also from Home/Game screens)
+- [ ] Device evidence **UNVERIFIABLE as recorded**: `versionCode` stayed 4 across ADR-015 and ADR-016, so the flashed build cannot be told apart via `dumpsys`. The only dated device artifact is an operator logcat of **2026-09-24**, which predates Contract 9. Corrected by the Contract 10 bump to `versionCode 5`. Re-flash before ticking.
+- [x] PTT proven fake before this contract ("Sovereign Mantle not on classpath" — the simulated engine reported success without sending)
+- [x] VoiceClipPttEngine: hold-to-record AAC clips → pair room `ptt/` → auto-play on any screen, paused during calls
+- [x] Rules stanza + 2 emulator tests (suite is 17; `pairings` delete at `firestore.rules:108-109` is still the one untested clause)
+- [ ] "Deleted after play" was FALSE until Contract 10: the clip was deleted after the first playback *attempt*, on the 30-minute staleness sweep, and on a ring interrupt. Deletion is now gated on `onCompletionListener`. A failed or interrupted clip is retained.
+- [ ] "SENT!" was FALSE until Contract 10: the Firestore `add()` was fire-and-forget, so a queued, offline, or rules-rejected write still flashed a green confirmation. It is now awaited.
+
+## Contract 10 — Full-repo sweep + fix (2026-09-25, `/sweep` @ `5bef86b`)
+Six read-only auditors (call core, media, Firestore rules, FCM wakeup, kid UX, doc drift) audited `5bef86b`; top findings were re-verified in source before anything was written. No build, install, or device run was claimed.
+- [x] PTT honesty: `add()` awaited; delete only on real completion; 30-min sweep no longer destroys unplayed clips; listener errors surface as `PttAudioState.Error`; `setOnInfoListener` handles `MAX_DURATION_REACHED` (was: silent death at 15s, then "Hold the button down"); bytes read before the size check; press/release race fixed with `isSending`
+- [x] `finishCallDetached(callId, seq, status)` now generation-checked (was: no `seq`, so a stale teardown cancelled a newer call)
+- [x] `sendLocalCandidate` carries the attempt + client reference (was: generation-*n* ICE landed in generation *n+1*)
+- [x] `onPairChanged` writes the room before resetting (was: silent local `Idle`, peer rang to its own timeout)
+- [x] Removed the first-launch system-Settings escape (`MainActivity` was the app's only `startActivity` — the only route out of the sandbox)
+- [x] "Connection lost. Reconnecting…" → "Connection lost…" (`RECONNECTING` is never assigned; no `restartIce` exists) + `RULES.md` §1.7a records reconnect as not implemented
+- [x] Raw `Throwable.message` no longer rendered on the child's Error card
+- [x] Speakerphone engaged on ICE connect, not on peer-connection creation (was: caller's phone switched to speaker for the whole 45s ring; a receive-only phone never switched)
+- [x] `VideoRenderer.removeSink` guarded — the `MediaStreamTrack has been disposed` twin of the hangup crash (Compose disposes the sink one frame after `pc.dispose()`); false "no-op" KDoc corrected
+- [x] `startRingback` refuses to steal a service-owned incoming ring (ownership fence bypassed)
+- [x] FGS identity wait raised 3s → 15s and "couldn't check" separated from "not for you" (a slow cold start used to drop a real ring, logged identically to a spoof)
+- [x] FCM `MessagePriority` checked; a downgraded message now posts a heads-up fallback instead of failing silently forever
+- [x] "Dad is talking" banner above the NavHost (a parent's voice used to play on the Game screen with no visual cue and no replay)
+- [x] `ParentGate` unlock is `remember`, not `rememberSaveable` (process death restored the child past the gate)
+- [x] Fleet self-audit: real device serials removed from `.opencode/commands/flash.md`; operator username removed from `opencode.json`
+- [x] Docs: heartbeat line unticked (never shipped), ADR-015 §6 amended, `RULES.md` §1.5/§1.5a/§1.5b/§1.7a corrected
+- [ ] **Gate G-C10 host** — `verify_project.py`, `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`, `:app:lintParentDebug :app:lintChildDebug`. NOT RUN YET.
+- [ ] **Operator** — `firebase deploy --only firestore:rules,functions`, build + flash `versionCode 5`, re-pair both phones, then the device matrix. Until the rules are deployed, every call and every PTT write is `PERMISSION_DENIED` and the child sees "Calling is not allowed right now."
+- [ ] **Still open (not fixed here, tracked in CURRENT_STATE):** `pairings/{uid}` is readable by any anonymous install; pairing mutuality is client-side only; no per-pair clip bound (quota + peer OOM); orphaned rooms and clips are undeletable after a reinstall; TURN unprovisioned (K8); 8 wakeup scenarios device-untested.

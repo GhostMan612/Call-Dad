@@ -87,6 +87,9 @@ class WebRTCClient(
     private var savedAudioMode: Int? = null
     private var savedSpeakerOn: Boolean? = null
 
+    /** Speaker is engaged on media connect, not on peer-connection creation. */
+    private var speakerEngaged = false
+
     private val remoteLock = Any()
     private var remoteDescriptionSet = false
     private val pendingRemoteCandidates = mutableListOf<RtcIceCandidate>()
@@ -145,6 +148,10 @@ class WebRTCClient(
             ?: error("createPeerConnection returned null")
         peerConnection = pc
 
+        // Save the audio route only. The speaker is NOT forced on here: this
+        // runs before any SDP exists, so the caller's phone would switch to
+        // speaker for the whole 45s ring and a receive-only phone would never
+        // switch at all. Speaker is engaged on media connect instead.
         enterCallAudioMode()
         createGameDataChannel(pc)
         attachLocalTracks(f, pc)
@@ -155,12 +162,20 @@ class WebRTCClient(
 
     /**
      * Idempotent teardown. Order matters (the hangup SIGSEGV):
-     *  1. peer connection dispose — disposes its transceivers, and with them
-     *     the Java wrapper of the remote track, detaching every renderer
-     *     sink cleanly. A later removeSink on that track is a no-op.
+     *  1. peer connection dispose.
      *  2. local tracks/sources/capturer, each via its Java dispose().
      *  3. factory last.
      * The shared EglBase is NOT released here.
+     *
+     * CORRECTION (was a false safety claim): this KDoc used to assert that
+     * pc.dispose() disposes the Java wrapper of the REMOTE track, so a later
+     * removeSink on it was "a no-op". It does not. Upstream
+     * PeerConnection.dispose() only walks its own Java senders/receivers/
+     * transceivers lists, and this app never calls getReceivers() or
+     * getTransceivers(), so the remote track's Java object survives and
+     * VideoRenderer's removeSink stays a LIVE native call against a peer
+     * connection that has been freed. VideoRenderer guards that call now.
+     * Do not restore the old claim.
      */
     fun dispose() {
         if (disposed) return
@@ -335,8 +350,22 @@ class WebRTCClient(
     private fun enterCallAudioMode() {
         savedAudioMode = audioManager.mode
         savedSpeakerOn = audioManager.isSpeakerphoneOn
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = true
+    }
+
+    /**
+     * Engaged when media actually connects, not when the peer connection is
+     * built. Until then the ring and the ringback stay on the default route
+     * so the caller can hear the other phone ringing normally.
+     */
+    @Suppress("DEPRECATION")
+    private fun enableSpeakerphone() {
+        if (speakerEngaged) return
+        speakerEngaged = true
+        runCatching {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isSpeakerphoneOn = true
+        }
+        WebRtcLog.transition("Speakerphone enabled")
     }
 
     @Suppress("DEPRECATION")
@@ -534,6 +563,7 @@ class WebRTCClient(
                 disconnectionDebounceJob = null
                 _iceEverConnected.value = true
                 _connectionHealth.value = ConnectionHealth.HEALTHY
+                enableSpeakerphone()
             }
             PeerConnection.IceConnectionState.DISCONNECTED -> {
                 if (disconnectionDebounceJob?.isActive == true) return

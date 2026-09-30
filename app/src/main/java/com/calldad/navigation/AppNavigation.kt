@@ -6,13 +6,24 @@
 // Location: app/src/main/java/com/calldad/navigation/AppNavigation.kt
 package com.calldad.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -21,6 +32,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.calldad.BuildConfig
+import com.calldad.R
 import com.calldad.ui.components.ParentGate
 import com.calldad.ui.screens.CallScreen
 import com.calldad.ui.screens.CallState
@@ -52,12 +65,16 @@ fun AppNavHost(
     navController: NavHostController = rememberNavController(),
     incomingCallRequest: Int = 0
 ) {
+    // The "Dad is talking" banner must be the OUTERMOST composable, above the
+    // NavHost, or the Game screen's full-screen WebView covers it.
+    Box(modifier) {
     val callViewModel = callViewModel()
     val callState by callViewModel.state.collectAsStateWithLifecycle()
 
     // Walkie-talkie session lives app-wide too: Dad's voice clips play on
     // any screen, and a live video call owns the mic and speaker.
     val pttViewModel = rememberPttViewModel()
+    val pttState by pttViewModel.state.collectAsStateWithLifecycle()
     val callLive = callState.isLive
     LaunchedEffect(callLive) { pttViewModel.onCallStateChanged(callLive) }
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -80,7 +97,7 @@ fun AppNavHost(
     NavHost(
         navController = navController,
         startDestination = Routes.HOME,
-        modifier = modifier
+        modifier = Modifier.fillMaxSize()
     ) {
         composable(Routes.HOME) {
             HomeScreen(
@@ -122,7 +139,11 @@ fun AppNavHost(
             HelperScreen(onBackHome = navController::returnHome)
         }
         composable(Routes.PAIRING) {
-            var unlocked by rememberSaveable { mutableStateOf(false) }
+            // `rememberSaveable`, not `remember`: process death while on the
+            // pairing destination used to restore the child straight INTO
+            // PairingScreen with the grown-ups gate already passed. The gate
+            // must never survive a process death.
+            var unlocked by remember { mutableStateOf(false) }
             if (unlocked) {
                 PairingScreen(onPaired = { navController.returnHome() })
             } else {
@@ -132,6 +153,39 @@ fun AppNavHost(
                 )
             }
         }
+    }
+
+    // A parent's voice arriving on the Game screen, with no visual cue and no
+    // way to replay it (the clip is deleted after playing), is a message the
+    // child cannot attribute and cannot recover. One unmissable banner, on
+    // every screen, including Game.
+    if (pttState.isReceiving) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter),
+            color = MaterialTheme.colorScheme.primary,
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.ptt_receiving_banner,
+                    stringResource(
+                        if (BuildConfig.APP_THEME == "blue") {
+                            R.string.child_peer_name
+                        } else {
+                            R.string.parent_peer_name
+                        }
+                    )
+                ),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 20.dp)
+            )
+        }
+    }
     }
 }
 

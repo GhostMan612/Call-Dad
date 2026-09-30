@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 
 data class PttUiState(
     val isTransmitting: Boolean = false,
+    val isSending: Boolean = false,
     val isReceiving: Boolean = false,
     val justSent: Boolean = false,
     val lastError: String? = null
@@ -89,7 +90,7 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
     // -------- gesture handlers --------
 
     fun onPress() {
-        if (_state.value.isTransmitting) return
+        if (_state.value.isTransmitting || _state.value.isSending) return
 
         val focusFailure = audioManager.requestFocus()
         if (focusFailure != null) {
@@ -116,17 +117,22 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
     fun onRelease() {
         if (!_state.value.isTransmitting) return
         audioManager.vibrateRelease()
-        _state.value = _state.value.copy(isTransmitting = false)
+
+        // isTransmitting clears only AFTER the send resolves, so a fast
+        // press-release-press cannot record nothing and then ship the PREVIOUS
+        // clip under the new press's confirmation.
+        _state.value = _state.value.copy(isSending = true)
 
         viewModelScope.launch {
             val result = engine.stopTransmitting()
             audioManager.abandonFocus()
             val f = result.exceptionOrNull() as? PttFailure
-            _state.value = if (result.isSuccess) {
-                _state.value.copy(justSent = true, lastError = null)
-            } else {
-                _state.value.copy(lastError = f?.userMessage ?: "Couldn't send. Try again.")
-            }
+            _state.value = _state.value.copy(
+                isTransmitting = false,
+                isSending = false,
+                justSent = result.isSuccess,
+                lastError = if (result.isSuccess) null else f?.userMessage ?: "Couldn't send. Try again."
+            )
             if (result.isSuccess) {
                 delay(SENT_FLASH_MS)
                 _state.value = _state.value.copy(justSent = false)

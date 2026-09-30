@@ -80,9 +80,25 @@ object CallAudioManager {
         }.onFailure { WebRtcLog.transition("Vibration start failed") }
     }
 
+    /**
+     * Caller-side "calling…" tone.
+     *
+     * Refuses to start while the BACKGROUND SERVICE owns an incoming ring.
+     * It used to call stopRingingLocked() unconditionally, bypassing the
+     * ownership fence that stopRinging(owner) enforces: a child who opened
+     * the app mid-ring and tapped the big button silently replaced Dad's
+     * incoming ring with a "calling…" tone. A 6-year-old then hears
+     * "calling…" instead of "Dad is calling!".
+     *
+     * @return true if the tone started, false if an incoming ring owns the audio.
+     */
     @Synchronized
-    fun startRingback() {
-        if (ringback != null) return
+    fun startRingback(): Boolean {
+        if (ringback != null) return true
+        if (ringOwner == OWNER_SERVICE) {
+            WebRtcLog.transition("Ringback suppressed: incoming ring owns audio")
+            return false
+        }
         stopRingingLocked()
         runCatching {
             ringback = ToneGenerator(AudioManager.STREAM_VOICE_CALL, RINGBACK_VOLUME).also {
@@ -92,6 +108,7 @@ object CallAudioManager {
             ringback = null
             WebRtcLog.transition("Ringback start failed")
         }
+        return ringback != null
     }
 
     @Synchronized

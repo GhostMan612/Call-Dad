@@ -84,13 +84,43 @@ class CallForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private suspend fun validateAndWatch(callId: String, seq: Int) {
-        val ownUid = FirebaseAuth.getInstance().currentUser?.uid
-        val peerUid = withTimeoutOrNull(3_000) {
-            SecurePeerStore(applicationContext).observePeerUid().first()
+    /**
+     * "We could not check" must not be treated as "this is not for you."
+     * A 3s DataStore read on a cold process competes with FirebaseApp init and
+     * auth restore in the same window, and the timeout logged identically to a
+     * spoof — so one slow cold start silently dropped a real ring. We are
+     * already a foreground service here; there is no reason to bail in 3s.
+     */
+    private suspend fun waitForAuthUid(): String? = withTimeoutOrNull(AUTH_WAIT_MS) {
+        var uid = FirebaseAuth.getInstance().currentUser?.uid
+        while (uid == null) {
+            delay(200)
+            uid = FirebaseAuth.getInstance().currentUser?.uid
         }
-        val pairedRoom = if (ownUid != null && peerUid != null) CallRoom.idFor(ownUid, peerUid) else null
+        uid
+    }
+
+    private suspend fun waitForPeerUid(): String? = withTimeoutOrNull(AUTH_WAIT_MS) {
+        SecurePeerStore(applicationContext).observePeerUid().first { it != null }
+    }
+
+    private suspend fun validateAndWatch(callId: String, seq: Int) {
+        // A 3s DataStore read on a cold process is not generous: it competes
+        // with FirebaseApp init and auth restore in the same window, and a
+        // timeout was indistinguishable from a spoof in the log — so a single
+        // slow cold start silently dropped a real ring. We are already a
+        // foreground service here; there is no reason to bail in 3 seconds.
+        val ownUid = waitForAuthUid()
+        val peerUid = waitForPeerUid()
+        if (ownUid == null || peerUid == null) {
+            WebRtcLog.transition("FGS ring dropped: identity unresolved")
+            shutDown()
+            return
+        }
+        val pairedRoom = CallRoom.idFor(ownUid, peerUid)
         if (pairedRoom == null || pairedRoom != callId) {
+            // Now this IS a genuine mismatch: we know who we are and who we
+            // are paired with, and the room is not ours.
             WebRtcLog.transition("FGS ring for unpaired room dropped")
             shutDown()
             return
@@ -165,6 +195,7 @@ class CallForegroundService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val REQUEST_CODE_FSI = 2001
         private const val RING_TIMEOUT_MS = 60_000L
+        private const val AUTH_WAIT_MS = 15_000L
 
         fun startIncomingCall(context: Context, callId: String, seq: Int) {
             val intent = Intent(context, CallForegroundService::class.java)

@@ -8,13 +8,10 @@ package com.calldad
 
 import android.Manifest
 import android.app.NotificationManager
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -31,6 +28,7 @@ import com.calldad.fcm.AppVisibility
 import com.calldad.fcm.CallForegroundService
 import com.calldad.navigation.AppNavHost
 import com.calldad.ui.theme.CallDadTheme
+import com.calldad.webrtc.WebRtcLog
 
 /**
  * Single-activity host. All UI is Compose; all navigation is Navigation-Compose.
@@ -82,7 +80,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun consumeIncomingIntent(intent: Intent?) {
-        if (intent?.action == CallForegroundService.ACTION_INCOMING_CALL) {
+        // ACTION_RING_NOTIFICATION is the heads-up fallback posted by
+        // CallMessagingService when the foreground-service path is
+        // unavailable (downgraded priority, or the platform refusing the
+        // start). It must route to the ring screen exactly like the real
+        // notification does, or the kid taps "Incoming call" and lands on
+        // Home with no explanation.
+        if (intent?.action == CallForegroundService.ACTION_INCOMING_CALL ||
+            intent?.action == ACTION_RING_FALLBACK
+        ) {
             incomingCallRequest += 1
         }
     }
@@ -102,11 +108,16 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Full-screen intents can be denied on Android 14+. Without them a
-     * ring still shows as a heads-up notification, it just won't wake a
-     * locked screen. Asked ONCE per install (it used to open Settings on
-     * every launch, dropping the kid there), and never crashes if the
-     * settings screen is missing.
+     * Full-screen intents can be denied on Android 14+. Without them a ring
+     * still shows as a heads-up notification, it just won't wake a locked
+     * screen — so the app degrades gracefully and there is nothing to fix.
+     *
+     * This used to open system Settings on first launch, which was the ONLY
+     * startActivity in the entire app and therefore the only route out of the
+     * sandbox: a 6-year-old tapping the launcher icon was dropped into system
+     * Settings with no gate and no warning. It is deliberately NOT navigated
+     * to. A grown-up who wants the FSI permission sets it from the app's
+     * notification settings; the kid never needs to leave the app.
      */
     private fun checkFullScreenIntentAccessOnce() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
@@ -115,18 +126,14 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         if (prefs.getBoolean(KEY_FSI_ASKED, false)) return
         prefs.edit().putBoolean(KEY_FSI_ASKED, true).apply()
-        try {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
-                    .setData(Uri.parse("package:$packageName"))
-            )
-        } catch (e: ActivityNotFoundException) {
-            Unit
-        }
+        WebRtcLog.transition("Full-screen intent not granted; using heads-up")
     }
 
     private companion object {
         const val PREFS = "app_prefs"
         const val KEY_FSI_ASKED = "fsi_asked"
+
+        /** Mirrors CallMessagingService's fallback notification action. */
+        const val ACTION_RING_FALLBACK = "com.calldad.RING_NOTIFICATION"
     }
 }

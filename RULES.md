@@ -47,10 +47,21 @@ C:\Program Files\Microsoft Visual Studio
 
 ### 1.5 BUILD BOUNDARY — HARD RULE
 - NEVER run: `assemble*`, `install*`, `connected*`, `flutter build/run`, emulator installs. The human builds + installs in Android Studio on Moto G 2025 / BLU View 5.
+- **Printing** an `assemble*` / `install*` command inside a runbook handed to the operator is permitted; **running** one is not. The `.opencode/commands/flash.md` command (`/flash`) is the sanctioned form.
 - Your lane ends at source correctness: `./gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest :app:lintParentDebug :app:lintChildDebug` (run from the repo root; the parent/child flavors mean the unflavored `testDebugUnitTest`/`lintDebug` tasks do not exist), `tools/verify_project.py`, `node --test functions/ring.test.js`, the Firestore rules tests in `tools/rules-test/` (local emulator), `adb devices` / read-only `adb shell getprop`. Compiling via the unit-test tasks is source verification, not a build claim.
-- Device/instrumented suites under `app/src/androidTest/` exist for the human's manual runs — do NOT execute them here unless explicitly asked.
+- **The two `node` gates need `node` on PATH (plus Java, for the Firestore emulator).** Where `node` is absent, `node --test functions/ring.test.js` and the `tools/rules-test/` emulator are **SKIPPED, not failed**, and a previous run's count must never be carried forward as if it were this session's.
+- There is **no `androidTest/` source set** in this repo. Every device result comes from a human run in Android Studio on Moto G 2025 / BLU View 5. If an instrumented suite is ever added it is the human's to run.
 - Debug device failures from the human's pasted output — never by rebuilding locally.
+- **Every terminal write is generation-checked.** A teardown that cannot see the current `seq` is a bug: it can cancel a newer call the peer is ringing. `SignalingClient.finishCall` and `finishCallDetached` both transact on `seq`; keep it that way.
 - Source: Vision `§1.5`, Atlas `§1.6`, Recovery `§1.5`.
+
+### 1.5a Machine-enforced boundaries (`opencode.json`, repo root)
+`opencode.json` is the enforcement layer for §1.1, §1.4 and §1.5. It denies `firebase*deploy*`, `git*add*-A*|--all*|-u*`, `adb*uninstall*|push*|root*` and `adb*shell*pm*`; it gates `gradlew*assemble*|install*|connected*|clean*` and `git*add*|commit*|push*` behind `ask`; and it allowlists the writable paths. A denied command is not a suggestion to retry — report it and stop.
+
+**Never write a real device serial, the operator's username, or any other machine identity into a committable file.** Ask for the serial at run time; `adb devices -l` has it.
+
+### 1.5b The agent fleet (`.opencode/`)
+Read-only auditors (none may edit): `call-core-auditor`, `webrtc-media`, `firestore-rules-auditor`, `fcm-wakeup-auditor`, `doc-drift-auditor`, `kid-ux-guardian`, `native-dev`, `comms-porter`. Execution: `gate-runner`. Records: `handoff-writer`. Tools: `gate`, `device-evidence`, `contract-diff`. Commands: `/verify`, `/probe`, `/smoke`, `/sweep`, `/flash`, `/evidence`. A subagent's claim is not evidence: re-read the line before acting on it.
 
 ### 1.6 Nothing outside the project without approval
 Do not install software, modify system settings, or write outside `C:\Call-Dad` / `C:\venv-hub\call-dad\` / approved tool homes without asking first.
@@ -59,7 +70,7 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
 - Allowlist-only contacts. v0.1 allowlist = Dad. No dial-pad to arbitrary numbers, no open discovery, no `CallRoute` broadcast — `Direct` only.
 - Adding a contact requires parent approval (adapted mantle `DualKeyGate` pattern: biometric/parent-gate, never kid-self-service).
 - No accounts, no analytics, no ads, no third-party SDKs phoning home in v0.1 (each new dep needs ADR justification).
-- Big-button UX: one giant Call Dad, one-tap hangup, auto-reconnect on LAN. Kid can never get stuck or lost.
+- Big-button UX: one giant Call Dad, one-tap hangup. **Reconnect is NOT implemented** — on peer loss the call ends and the kid is returned home (§1.7a). Kid can never get stuck or lost.
 - Chat/PTT/photo events that would sync to any hub are redacted by default (mantle `hub_sync_bridge` posture: chat/PTT/telemetry/biometric never leave device without explicit parent opt-in).
 
 ### 1.7a Recorded architecture deviations (operator to ratify)
@@ -68,6 +79,8 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
 - **Media + crypto:** WebRTC (Stream fork) with DTLS-SRTP end-to-end media encryption (ADR-005) replaces the custom ECDH + AES-GCM frame cipher (§2.5).
 - **Call flow:** the 7-state machine in `CallState.kt` (§2.6's Invite→Accept/Decline→End, extended with NoAnswer/Error).
 - **Allowlist:** exactly one paired contact per phone, via a pair-scoped Firestore room that only those two UIDs can touch; pairing is parent-gated and mutual (ADR-015).
+- **Reconnect: NOT implemented.** `ConnectionHealth.RECONNECTING` is declared in `ConnectionState.kt` but never assigned, and `restartIce()` appears nowhere in the tree. `CallScreen` renders "Connection lost…" (corrected 2026-09-25; it used to say "Reconnecting…") and `CallViewModel` ends the call after `LOST_GRACE_MS`. §1.7's auto-reconnect promise is **void** until an ICE-restart path exists. Do not restore the word "Reconnecting" without one.
+- **PTT leaves the device.** §1.7's last bullet is not satisfied by the walkie-talkie as shipped: clips are written to the pair's Firestore room (`ADR-016`) with **no parent opt-in, no setting, and no disclosure**. A parent must be told this before the feature is relied on. Clips are deleted only after they actually play to completion; a clip that fails to decode, is interrupted by a ring, or cannot be deleted is retained rather than silently destroyed.
 - **Open:** ML Kit (Play Services barcode) sends usage metrics to Google — keep, or decode with ZXing only (operator).
 
 ---

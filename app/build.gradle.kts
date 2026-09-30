@@ -18,8 +18,13 @@ android {
         minSdk = 26
         targetSdk = 35
         // versionCode 4: build fingerprint (lane-checkable via dumpsys).
-        versionCode = 4
-        versionName = "0.2.1"
+        // versionCode 5: Contract 9 follow-up. Bumps past 4/0.2.1 because that
+        // fingerprint was reused across ADR-015 and ADR-016, which made every
+        // device claim unattributable via dumpsys. 5 is the fingerprint that
+        // proves the PTT-honesty, stale-teardown, speaker-timing and
+        // no-Settings-escape fixes are on the phone.
+        versionCode = 5
+        versionName = "0.2.2"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

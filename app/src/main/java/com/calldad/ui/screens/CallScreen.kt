@@ -515,8 +515,13 @@ private fun InCallContent(
         if (health == ConnectionHealth.LOST ||
             health == ConnectionHealth.RECONNECTING
         ) {
+            // Do not promise a reconnect. There is no restartIce() anywhere
+            // in this app and ConnectionHealth.RECONNECTING is never assigned,
+            // so "Reconnecting…" was a 20-second lie before the call ends
+            // anyway. RULES §1.7's "auto-reconnect on LAN" is void (see
+            // RULES §1.7a); CallViewModel ends the call on peer loss.
             Text(
-                text = "Connection lost. Reconnecting…",
+                text = "Connection lost…",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.9f),
                 modifier = Modifier

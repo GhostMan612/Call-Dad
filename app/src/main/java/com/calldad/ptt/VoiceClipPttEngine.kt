@@ -44,9 +44,19 @@ import kotlin.coroutines.resume
  * short AAC clip is recorded; on release it is written to
  * `calls/{roomId}/ptt/{auto}` (only the two paired UIDs can touch it, see
  * firestore.rules). The other phone plays clips in arrival order on ANY
- * screen, holds them while a video call owns the audio, and deletes each
- * clip once played. Clips sent while the other phone is offline play when
- * it comes back (up to [MAX_CLIP_AGE_MS]).
+ * screen, holds them while a video call owns the audio, and deletes a clip
+ * ONLY after it has actually played to completion. A clip that fails to
+ * decode, or that is interrupted by a ring, is kept so the message is not
+ * silently lost. Clips sent while the other phone is offline play when it
+ * comes back; there is no age-based destruction.
+ *
+ * Honesty rules enforced here (ADR-016 follow-up):
+ *  - the upload is AWAITED, so "SENT!" cannot be shown for a write that is
+ *    still queued, offline, or rejected by the rules;
+ *  - deletion happens only on onCompletionListener, never on a failure or an
+ *    interrupt;
+ *  - the listener's own errors surface as PttAudioState.Error rather than
+ *    leaving a silent walkie-talkie.
  *
  * No new dependencies: MediaRecorder / MediaPlayer + Firestore bytes.
  */
@@ -75,6 +85,15 @@ class VoiceClipPttEngine(
     private var recorder: MediaRecorder? = null
     private var recordFile: File? = null
     private var recordStartedAt = 0L
+
+    /**
+     * MediaRecorder stops itself at MAX_CLIP_MS and only says so through
+     * this listener. Without it the child talks into a dead mic, watches
+     * "TALKING" for the rest of the hold, and is then told they held the
+     * button wrong. Set by the engine, cleared by stopTransmitting.
+     */
+    @Volatile
+    private var recordLimitReached = false
 
     private data class Clip(val id: String, val bytes: ByteArray)
 
@@ -126,6 +145,12 @@ class VoiceClipPttEngine(
             r.setAudioSamplingRate(SAMPLE_RATE)
             r.setAudioEncodingBitRate(BIT_RATE)
             r.setMaxDuration(MAX_CLIP_MS)
+            r.setOnInfoListener { _, what, _ ->
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
+                    recordLimitReached = true
+                    WebRtcLog.transition("PTT clip reached max duration")
+                }
+            }
             r.setOutputFile(file.absolutePath)
             r.prepare()
             r.start()
@@ -144,7 +169,12 @@ class VoiceClipPttEngine(
         val r = recorder ?: return Result.success(Unit)
         val file = recordFile
         val durationMs = System.currentTimeMillis() - recordStartedAt
-        val stopped = runCatching { r.stop() }.isSuccess
+        // A clip that hit the cap stopped itself, so stop() throws. That is
+        // NOT a failed recording — the bytes are on disk and the child did
+        // nothing wrong. Only treat a throw as fatal when the cap was not hit.
+        val capped = recordLimitReached
+        val stopped = capped || runCatching { r.stop() }.isSuccess
+        recordLimitReached = false
         releaseRecorder()
         if (!stopped || file == null || durationMs < MIN_CLIP_MS) {
             file?.delete()
@@ -152,12 +182,21 @@ class VoiceClipPttEngine(
                 PttFailure(PttFailureKind.UNKNOWN, "Hold the button down while you talk.")
             )
         }
-        val p = pair ?: return Result.failure(
-            PttFailure(PttFailureKind.TRANSPORT_ERROR, "Pair the phones first.")
-        )
+        val p = pair ?: run {
+            file.delete()
+            return Result.failure(
+                PttFailure(PttFailureKind.TRANSPORT_ERROR, "Pair the phones first.")
+            )
+        }
         return runCatching {
-            val bytes = withContext(Dispatchers.IO) { file.readBytes().also { file.delete() } }
+            // Read the bytes BEFORE any failure path can delete the file, so
+            // a too-large clip does not destroy the recording first.
+            val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+            file.delete()
             if (bytes.size > MAX_CLIP_BYTES) error("clip too large")
+            // AWAITED. Without this the Task is discarded, runCatching only
+            // ever sees the synchronous path, and the child is shown "SENT!"
+            // for a write that is queued, offline, or rejected by the rules.
             firestore.collection("calls").document(p.roomId).collection("ptt").add(
                 mapOf(
                     "from" to p.ownUid,
@@ -165,7 +204,7 @@ class VoiceClipPttEngine(
                     "durationMs" to durationMs.coerceAtMost(MAX_CLIP_MS.toLong()),
                     "createdAt" to FieldValue.serverTimestamp()
                 )
-            )
+            ).await()
             WebRtcLog.transition("PTT clip sent")
             Unit
         }.recoverCatching {
@@ -189,7 +228,13 @@ class VoiceClipPttEngine(
         registration = firestore.collection("calls").document(p.roomId).collection("ptt")
             .orderBy("createdAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snap, err ->
-                if (err != null || snap == null) return@addSnapshotListener
+                if (err != null || snap == null) {
+                    // A dead walkie-talkie must not be indistinguishable from
+                    // a quiet parent. Surface it; silence is the real defect.
+                    WebRtcLog.transition("PTT clip listener failed")
+                    _incoming.value = PttAudioState.Error("Couldn't get messages. Try again.")
+                    return@addSnapshotListener
+                }
                 if (snap.metadata.isFromCache) return@addSnapshotListener
                 for (change in snap.documentChanges) {
                     if (change.type != DocumentChange.Type.ADDED) continue
@@ -197,14 +242,15 @@ class VoiceClipPttEngine(
                     if (doc.metadata.hasPendingWrites()) continue
                     if (doc.getString("from") != p.peerUid) continue
                     if (!seenClips.add(doc.id)) continue
-                    val createdMs = doc.getTimestamp("createdAt")?.toDate()?.time
-                    val fresh = createdMs == null ||
-                        System.currentTimeMillis() - createdMs <= MAX_CLIP_AGE_MS
                     val bytes = doc.getBlob("audio")?.toBytes()
-                    if (fresh && bytes != null) {
+                    if (bytes != null) {
+                        // Age is NOT a reason to destroy a message the child
+                        // was told was sent. Play it; the sender's retention
+                        // decision is the sender's, not ours.
                         playQueue.trySend(Clip(doc.id, bytes))
                     } else {
-                        deleteClip(p.roomId, doc.id)
+                        // Unreadable payload: do not delete, just skip.
+                        WebRtcLog.transition("PTT clip had no audio")
                     }
                 }
             }
@@ -214,6 +260,11 @@ class VoiceClipPttEngine(
         runCatching {
             firestore.collection("calls").document(roomId)
                 .collection("ptt").document(clipId).delete()
+        }.onFailure {
+            // Leaving the id in seenClips orphans the doc forever. Drop it so
+            // a later snapshot can retry the delete.
+            seenClips.remove(clipId)
+            WebRtcLog.transition("PTT clip delete failed")
         }
     }
 
@@ -223,18 +274,29 @@ class VoiceClipPttEngine(
             while (recorder != null) delay(200)
             val roomId = pair?.roomId
             _incoming.value = PttAudioState.Receiving
-            runCatching { play(clip.bytes) }
-                .onFailure { WebRtcLog.transition("PTT clip playback failed") }
+            // play() reports true ONLY on onCompletionListener. A failure, a
+            // decode error, or an interrupt all return false, and the clip is
+            // kept so the message is not silently eaten.
+            val played = runCatching { play(clip.bytes) }.getOrElse {
+                WebRtcLog.transition("PTT clip playback failed")
+                false
+            }
             _incoming.value = PttAudioState.Idle
-            if (roomId != null) deleteClip(roomId, clip.id)
+            if (played) {
+                if (roomId != null) deleteClip(roomId, clip.id)
+            } else {
+                _incoming.value = PttAudioState.Error("That message didn't play. Ask again?")
+            }
         }
     }
 
-    private suspend fun play(bytes: ByteArray) {
+    /** @return true only when the clip played to completion. */
+    private suspend fun play(bytes: ByteArray): Boolean {
         val file = File(appContext.cacheDir, "ptt_in.m4a")
         withContext(Dispatchers.IO) { file.writeBytes(bytes) }
         val mp = MediaPlayer()
         player = mp
+        var completed = false
         try {
             mp.setAudioAttributes(
                 AudioAttributes.Builder()
@@ -245,12 +307,15 @@ class VoiceClipPttEngine(
             mp.setDataSource(file.absolutePath)
             mp.prepare()
             suspendCancellableCoroutine { cont ->
-                val finish = { if (cont.isActive) cont.resume(Unit) }
-                mp.setOnCompletionListener { finish() }
-                mp.setOnErrorListener { _, _, _ -> finish(); true }
+                val finish = { ok: Boolean ->
+                    if (ok) completed = true
+                    if (cont.isActive) cont.resume(Unit)
+                }
+                mp.setOnCompletionListener { finish(true) }
+                mp.setOnErrorListener { _, _, _ -> finish(false); true }
                 interruptPlayback = {
                     runCatching { mp.stop() }
-                    finish()
+                    finish(false)
                 }
                 cont.invokeOnCancellation { runCatching { mp.stop() } }
                 mp.start()
@@ -262,6 +327,7 @@ class VoiceClipPttEngine(
             runCatching { mp.release() }
             file.delete()
         }
+        return completed
     }
 
     private fun stopPlayer() {
@@ -287,6 +353,5 @@ class VoiceClipPttEngine(
         const val MIN_CLIP_MS = 400L
         const val MAX_CLIP_MS = 15_000
         const val MAX_CLIP_BYTES = 200_000
-        const val MAX_CLIP_AGE_MS = 30 * 60_000L
     }
 }

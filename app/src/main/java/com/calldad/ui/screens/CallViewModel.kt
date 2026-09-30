@@ -328,7 +328,7 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         pair?.let { p ->
             if (s is CallState.Connected ||
                 (s is CallState.Ringing && !s.isIncoming)) {
-                signaling.finishCallDetached(p.roomId, "ENDED")
+                signaling.finishCallDetached(p.roomId, currentSeq, "ENDED")
             }
         }
         teardownMedia()
@@ -341,6 +341,15 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private fun onPairChanged(p: FamilyPair?) {
         roomJob?.cancel()
         if (_state.value.isLive) {
+            // Tell the room we are leaving. This used to go straight to Idle
+            // and write nothing, so the peer kept ringing to its own no-answer
+            // timeout with no idea what happened, while any startCall still in
+            // flight wrote a teardown to the OLD room id captured earlier.
+            val s = _state.value
+            val seq = currentSeq
+            if (s is CallState.Connected || (s is CallState.Ringing && !s.isIncoming)) {
+                pair?.let { old -> signaling.finishCallDetached(old.roomId, seq, "ENDED") }
+            }
             teardownMedia()
             _state.value = CallState.Idle
         }
@@ -536,7 +545,15 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private fun sendLocalCandidate(candidate: IceCandidate) {
         val p = pair ?: return
         val byCaller = amCaller
+        val myAttempt = attempt
+        val myClient = rtcFlow.value
         viewModelScope.launch {
+            // Generation guard. teardownMedia() bumps `attempt`; without this
+            // check a candidate gathered for generation n is arrayUnion-ed
+            // into generation n+1's freshly-reset arrays AFTER the peer's
+            // connection is already built, and libwebrtc rejects the mismatched
+            // ufrag with no visible cause.
+            if (attempt != myAttempt || rtcFlow.value !== myClient) return@launch
             signaling.addIceCandidate(p.roomId, candidate, byCaller)
         }
     }
@@ -688,7 +705,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 else ->
                     CallErrorKind.SIGNALING_FAILED to "Something went wrong. Tap to try again."
             }
-            else -> CallErrorKind.UNKNOWN to (t.message ?: "Something went wrong. Tap to try again.")
+            // Never surface a raw throwable message. A java.lang.* or
+            // Firestore string on a 6-year-old's Error card is a UX failure
+            // and a small information leak; the guardrail covers the logs,
+            // not the screen.
+            else -> CallErrorKind.UNKNOWN to "Something went wrong. Tap to try again."
         }
         WebRtcLog.transition("Call failed: ${kind.name}")
         val s = _state.value

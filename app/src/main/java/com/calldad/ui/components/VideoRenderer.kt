@@ -78,7 +78,16 @@ fun VideoRenderer(
         val r = currentRenderer
         if (t != null && r != null) t.addSink(r)
         onDispose {
-            if (t != null && r != null) t.removeSink(r)
+            // This runs one Compose frame AFTER CallViewModel.teardownMedia
+            // has already disposed the peer connection, so the track can be
+            // dead here. pc.dispose() does NOT dispose the remote track's Java
+            // wrapper (WebRTCClient never calls getReceivers/getTransceivers),
+            // which made this a live native call against freed memory and
+            // produced "IllegalStateException: MediaStreamTrack has been
+            // disposed" on hangup. removeSink throws before it frees the sink,
+            // so swallowing is correct here — and the renderer is nulled in
+            // onRelease before view.release() for the same reason.
+            if (t != null && r != null) runCatching { t.removeSink(r) }
         }
     }
 }
