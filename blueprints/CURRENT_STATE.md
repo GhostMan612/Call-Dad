@@ -56,7 +56,7 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `
 | K13 | Firestore database not provisioned — writes pend offline forever, the "Calling Dad…" hang | **CLOSED 2026-09-30, unintentionally**: the deploy's `ensuring required API firestore.googleapis.com is enabled` created `databases/(default)` (STANDARD). No console action was needed. First real call succeeded afterwards |
 | K12 | Voice clips have no push yet: a killed app hears them on next open | OPEN (ADR-016 next step). PTT otherwise PROVEN two-way on device 2026-09-30 |
 | K11 | Device matrix for ADR-015 (killed-app ring, glare, no-answer, lost-peer end, game sync, pairing gate) | PARTIAL: two-way call + answer + video + PTT PROVEN. Remaining items OPEN (operator) |
-| K14 | PTT clips clipped at the end of the last word when the button was released immediately | **FIXED in source 2026-09-30**, awaiting device re-test: `stopTransmitting` now waits `ENCODER_DRAIN_MS` (700ms) so the AAC encoder flushes before the MPEG-4 container is finalised. Fix is in vc6, NOT in the installed vc5 |
+| K14 | PTT clips clipped at the end of the last word when the button was released immediately | **CLOSED 2026-09-30, DEVICE-PROVEN on both phones, both directions**: no clipping, no dropped syllables. `stopTransmitting` waits `ENCODER_DRAIN_MS` (700ms) so the AAC encoder flushes before the MPEG-4 container is finalised |
 | K15 | `firebase-functions@6.1.0` is behind current; the deploy CLI warned | OPEN: deliberate upgrade commit with its own gate run, not a deploy-day change |
 | K16 | `functions/package-lock.json` now pins the deploy tree; 8 moderate advisories inherited via firebase-admin 12.x → deprecated `uuid@9/10` | OPEN (operator): dependency bump is a separate contract |
 
@@ -94,8 +94,11 @@ One flavor per device; no crossed install. Both match `app/build.gradle.kts`.
 ### Operator-witnessed behaviour (CLAIMED by operator, not lane-verified)
 
 - Both phones call and answer each other; video good. **First proven E2E call.**
-- PTT works both ways.
-- PTT clips the end of the last word on an immediate release → K14, fixed in vc6 source.
+- PTT works both directions.
+- PTT tail clipping FIXED and re-verified on both phones, both directions: no clipping,
+  no dropped syllables (K14 closed). The operator's ears are the only instrument for this
+  one — the encoder drain is an audio-domain change, so logcat could confirm the send and
+  receive path was clean but could never have confirmed the audio was intact.
 
 ### NOT claimed
 

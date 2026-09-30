@@ -81,26 +81,29 @@ kept as dated history, not current state.
   with throwaway probes: cosmetic. All six legitimate member operations return ALLOWED
   with no error, so no denial is masking a real allow. Recorded so the next auditor
   does not re-chase it.
-- **PTT tail clipping (K14) — fixed in source, NOT yet on a phone.** Operator
-  reported every clip cuts the end of the last word. Cause: `stopTransmitting()` called
-  `MediaRecorder.stop()` the instant the finger lifted, and an AAC encoder holds a
-  priming delay plus unsent frames that are discarded when the MPEG-4 container is
-  finalised. Fix: keep recording a `ENCODER_DRAIN_MS` (700ms) silent tail so the encoder
-  flushes. Shipped as **vc6 / 0.2.3** — deliberately NOT reusing 5, because 5 is the
-  fingerprint that proves the bug. A `dumpsys` reading of 5 after this fix is
-  meaningless. **vc6 has never been built or installed.**
+- **PTT tail clipping (K14) — FIXED AND DEVICE-PROVEN, both directions.** Operator
+  reported every clip cut the end of the last word on immediate release. Cause: `stopTransmitting()`
+  called `MediaRecorder.stop()` the instant the finger lifted, and an AAC encoder holds a
+  priming delay plus unsent frames that are discarded when the MPEG-4 container is finalised.
+  Fix: keep recording a `ENCODER_DRAIN_MS` (700ms) silent tail so the encoder flushes. Shipped
+  as **vc6 / 0.2.3** — deliberately NOT reusing 5, because 5 is the fingerprint that proves
+  the bug. vc6 was clean-built (37 tasks executed) and installed to both phones; the operator
+  re-verified **no clipping and no dropped syllables in both directions. K14 CLOSED.**
+  - Worth recording: the operator had to re-test this TWICE because I asked for logcat evidence
+    that could not have existed. The encoder drain is an audio-domain change; logcat can confirm
+    the send and receive path is clean but has no visibility into whether a syllable survived.
+    Only the operator's ears can. Trusting that result the first time would have cost one
+    unnecessary test cycle.
 - **Operator override on the build boundary:** the operator authorised `clean assemble*`
   and `adb install` from this lane for this session, over RULES §1.5. A deliberate,
   one-off override, recorded here so a later reader does not think §1.5 was amended.
 
 ### Next actions
 
-1. Operator: build + install **vc6** to both devices, then re-test PTT specifically —
-   release the button immediately after speaking and confirm the last word survives.
-2. Operator: finish the ADR-015 device matrix (K11): killed-app ring, force-stop, doze,
+1. Operator: finish the ADR-015 device matrix (K11): killed-app ring, force-stop, doze,
    no-answer timeout, lost-peer end, game sync during a call, pairing-gate bypass.
-3. Operator: mobile-data call, to see how badly the missing TURN server (K8) actually bites.
-4. Deliberate dependency contract: `firebase-functions@6.1.0` is behind (CLI warned),
+2. Operator: mobile-data call, to see how badly the missing TURN server (K8) actually bites.
+3. Deliberate dependency contract: `firebase-functions@6.1.0` is behind (CLI warned),
    and 8 moderate advisories run through `firebase-admin` 12.x → deprecated `uuid@9/10`.
    `functions/package-lock.json` now pins them, so they are reproducible rather than
    drifting. Bump as its own commit with its own gate run.
