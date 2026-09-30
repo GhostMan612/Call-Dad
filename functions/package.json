@@ -1,10 +1,14 @@
 {
   "name": "call-dad-functions",
-  "engines": { "node": "22" },
-  "scripts": { "test": "node --test" },
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
   "main": "index.js",
   "dependencies": {
-    "firebase-admin": "^12.6.0",
-    "firebase-functions": "^6.1.0"
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0"
   }
 }

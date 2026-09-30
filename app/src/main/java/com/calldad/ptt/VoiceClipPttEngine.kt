@@ -221,9 +221,59 @@ class VoiceClipPttEngine(
                 )
             ).await()
             WebRtcLog.transition("PTT clip sent")
+            // Prune AFTER the send resolved, so a failed or rejected write
+            // never triggers a delete on the sender's behalf.
+            pruneOldClips(p.roomId)
             Unit
         }.recoverCatching {
             throw PttFailure(PttFailureKind.TRANSPORT_ERROR, "Couldn't send. Try again.", it)
+        }
+    }
+
+    /**
+     * Bounds the clip collection without breaking the promise that a message
+     * the child was told was sent is not silently eaten.
+     *
+     * Clips that PLAYED are already deleted, so a normally-used pair never
+     * accumulates anything and this does nothing at all. It only engages when a
+     * peer has been offline long enough that clips pile up, which is precisely
+     * the case where the old "never delete" rule leaked storage forever.
+     *
+     * Two conditions, both required:
+     *  - the room holds more than [MAX_PENDING_CLIPS] clips, AND
+     *  - the oldest one is older than [UNPLAYED_GRACE_MS] (24h).
+     *
+     * The 24h grace is the whole design: a message is never dropped because it
+     * is old, only because the pair is so far behind that keeping it would cost
+     * unbounded storage. A parent who is away for a weekend still gets every
+     * message; a pair abandoned for months does not bill forever.
+     */
+    private suspend fun pruneOldClips(roomId: String) {
+        runCatching {
+            // await() (not the blocking get()) so this runs off the main thread
+            // and yields a QuerySnapshot directly.
+            val docs = firestore.collection("calls").document(roomId).collection("ptt")
+                .orderBy("createdAt", Query.Direction.ASCENDING)
+                .get()
+                .await()
+                .documents
+            if (docs.size <= MAX_PENDING_CLIPS) return@runCatching
+            val cutoffMs = System.currentTimeMillis() - UNPLAYED_GRACE_MS
+            var toDrop = docs.size - MAX_PENDING_CLIPS
+            for (doc in docs) {
+                if (toDrop <= 0) break
+                val created = doc.getTimestamp("createdAt") ?: continue
+                if (created.toDate().time > cutoffMs) break
+                // Only ever remove the oldest, oldest-first, and only past the
+                // grace window. Anything newer stops the sweep.
+                deleteClip(roomId, doc.id)
+                toDrop--
+            }
+        }.onFailure {
+            // Never surface this as an error: the message was SENT. A failed
+            // prune is storage pressure, not a lost message, and must not make
+            // the child think their words did not go through.
+            WebRtcLog.transition("PTT clip prune skipped")
         }
     }
 
@@ -376,5 +426,14 @@ class VoiceClipPttEngine(
          */
         const val ENCODER_DRAIN_MS = 700L
         const val MAX_CLIP_BYTES = 200_000
+
+        /**
+         * Clips a room may hold before pruning starts, and how old the oldest
+         * must be before it may go. A live pair never reaches the first number
+         * because played clips delete immediately; the grace period is what
+         * keeps a returning parent from losing a weekend of messages.
+         */
+        const val MAX_PENDING_CLIPS = 50
+        const val UNPLAYED_GRACE_MS = 24L * 60L * 60L * 1000L
     }
 }

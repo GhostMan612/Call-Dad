@@ -105,9 +105,30 @@ test("bogus status is rejected", async () => {
   await assertFails(updateDoc(doc(db(DAD), "calls", ROOM), { status: "HACKED" }));
 });
 
-test("nobody deletes a room", async () => {
+test("a LIVE room is never deletable, by anyone", async () => {
+  // Cleanup (below) is safe only because a ringing/connected room is
+  // undeletable. If this ever passes, a ringing call can be cancelled by
+  // deleting the doc, which is the same class of bug as the stale teardown.
   await seed(ringing(KID, DAD, 1));
   await assertFails(deleteDoc(doc(db(DAD), "calls", ROOM)));
+  await assertFails(deleteDoc(doc(db(KID), "calls", ROOM)));
+  await assertFails(deleteDoc(doc(db(EVE), "calls", ROOM)));
+});
+
+test("a TERMINAL room can be cleaned up by a member, so a reinstall leaves no orphan", async () => {
+  // Was `delete: if false` for every case, which meant that after a reinstall
+  // (new UID, new room) the old room and its clips were written by an account
+  // that no longer existed on the phone and were undeletable by anyone --
+  // accruing storage forever with no way to reclaim it.
+  await seed({ ...ringing(KID, DAD, 1), status: "ENDED" });
+  await assertSucceeds(deleteDoc(doc(db(DAD), "calls", ROOM)));
+  await seed({ ...ringing(KID, DAD, 1), status: "DECLINED" });
+  await assertSucceeds(deleteDoc(doc(db(KID), "calls", ROOM)));
+});
+
+test("a terminal room is still not deletable by an outsider", async () => {
+  await seed({ ...ringing(KID, DAD, 1), status: "ENDED" });
+  await assertFails(deleteDoc(doc(db(EVE), "calls", ROOM)));
 });
 
 const pairing = (uid, peer, minutes = 10) => ({
@@ -115,11 +136,39 @@ const pairing = (uid, peer, minutes = 10) => ({
   expiresAt: Timestamp.fromMillis(Date.now() + minutes * 60_000),
 });
 
-test("pairing: owner writes, anyone signed-in gets by id, nobody lists", async () => {
+test("pairing: owner writes, the NAMED peer reads, nobody else does", async () => {
   await assertSucceeds(setDoc(doc(db(KID), "pairings", KID), pairing(KID, DAD)));
+  // The handshake needs exactly this one read: the peer confirms the doc
+  // names them. That is the ONLY other reader.
   await assertSucceeds(getDoc(doc(db(DAD), "pairings", KID)));
   await assertFails(getDocs(collection(db(DAD), "pairings")));
   await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), "pairings", KID)));
+});
+
+test("pairing: a signed-in stranger can NOT read a pairing doc (K9-class leak)", async () => {
+  // Was `allow get: if request.auth != null`, so ANY anonymous install could
+  // read any pairing doc by id and learn a real UID, a real peer UID, and a
+  // live handshake nonce -- which is half of hijacking a pairing. `list` was
+  // already denied, but ids leak through other channels.
+  await assertSucceeds(setDoc(doc(db(KID), "pairings", KID), pairing(KID, DAD)));
+  await assertFails(getDoc(doc(db(EVE), "pairings", KID)));
+});
+
+test("pairing: a live handshake cannot be deleted early", async () => {
+  // A phone mid-scan must not have its handshake yanked away by the other
+  // side, which would strand the pair between the two writes.
+  await assertSucceeds(setDoc(doc(db(KID), "pairings", KID), pairing(KID, DAD)));
+  await assertFails(deleteDoc(doc(db(KID), "pairings", KID)));
+});
+
+test("pairing: an EXPIRED handshake is clearable, or it leaks forever", async () => {
+  // Written with rules disabled, because `create` legitimately refuses an
+  // already-expired doc (a phone that died mid-handshake is exactly the case
+  // that leaves one behind, and it must not be clearable-by-nobody).
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "pairings", KID), pairing(KID, DAD, -5));
+  });
+  await assertSucceeds(deleteDoc(doc(db(KID), "pairings", KID)));
 });
 
 test("pairing: no writing someone else's doc, no self-pairing, bounded expiry", async () => {

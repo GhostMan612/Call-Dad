@@ -64,9 +64,15 @@ service cloud.firestore {
                           : (request.resource.data.status == 'RINGING'
                              && request.resource.data.callerUid == request.auth.uid));
 
-      // Delete: forbidden. Teardown writes ENDED; the doc is the shared
-      // teardown signal the peer observes.
-      allow delete: if false;
+      // Delete: a TERMINAL room may be removed by a member; a live one may
+      // not. This was `if false` for every case, which meant that after a
+      // reinstall (new UID, new room) the old room and its clips were
+      // permanently orphaned -- written by an account that no longer exists on
+      // the phone, undeletable by anyone, accruing storage forever. Cleanup is
+      // safe exactly when there is nothing left to ring for: a RINGING or
+      // CONNECTED room is still a live call and is never deletable.
+      allow delete: if isMember()
+                    && resource.data.status in ['ENDED', 'DECLINED'];
 
       // Walkie-talkie voice clips (ADR-016). Same two members only. The
       // sender stamps itself and the server time; clips are small AAC
@@ -87,11 +93,21 @@ service cloud.firestore {
     }
 
     // Pairing handshake docs: pairings/{uid} = {uid, peerUid, sessionNonce,
-    // expiresAt}. Readable by id to any signed-in phone (the peer must
-    // see it to confirm the mutual scan); never listable, so nobody can
-    // enumerate who is paired with whom.
+    // expiresAt}.
+    //
+    // READ is closed to the two named parties. It was `request.auth != null`,
+    // i.e. any anonymous install in the world could read any pairing doc by id
+    // and learn a real UID, a real peer UID, and a live handshake nonce.
+    // `list` was already denied so nobody could enumerate, but ids are guessable
+    // once a UID leaks through any channel, and a nonce is exactly the secret
+    // the mutual handshake is built on: reading it is half of hijacking a
+    // pairing. The peer still sees it, which is the only read the handshake
+    // needs, because the owner has already written their doc by then.
     match /pairings/{uid} {
-      allow get: if request.auth != null;
+      allow get: if request.auth != null
+                 && (request.auth.uid == uid
+                     || (resource.data.peerUid == request.auth.uid));
+
       allow list: if false;
 
       allow create, update: if request.auth != null
@@ -105,8 +121,12 @@ service cloud.firestore {
                             && request.resource.data.expiresAt <
                                request.time + duration.value(25, 'm');
 
+      // Only an expired handshake may be cleared early. An unexpired one is
+      // live state: a phone mid-scan must not have it yanked away by the other
+      // side, which would strand the pair between the two writes.
       allow delete: if request.auth != null
-                    && request.auth.uid == uid;
+                    && request.auth.uid == uid
+                    && resource.data.expiresAt < request.time;
     }
   }
 }

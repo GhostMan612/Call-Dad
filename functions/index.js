@@ -4,6 +4,7 @@ const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { logger } = require("firebase-functions");
 const { ringTarget } = require("./ring");
+const { clipTarget } = require("./clip");
 
 initializeApp();
 
@@ -19,23 +20,61 @@ exports.onCallRoomWritten = onDocumentWritten("calls/{callId}", async (event) =>
   const after = event.data?.after?.exists ? event.data.after.data() : null;
   const target = ringTarget(callId, before, after);
   if (!target) return;
+  await pushToCallee(target.calleeUid, "incoming_call", {
+    callId,
+    seq: String(target.seq),
+  });
+});
 
+/**
+ * K12: a PTT clip used to be visible only when the app happened to be open on
+ * the receiving phone. The clip itself was safe and durable in Firestore, but a
+ * parent who sent "goodnight" into a locked phone got no indication at all,
+ * which is indistinguishable from the message having failed.
+ *
+ * A NORMAL-priority, data-only push, deliberately NOT a ring: a voice message
+ * arriving at 2am must not wake the house. It carries no audio and no content,
+ * only the fact that something is waiting, so nothing about the message is
+ * exposed to FCM or to a lock screen.
+ */
+exports.onPttClipWritten = onDocumentWritten(
+  "calls/{callId}/ptt/{clipId}",
+  async (event) => {
+    const callId = event.params.callId;
+    const before = event.data?.before?.exists ? event.data.before.data() : null;
+    const after = event.data?.after?.exists ? event.data.after.data() : null;
+    const target = clipTarget(callId, before, after);
+    if (!target) return;
+    await pushToCallee(target.peerUid, "ptt_clip", { callId });
+  },
+);
+
+/**
+ * Sends a data-only message to one device's own token
+ * (users/{uid}.fcmToken). No broadcast topic: nobody else can subscribe and
+ * learn when this family calls. A stale token is deleted rather than retried
+ * forever, so one uninstalled phone cannot block the pair's wakeups.
+ */
+async function pushToCallee(calleeUid, type, extra) {
   const db = getFirestore();
-  const userRef = db.collection("users").doc(target.calleeUid);
+  const userRef = db.collection("users").doc(calleeUid);
   const user = await userRef.get();
   const token = user.exists ? user.get("fcmToken") : null;
   if (!token) {
-    logger.info("Ring skipped: callee has no registered device");
+    logger.info("Push skipped: no registered device");
     return;
   }
 
+  // A voice message is a notification, not an alarm: normal priority, so it
+  // never becomes a wakeup the phone must grant.
+  const priority = type === "ptt_clip" ? "normal" : "high";
   try {
     await getMessaging().send({
       token,
-      data: { type: "incoming_call", callId, seq: String(target.seq) },
-      android: { priority: "high", ttl: 30 * 1000 },
+      data: { type, ...extra },
+      android: { priority, ttl: 30 * 1000 },
     });
-    logger.info("Ring push sent");
+    logger.info("Push sent: " + type);
   } catch (err) {
     const code = err?.errorInfo?.code || err?.code;
     if (code === "messaging/registration-token-not-registered" ||
@@ -43,7 +82,7 @@ exports.onCallRoomWritten = onDocumentWritten("calls/{callId}", async (event) =>
       await userRef.update({ fcmToken: FieldValue.delete() });
       logger.info("Stale device token removed");
     } else {
-      logger.error("Ring push failed", code);
+      logger.error("Push failed", code);
     }
   }
-});
+}

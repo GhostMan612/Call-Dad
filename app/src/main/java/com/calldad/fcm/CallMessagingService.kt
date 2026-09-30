@@ -23,8 +23,17 @@ import com.google.firebase.messaging.RemoteMessage
 class CallMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
-        if (message.data["type"] != "incoming_call") return
+        when (message.data["type"]) {
+            "incoming_call" -> handleRing(message)
+            // K12: a clip waiting on a phone whose app is not open. The audio
+            // never comes through FCM -- it is fetched from Firestore by the
+            // app -- so this is a nudge, not a delivery.
+            "ptt_clip" -> handleClipWaiting(message)
+            else -> return
+        }
+    }
 
+    private fun handleRing(message: RemoteMessage) {
         if (AppVisibility.isForeground) {
             WebRtcLog.transition("FCM ring skipped: app on screen, room listener rings")
             return
@@ -56,6 +65,53 @@ class CallMessagingService : FirebaseMessagingService() {
         } catch (t: Throwable) {
             WebRtcLog.transition("Foreground service start failed")
             postHeadsUpFallback(callId, seq)
+        }
+    }
+
+    /**
+     * Tells the holder a voice message is waiting, without ringing, without a
+     * foreground service, and without putting the message itself on the lock
+     * screen. Deliberately quiet: this is a "dad left you something", not a
+     * call, and it must not wake the house at 2am.
+     */
+    private fun handleClipWaiting(message: RemoteMessage) {
+        val callId = message.data["callId"].orEmpty()
+        if (callId.isEmpty()) return
+        // Already in the app: the Firestore listener is live and will play it.
+        if (AppVisibility.isForeground) {
+            WebRtcLog.transition("PTT push skipped: app on screen, listener will play")
+            return
+        }
+        runCatching {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pi = PendingIntent.getActivity(
+                this,
+                REQUEST_CODE_CLIP,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val nm = getSystemService(NotificationManager::class.java) ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+            nm.notify(
+                NOTIFICATION_ID_CLIP_WAITING,
+                NotificationCompat.Builder(this, CallDadApplication.CHANNEL_INCOMING_CALL)
+                    .setSmallIcon(R.drawable.ic_mic)
+                    .setContentTitle("A message is waiting")
+                    .setContentText("Tap to hear it")
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                    .build()
+            )
+            WebRtcLog.transition("PTT clip waiting notification posted")
         }
     }
 
@@ -113,5 +169,7 @@ class CallMessagingService : FirebaseMessagingService() {
         const val EXTRA_SEQ = "seq"
         const val NOTIFICATION_ID_FALLBACK = 1002
         const val REQUEST_CODE_FALLBACK = 2002
+        const val NOTIFICATION_ID_CLIP_WAITING = 1003
+        const val REQUEST_CODE_CLIP = 2003
     }
 }

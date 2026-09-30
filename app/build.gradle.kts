@@ -27,8 +27,12 @@ android {
         // fingerprint that PROVES the tail-clipping bug (operator-witnessed on
         // both devices). A dumpsys reading of 5 after the fix is meaningless,
         // because 5 and 6 differ only in that fix.
-        versionCode = 6
-        versionName = "0.2.3"
+        // versionCode 7: closes K8 (TURN), K12 (PTT push), the pairings read
+        // hole, orphan cleanup, and the clip cap. Bumps because the APK's ICE
+        // servers changed: a phone on 6 would silently lack a relay and fail
+        // on mobile data, and that is not visible from dumpsys at all.
+        versionCode = 7
+        versionName = "0.2.4"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a
