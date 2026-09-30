@@ -53,6 +53,79 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
   subagent fan-out was never the leak. `gate-runner` was the only fleet agent with shell
   access and is now constrained.
 
+## Where we are (2026-09-30, Contract 11 close-out — K8/K9/K12/K16/K17/K18/K19 closed in source, K8 proven on device)
+
+Supersedes the Contract 10 block below for current state.
+
+- **Operator instruction was "close everything". Two of the nine could not be
+  closed by writing code, and are recorded as open rather than ticked: K11 is a matrix of
+  human-witnessed behaviours no host test can assert, and K8's relay could only be *proven*
+  by a real call on mobile data.** Everything else is closed in source with host tests.
+- **K17 — the real security find.** `pairings/{uid}` reads were `request.auth != null`, so
+  any anonymous install could read any pairing doc by id and take a real UID, a real peer
+  UID and a live `sessionNonce`. That nonce is the secret the mutual handshake is built on,
+  so this was half of hijacking a pairing. Now owner-or-named-peer only — the single read
+  the handshake actually needs. Also: a live handshake can no longer be deleted early (that
+  stranded pairs between the two writes) while an expired one is clearable, so a phone that
+  died mid-handshake no longer leaks it forever.
+- **K18 — orphans.** `calls` delete was `if false` for every case, so after a reinstall the
+  old room was written by an account that no longer existed on the phone and was deletable
+  by nobody, forever. A member may now delete a TERMINAL room (ENDED/DECLINED). Live rooms
+  stay undeletable by caller, callee **and** outsider — a deletable ringing room is the same
+  bug class as the stale teardown this contract started on.
+- **K12 — PTT now pushes.** A clip was invisible until the app happened to be open on the
+  receiving phone, so "goodnight" into a locked phone looked like it had failed.
+  `onPttClipWritten` sends `{type: ptt_clip, callId}` at **normal** priority: deliberately
+  not a ring, because a voice message at 2am must not wake the house. No audio or content
+  crosses FCM. Decision logic in `functions/clip.js` with 7 tests, mirroring `ring.js`.
+- **K19 — clip cap** (operator decision, count + 24h grace). Prune only when the room holds
+  >50 clips AND the oldest is >24h old, oldest-first. Played clips already delete
+  immediately, so a live pair never accumulates and this never engages. Runs AFTER the send
+  resolves; a prune failure never surfaces as a send failure. This is the one place the
+  deliberate never-delete-a-sent-message rule is traded away, bounded on both count AND age.
+- **K16 — dependency bump deployed.** firebase-functions 6.1.0 → 7.4.0, firebase-admin
+  12.7.0 → 14.5.0, both MAJOR. `npm audit` 8 moderate → 2 (both in `glob`/`teeny-request`, a
+  path this app never touches). Deployed clean; the CLI's "outdated firebase-functions"
+  warning is gone.
+- **K9 — ML Kit** recorded in RULES §1.7a as the single named exception to §1.7, with
+  exactly what leaves the device (barcode model fetch + anonymous Play Services telemetry)
+  and what does not (no image, camera frame, QR payload, UID, nonce, audio, video).
+  Operator signed off on the reasoning: pairing must not fail for a grown-up.
+- **K8 CLOSED AND DEVICE-PROVEN.** A call completed with mobile data on and Wi-Fi off.
+  Open Relay is the default; `local.properties` TURN_* overrides for a private relay.
+  Honest caveat, recorded in RULES §1.7a and `WebRtcConfig`: DTLS-SRTP means the relay
+  carries ciphertext, but it IS a third party in the media path and the credentials are
+  APK-extractable. Acceptable for a two-person family app, **not** for real child media.
+  Proven for a normal NAT, not a symmetric one.
+- **Backend fully current.** Rules released; `onCallRoomWritten` updated; `onPttClipWritten`
+  created (v2, us-central1, nodejs22, 256MB) — confirmed with `firebase functions:list`, not
+  taken from the deploy log. vc7/0.2.4 clean-built and installed to both phones
+  (`dumpsys` 10:20:55 parent, 10:21:01 child, one flavor each).
+- **Four failures hit in this pass and all four were mine**, recorded because the pattern
+  matters more than the individual bugs: a `const val` typed `String` then used as a
+  `List`; Firestore `.get()` resolving to the blocking overload so `.documents` was
+  unresolved; a test that tried to CREATE an already-expired doc which the rules correctly
+  refuse; and a "functions" gate that appeared to fail six tests when it had not — emulator
+  output bleeding into the same stream. Each gate is now run isolated, and the parallel-PowerShell
+  habit is why that last one was caught rather than reported to the operator as a failure.
+- **Process note carried forward:** during the PTT verification the operator had to re-test
+  twice, because I asked for logcat evidence that could not exist (the encoder drain is an
+  audio-domain change; logs cannot show whether a syllable survived). Only the operator's
+  ears could verify it, and they already had.
+
+### Next actions (all human-witnessed; none can be closed by writing code)
+
+1. Re-pair both phones under the tightened K17 read. If the client assumed any-signed-in
+   could read, pairing fails — which is the correct, safe failure.
+2. Screen-off PTT: send a clip with the receiving app closed. Expect a quiet
+   "A message is waiting". **If it rings loudly, the normal priority is wrong and that is a
+   bug, not a preference.**
+3. K11 remainder: killed-app ring, force-stop, doze, no-answer timeout, lost-peer end,
+   game sync mid-call.
+4. K20, accepted rather than closed: pruning is client-triggered, so a pair that never opens
+   the app never prunes. A Firestore TTL would need a scheduled function and a billed index,
+   and a dormant pair costs cents.
+
 ## Where we are (2026-09-30, Contract 10 — FIRST DEVICE-PROVEN CALL, both flavors installed)
 
 This supersedes the 2026-09-24 block below. Read this first; the older blocks are

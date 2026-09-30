@@ -50,7 +50,7 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `
 | K5 | SQLCipher | MOOT: no Room/database in the app; ADR-003 stays unaccepted |
 | K6 | No release keystore | OPEN (operator) |
 | K7 | Firebase CLI on PATH | **CLOSED 2026-09-30**: Node 22.23.2 (`OpenJS.NodeJS.22`) + firebase-tools 15.32.0 installed; `firebase deploy` completed |
-| K8 | No TURN: symmetric-NAT / mobile-data calls fail | **CLOSED 2026-09-30, operator decision**: Open Relay wired as the default (published long-lived creds, no account, no billing). WebRTC media stays DTLS-SRTP E2E so the relay carries ciphertext, but it is a third party in the media path and its creds are APK-extractable — accepted for a 2-person family app, NOT for real child media. `local.properties` TURN_* overrides for a private relay. **Needs a mobile-data call to prove it** |
+| K8 | No TURN: symmetric-NAT / mobile-data calls fail | **CLOSED AND DEVICE-PROVEN 2026-09-30**: a call completed with mobile data on and Wi-Fi off (operator-witnessed). Open Relay wired as the default (published long-lived creds, no account, no billing). WebRTC media stays DTLS-SRTP E2E so the relay carries ciphertext, but it is a third party in the media path and its creds are APK-extractable — accepted for a 2-person family app, NOT for real child media. `local.properties` TURN_* overrides for a private relay. **NOT yet proven:** a symmetric-NAT carrier (mobile-data pass covers the common case, not every NAT) |
 | K9 | ML Kit phone-home vs RULES §1.7 | **CLOSED 2026-09-30, operator sign-off**: named exception recorded in RULES §1.7a with exactly what leaves the device (barcode model fetch + anonymous Play Services telemetry) and what does not (no image, frame, QR payload, UID, nonce, audio, video). ZXing fallback already wired. Chose ML Kit because pairing must not fail for a grown-up |
 | K10 | Rules + function redeploy required: old `family_channel` clients cannot talk to new ones | **CLOSED 2026-09-30**: `firebase deploy --only firestore:rules,functions` completed; rules released, `onCallRoomWritten` live (v2, us-central1, nodejs22); both phones re-paired and called successfully. **RE-REDEPLOY NEEDED for the K9/K12 rules + `onPttClipWritten`** |
 | K13 | Firestore database not provisioned — writes pend offline forever, the "Calling Dad…" hang | **CLOSED 2026-09-30, unintentionally**: the deploy's `ensuring required API firestore.googleapis.com is enabled` created `databases/(default)` (STANDARD). No console action was needed. First real call succeeded afterwards |
@@ -107,7 +107,8 @@ One flavor per device; no crossed install. Both match `app/build.gradle.kts`.
 
 ### NOT claimed
 
-- **`versionCode 7` has never been built, installed, or run.** Everything under K8/K9/K12/K16/K17/K18/K19 is verified in SOURCE and by host tests only. The emulator proves the new rules behave as written; it does not prove a real phone accepted a real pairing with the tightened read.
-- **K8's TURN relay is unproven end-to-end.** Wired and default-on, but no mobile-data call has crossed it. If the relay is unreachable the app must fail the same way it did before, which is the thing still worth checking.
-- **K12's push is undeployed.** `onPttClipWritten` does not exist in the live project yet; the running function is still the single `onCallRoomWritten`.
-- Killed-app ring, doze, force-stop, mobile-data/TURN, and multi-generation call sequences remain unproven.
+- **`versionCode 7` IS built, installed and on both phones** (`dumpsys` 10:20:55 parent / 10:21:01 child, one flavor each), and the rules + BOTH functions are live. The **mobile-data call passed** (operator-witnessed), so K8 is proven on hardware rather than only in source.
+- **K12's screen-off PTT push is unproven.** `onPttClipWritten` is deployed and live, but no test has confirmed a quiet notification appears on a locked phone, nor that it stays quiet.
+- **K17's tightened pairing read has not been re-witnessed.** The rule is deployed and emulator-tested; whether a real phone completes a fresh pairing under it is untested.
+- The relay path has been proven for a normal NAT, not a symmetric one. K8's caveat stands.
+- Killed-app ring, force-stop, doze, no-answer timeout, lost-peer end, and game sync mid-call remain unproven.
