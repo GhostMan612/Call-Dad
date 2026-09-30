@@ -174,6 +174,65 @@ class PttHonestyTest {
         return file.readText()
     }
 
+    // ---- the end of the child's sentence must survive the release ----
+
+    @Test
+    fun releasingWaitsForTheEncoderToDrain() {
+        // Was: stopTransmitting() called recorder.stop() the instant the finger
+        // lifted. MediaRecorder finalises the MPEG-4 container at once and an
+        // AAC encoder still holds a priming delay plus unsent frames, so the
+        // end of the last word was thrown away on EVERY message. Device-proven
+        // 2026-09-30: PTT worked both ways but clipped at the end.
+        //
+        // Match the real stop call, not the prose: this file's own comment says
+        // "MediaRecorder.stop() finalises ...", and a naive indexOf("r.stop()")
+        // hits THAT first and reports a false failure.
+        val body = engine.substringAfter("override suspend fun stopTransmitting()").substringAfter("{")
+        val stopIdx = body.indexOf("runCatching { r.stop() }")
+        val drainIdx = body.indexOf("delay(ENCODER_DRAIN_MS)")
+        assertTrue("the real r.stop() call not found", stopIdx >= 0)
+        assertTrue("the drain delay not found", drainIdx >= 0)
+        assertTrue(
+            "the recorder must not be stopped before the encoder drain delay",
+            drainIdx < stopIdx
+        )
+    }
+
+    @Test
+    fun theDrainIsSkippedWhenTheCapAlreadyFinalisedTheClip() {
+        // A clip that hit MAX_CLIP_MS is already stopped by the platform;
+        // calling stop() again throws. The drain must not run in that case,
+        // because the value it guards is the one stop() itself sets.
+        assertTrue(
+            "the drain must be conditional on !recordLimitReached",
+            Regex("""if \(!recordLimitReached\) delay\(ENCODER_DRAIN_MS\)""")
+                .containsMatchIn(engine)
+        )
+    }
+
+    @Test
+    fun theDrainIsShortEnoughToStayInsideTheClipCap() {
+        // The tail must not push a normal clip past MAX_CLIP_MS, and must be
+        // long enough to cover the ~128ms AAC priming delay plus a few frames.
+        // NOTE: MAX_CLIP_MS is written 15_000, so the pattern must tolerate the
+        // underscore or it silently parses as 15 and every comparison is a lie.
+        val drain = Regex("""const val ENCODER_DRAIN_MS = (\d[\d_]*)L""")
+            .find(engine)?.groupValues?.get(1)?.replace("_", "")?.toLongOrNull()
+        assertTrue("ENCODER_DRAIN_MS not found as a Long literal", drain != null)
+        val cap = Regex("""const val MAX_CLIP_MS = (\d[\d_]*)""")
+            .find(engine)?.groupValues?.get(1)?.replace("_", "")?.toLongOrNull()
+        assertTrue("MAX_CLIP_MS not found", cap != null)
+        assertTrue("MAX_CLIP_MS must be 15000, parsed $cap", cap == 15_000L)
+        assertTrue(
+            "the drain ($drain ms) must be well inside the cap ($cap ms)",
+            drain != null && cap != null && drain < cap / 4
+        )
+        assertTrue(
+            "the drain must exceed the ~128ms AAC priming delay",
+            drain != null && drain >= 300
+        )
+    }
+
     // ---- the contract types must stay reachable ----
 
     @Test

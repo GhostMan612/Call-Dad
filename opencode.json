@@ -1,0 +1,53 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "gradlew*assemble*": "ask",
+      "gradlew*install*": "ask",
+      "gradlew*connected*": "ask",
+      "gradlew*clean*": "ask",
+      "adb*install*": "ask",
+      "adb*uninstall*": "deny",
+      "adb*push*": "deny",
+      "adb*root*": "deny",
+      "adb*shell*pm*": "deny",
+      "adb*logcat*": "allow",
+      "adb*devices*": "allow",
+      "adb*shell*getprop*": "allow",
+      "adb*shell*dumpsys*": "allow",
+      "firebase*deploy*": "deny",
+      "git*add*-A*": "deny",
+      "git*add*--all*": "deny",
+      "git*add*-u*": "deny",
+      "git*add*": "ask",
+      "git*commit*": "ask",
+      "git*push*--force*": "deny",
+      "git*push*": "ask",
+      "git*reset*--hard*": "ask"
+    },
+    "external_directory": {
+      "*": "ask",
+      "C:/Call-Dad/**": "allow",
+      "C:/android/**": "allow",
+      "C:/venv-hub/**": "allow",
+      "C:/Program Files/**": "deny",
+      "C:/Program Files (x86)/**": "deny",
+      "C:/ProgramData/**": "deny",
+      "C:/Users/<USER>/AppData/Local/Temp/opencode/**": "allow"
+    }
+  },
+  "references": {
+    "blueprints": {
+      "path": "blueprints",
+      "description": "Call-Dad architecture, ADRs, checklists, blueprints — read before any code change"
+    },
+    "docs": {
+      "path": "docs",
+      "description": "Call-Dad setup, device, firebase-plan, kid-safe-ux, donor-reuse notes"
+    }
+  },
+  "tool_output": {
+    "max_lines": 400
+  }
+}

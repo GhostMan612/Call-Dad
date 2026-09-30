@@ -23,8 +23,12 @@ android {
         // device claim unattributable via dumpsys. 5 is the fingerprint that
         // proves the PTT-honesty, stale-teardown, speaker-timing and
         // no-Settings-escape fixes are on the phone.
-        versionCode = 5
-        versionName = "0.2.2"
+        // versionCode 6: PTT encoder-drain fix. MUST NOT reuse 5: 5 is the
+        // fingerprint that PROVES the tail-clipping bug (operator-witnessed on
+        // both devices). A dumpsys reading of 5 after the fix is meaningless,
+        // because 5 and 6 differ only in that fix.
+        versionCode = 6
+        versionName = "0.2.3"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

@@ -168,6 +168,21 @@ class VoiceClipPttEngine(
     override suspend fun stopTransmitting(): Result<Unit> {
         val r = recorder ?: return Result.success(Unit)
         val file = recordFile
+
+        // Encoder-drain tail (device-proven clipping fix, 2026-09-30).
+        // MediaRecorder.stop() finalises the MPEG-4 container immediately, and
+        // an AAC encoder holds a priming delay plus whatever frames are still
+        // in its write buffer. Stopping the instant the finger lifts therefore
+        // throws away the last fraction of a second of speech — the end of the
+        // last word. The child hears themselves get cut off on every message.
+        // Recording a short silent tail gives the encoder time to flush, so the
+        // final words survive. Silent audio is inaudible; a truncated last word
+        // is very audible, so paying this in dead air is the right trade.
+        //
+        // Only on the release path: a clip that hit MAX_CLIP_MS is already
+        // finalised by the platform, and stopping it again throws.
+        if (!recordLimitReached) delay(ENCODER_DRAIN_MS)
+
         val durationMs = System.currentTimeMillis() - recordStartedAt
         // A clip that hit the cap stopped itself, so stop() throws. That is
         // NOT a failed recording — the bytes are on disk and the child did
@@ -352,6 +367,14 @@ class VoiceClipPttEngine(
         const val BIT_RATE = 32_000
         const val MIN_CLIP_MS = 400L
         const val MAX_CLIP_MS = 15_000
+
+        /**
+         * Silent recording kept after the finger lifts, so the AAC encoder can
+         * flush its buffered tail before the container is finalised. 700ms is
+         * comfortably more than the ~2048-sample (128ms) priming delay plus
+         * a few 23ms frames, with margin for a slow device.
+         */
+        const val ENCODER_DRAIN_MS = 700L
         const val MAX_CLIP_BYTES = 200_000
     }
 }

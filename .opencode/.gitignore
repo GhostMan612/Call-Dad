@@ -1,0 +1,7 @@
+node_modules
+package.json
+package-lock.json
+bun.lock
+# NOTE: this file used to list itself, which meant the ignore rules never
+# reached a fresh clone or another operator. That left .opencode/node_modules
+# and the lockfiles committable. Self-ignore removed deliberately.

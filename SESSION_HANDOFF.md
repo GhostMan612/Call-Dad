@@ -19,6 +19,58 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-30, Contract 10 — FIRST DEVICE-PROVEN CALL, both flavors installed)
+
+This supersedes the 2026-09-24 block below. Read this first; the older blocks are
+kept as dated history, not current state.
+
+- **The "Calling Dad…" hang is dead, root cause and all.** It was never a code bug:
+  the 2026-09-19 diagnosis at the bottom of this file was right that no Firestore
+  database was provisioned. It was fixed as a SIDE EFFECT of the deploy — the CLI's
+  `ensuring required API firestore.googleapis.com is enabled` created
+  `databases/(default)`. No console action was needed. The operator did not have to
+  do the thing three sessions of handoff text told him to do.
+- **First proven end-to-end call** (operator-witnessed, 2026-09-30): both phones
+  call and answer each other, video good, PTT works both ways.
+- **Build/install evidence (`dumpsys` fingerprint):** clean
+  `assembleParentDebug`+`assembleChildDebug` (33 tasks executed from scratch, not
+  up-to-date reuse). Moto G 2025 `ZT4222BMWN` = `com.calldad.parent` vc5;
+  BLU View 5 `7040016025040287` = `com.calldad.child` vc5. One flavor per device.
+- **All five gates GREEN**, including the two that were SKIPPED for the whole of
+  Contract 9. `functions` 6/6 and rules emulator 17/17 now actually run: Node 22.23.2
+  and the Android Studio JBR were already on the machine, just not on this lane's PATH.
+- **Backend is LIVE:** `firestore.rules` released; `onCallRoomWritten` v2
+  us-central1 nodejs22; `databases/(default)` STANDARD. `.firebaserc` added (it was
+  missing, so `firebase deploy` had no target). The first deploy attempt failed on
+  first-time Eventarc service-agent propagation; a plain retry succeeded. Not a bug.
+- **Rules emulator logs 22 "evaluation error" lines despite 17/17 pass.** Investigated
+  with throwaway probes: cosmetic. All six legitimate member operations return ALLOWED
+  with no error, so no denial is masking a real allow. Recorded so the next auditor
+  does not re-chase it.
+- **PTT tail clipping (K14) — fixed in source, NOT yet on a phone.** Operator
+  reported every clip cuts the end of the last word. Cause: `stopTransmitting()` called
+  `MediaRecorder.stop()` the instant the finger lifted, and an AAC encoder holds a
+  priming delay plus unsent frames that are discarded when the MPEG-4 container is
+  finalised. Fix: keep recording a `ENCODER_DRAIN_MS` (700ms) silent tail so the encoder
+  flushes. Shipped as **vc6 / 0.2.3** — deliberately NOT reusing 5, because 5 is the
+  fingerprint that proves the bug. A `dumpsys` reading of 5 after this fix is
+  meaningless. **vc6 has never been built or installed.**
+- **Operator override on the build boundary:** the operator authorised `clean assemble*`
+  and `adb install` from this lane for this session, over RULES §1.5. A deliberate,
+  one-off override, recorded here so a later reader does not think §1.5 was amended.
+
+### Next actions
+
+1. Operator: build + install **vc6** to both devices, then re-test PTT specifically —
+   release the button immediately after speaking and confirm the last word survives.
+2. Operator: finish the ADR-015 device matrix (K11): killed-app ring, force-stop, doze,
+   no-answer timeout, lost-peer end, game sync during a call, pairing-gate bypass.
+3. Operator: mobile-data call, to see how badly the missing TURN server (K8) actually bites.
+4. Deliberate dependency contract: `firebase-functions@6.1.0` is behind (CLI warned),
+   and 8 moderate advisories run through `firebase-admin` 12.x → deprecated `uuid@9/10`.
+   `functions/package-lock.json` now pins them, so they are reproducible rather than
+   drifting. Bump as its own commit with its own gate run.
+
 ## Where we are (2026-09-24, full-repo sweep + fix — ADR-015, executor lane, cloud session)
 
 - **Sweep:** 4 parallel read-only reviews (call core, security/pairing, tests/features, docs drift). Headline findings re-verified against source by the executor before any fix.
