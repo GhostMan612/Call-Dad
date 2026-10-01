@@ -38,6 +38,19 @@ val HelperPurpleLight = Color(0xFFF3E5F5)
  */
 val ChatPurple = Color(0xFF00796B)
 
+/**
+ * Pictures' tile colour: amber, and the last one.
+ *
+ * The Home grid is now six tiles. Every colour here is chosen to be far from the
+ * other four (green/blue/orange/purple/teal), and amber is the only remaining
+ * hue that is unmistakably distinct at a glance. If a seventh feature ever lands,
+ * the right answer is NOT another hue — it is a second row, because the whole
+ * reason the grid is a fixed no-scroll grid is that a 6-year-old can see every
+ * door at once. A grid that needs scrolling has already lost the property that
+ * makes it kid-safe.
+ */
+val PhotoAmber = Color(0xFFB26A00)
+
 val HangUpRed = Color(0xFFC62828)
 
 // ---- Chat (SPEC_SHEET §2.3) ----------------------------------------------

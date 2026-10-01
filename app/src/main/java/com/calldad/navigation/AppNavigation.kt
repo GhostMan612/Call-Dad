@@ -39,10 +39,12 @@ import com.calldad.ui.components.ParentGate
 import com.calldad.ui.screens.CallScreen
 import com.calldad.ui.screens.CallState
 import com.calldad.ui.screens.ChatScreen
+import com.calldad.ui.screens.ConsentScreen
 import com.calldad.ui.screens.GameScreen
 import com.calldad.ui.screens.HelperScreen
 import com.calldad.ui.screens.HomeScreen
 import com.calldad.ui.screens.PairingScreen
+import com.calldad.ui.screens.PhotoScreen
 import com.calldad.ui.screens.PttScreen
 import com.calldad.ui.screens.callViewModel
 import com.calldad.ui.screens.isLive
@@ -65,7 +67,8 @@ private const val INCOMING_CALL = "${Routes.CALL}?mode=incoming"
 fun AppNavHost(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
-    incomingCallRequest: Int = 0
+    incomingCallRequest: Int = 0,
+    onPickPhoto: () -> Unit = {}
 ) {
     // BP-05 §4 no-escape: the system back button must land on Home, never on
     // the device launcher. A child pressing back on the Helper or Game screen
@@ -121,6 +124,10 @@ fun AppNavHost(
                 onStartCall = { navController.openCall("${Routes.CALL}?mode=caller") },
                 onOpenPairing = {
                     navController.navigate(Routes.PAIRING) { launchSingleTop = true }
+                },
+                // Sibling of the gear, and equally gated — see ConsentScreen.
+                onOpenConsent = {
+                    navController.navigate(Routes.CONSENT) { launchSingleTop = true }
                 }
             )
         }
@@ -175,6 +182,28 @@ fun AppNavHost(
                     onCancel = { navController.returnHome() }
                 )
             }
+        }
+        composable(Routes.PHOTO) {
+            // Activity-scoped, same reasoning as the thread: a private copy
+            // would run a second Firestore listener and two decodes of the same
+            // 800KB photo.
+            //
+            // The picker is handed to the HOST, not launched here. This lane's
+            // rule is that the app holds no camera and no gallery handle of its
+            // own, and the only way the child's phone ever selects a picture is a
+            // system picker the OS owns.
+            PhotoScreen(
+                onBackHome = navController::returnHome,
+                onPickPhoto = onPickPhoto
+            )
+        }
+        composable(Routes.CONSENT) {
+            // The kill switch's ONLY trigger, and unreachable from the child's
+            // flow. `ConsentScreen` installs its own ParentGate internally, with
+            // the same `remember` (not `rememberSaveable`) discipline as pairing
+            // so a process death restores the child to the GATE and never into
+            // the controls.
+            ConsentScreen(onBackHome = navController::returnHome)
         }
     }
 

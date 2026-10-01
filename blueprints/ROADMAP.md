@@ -17,7 +17,8 @@
   - **✅ auto-reconnect via ICE restart** (was voided in RULES §1.7a).
   - **✅ missed-call callback card** (BP-05 §4's last open criterion) + the call log behind it (ADR-018: DataStore, not Room, with the cap and drop order pinned).
   - **✅ 1:1 text chat** (BP-03 / SPEC_SHEET §2.3): thread, honest receipts, no-link rule, pair-scoped rules. **No tappable links, no autoLink, no intents, no autocorrect** — a chat box is the widest hole the allowlist could have.
-  - **☐ photo sharing** (BP-04 / §2.4): the chunked, SHA-256-verified transport and its rules are DONE and host-tested (`PhotoTransfer`, byte-proof on synthetic fixtures). **The Android half — camera/picker, Bitmap→WEBP, and the screen — is not built.** The pure half being done is not the feature being done.
+  - **✅ photo sharing** (BP-04 / §2.4): chunked + SHA-256-verified transport, downscaled to 1080px WEBP, immutable manifest, pair-scoped rules, and a screen. Picking goes through the **permissionless system photo picker**, so the app holds no `READ_MEDIA_IMAGES` and no `CAMERA`; nothing is written back to the device's gallery. An unverified photo renders as a sentence, never as a half-decoded image.
+  - **✅ parent-side consent controls** — "Allow everything" / "Turn everything off" behind the grown-ups gate, so the kill switch has a button. Deliberately two actions, not a per-scope checkbox grid.
   - **☐ text chat + photo survive app restart**: neither is witnessed on a device.
   - **☐ every human-witnessed device proof below**, including the locked-phone checks.
 - [x] **Phase 6a — PTT encoder-drain re-test (K14):** CLOSED 2026-09-30. vc6/0.2.3 clean-built and installed to both phones; operator-witnessed both directions, no clipping and no dropped syllables. The 700ms silent tail lets the AAC encoder flush before the MPEG-4 container is finalised.

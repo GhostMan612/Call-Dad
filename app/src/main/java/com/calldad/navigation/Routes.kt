@@ -17,4 +17,10 @@ object Routes {
 
     /** 1:1 Dad thread (SPEC_SHEET §2.3, BP-03). */
     const val CHAT = "chat"
+
+    /** Pictures in the same thread (SPEC_SHEET §2.4, BP-04). */
+    const val PHOTO = "photo"
+
+    /** Parent-side consent grant/revoke. ALWAYS behind ParentGate. */
+    const val CONSENT = "consent"
 }

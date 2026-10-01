@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 enum class HomeDestination(val route: String, val label: String) {
     CALL(Routes.CALL, "Call Dad"),
     CHAT(Routes.CHAT, "Messages"),
+    PHOTO(Routes.PHOTO, "Pictures"),
     PTT(Routes.PTT, "Walkie Talkie"),
     GAME(Routes.GAME, "Play Games"),
     HELPER(Routes.HELPER, "Ask Helper")

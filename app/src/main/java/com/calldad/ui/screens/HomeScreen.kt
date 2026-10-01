@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsVoice
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.Icon
@@ -51,12 +53,14 @@ import com.calldad.ui.theme.CallGreen
 import com.calldad.ui.theme.ChatPurple
 import com.calldad.ui.theme.GameBlue
 import com.calldad.ui.theme.HelperPurple
+import com.calldad.ui.theme.PhotoAmber
 import com.calldad.ui.theme.PttOrange
 
 @Composable
 fun HomeScreen(
     onNavigate: (String) -> Unit,
     onOpenPairing: () -> Unit,
+    onOpenConsent: () -> Unit,
     onStartCall: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = viewModel(
@@ -79,6 +83,7 @@ fun HomeScreen(
         },
         onActionSelected = onNavigate,
         onOpenPairing = onOpenPairing,
+        onOpenConsent = onOpenConsent,
         modifier = modifier
     )
 }
@@ -104,6 +109,7 @@ private fun HomeContent(
     onCallbackTapped: () -> Unit,
     onActionSelected: (String) -> Unit,
     onOpenPairing: () -> Unit,
+    onOpenConsent: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -160,24 +166,46 @@ private fun HomeContent(
             }
         }
 
-        // Gear icon, top-end corner. 64dp touch target, 50% alpha
-        // tint. Visually subordinate to the four action cards so
-        // a 6-year-old does not press it accidentally.
-        IconButton(
-            onClick = onOpenPairing,
+        // The grown-ups area, top-end. TWO 64dp targets rather than one: the
+        // kill switch has to be reachable by a parent, and burying it inside a
+        // sub-menu of the gear is how a control that "exists but nobody can find
+        // it" happens. Both land on gated screens, so neither is a child-reachable
+        // capability — the gate is the boundary, not the button count.
+        //
+        // Visually subordinate to the tiles (50% alpha, small) so a 6-year-old
+        // does not press them by accident.
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(12.dp)
-                .size(64.dp)
-                .semantics { contentDescription = "Pair devices" }
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.onBackground
-                    .copy(alpha = 0.5f)
-            )
+            IconButton(
+                onClick = onOpenConsent,
+                modifier = Modifier
+                    .size(64.dp)
+                    .semantics { contentDescription = "Grown-ups settings" }
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Shield,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                )
+            }
+            IconButton(
+                onClick = onOpenPairing,
+                modifier = Modifier
+                    .size(64.dp)
+                    .semantics { contentDescription = "Pair devices" }
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                )
+            }
         }
     }
 }
@@ -235,6 +263,7 @@ private data class ActionVisuals(val icon: ImageVector, val container: Color)
 private fun HomeDestination.visuals(): ActionVisuals = when (this) {
     HomeDestination.CALL -> ActionVisuals(Icons.Filled.Call, CallGreen)
     HomeDestination.CHAT -> ActionVisuals(Icons.AutoMirrored.Filled.Chat, ChatPurple)
+    HomeDestination.PHOTO -> ActionVisuals(Icons.Filled.Photo, PhotoAmber)
     HomeDestination.PTT -> ActionVisuals(Icons.Filled.SettingsVoice, PttOrange)
     HomeDestination.GAME -> ActionVisuals(Icons.Filled.SportsEsports, GameBlue)
     HomeDestination.HELPER -> ActionVisuals(Icons.Filled.SmartToy, HelperPurple)
@@ -250,7 +279,8 @@ private fun HomeContentPreview() {
             callback = null,
             onCallbackTapped = {},
             onActionSelected = {},
-            onOpenPairing = {}
+            onOpenPairing = {},
+            onOpenConsent = {}
         )
     }
 }

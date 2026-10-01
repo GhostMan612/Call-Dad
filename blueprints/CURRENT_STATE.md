@@ -42,7 +42,10 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `history/CallLog.kt`, `history/CallLogStore.kt` | Call history + the missed-call callback card (BP-05 §4). DataStore, NOT Room — ADR-018 |
 | `consent/ConsentCert.kt` | Grant/revoke/expiry/scope gate. Absence DENIES. Revocation is a seq RANGE, not a flag — ADR-017 |
 | `consent/ConsentStore.kt` | Live certs from `calls/{room}/consents/` + append-only revocations; parent-side grant/revoke |
-| `photos/PhotoTransfer.kt` | Chunked, SHA-256-verified photo transport + downscale policy (BP-04). **Pure half only; no Android encoder or UI yet** |
+| `photos/PhotoTransfer.kt` | Chunked, SHA-256-verified photo transport + downscale policy (BP-04) |
+| `photos/PhotoClient.kt` | Send/receive over `calls/{room}/photos/`; chunks first, manifest last, unverified bytes never published |
+| `ui/screens/PhotoViewModel.kt`, `ui/screens/PhotoScreen.kt` | Picture screen. Decode gated on `verified`; system photo picker only, no share/save |
+| `ui/screens/ConsentScreen.kt` | Parent-side grant/revoke behind `ParentGate` — the kill switch's only trigger |
 
 Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (14 classes), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (40 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
@@ -135,7 +138,7 @@ One flavor per device; no crossed install.
 - **`versionCode 10 / 0.3.0` is SOURCE-ONLY.** Never built, never installed, never witnessed. Both phones are on **vc7 / 0.2.4**, which means two operator-reported defects are **live on the child's phone right now**: a voice message rings at full volume on a locked phone, and a call ring traps the grown-up on their own lock screen. The fixes are gated and reviewed in source; the device proof is what closes this. **This remains the single highest-priority open item.**
 - **The Firestore rules deployed live are the vc9-era set.** Chat, photos, consents and revocations are emulator-tested (40/40) and **not deployed**. No new feature works on a device until `firebase deploy --only firestore:rules` runs.
 - **The consent kill switch has never been exercised on a device.** The rules are proven against the emulator and the gate logic is host-tested, but no human has granted a scope and watched a child lose it.
-- **`PhotoTransfer` is the pure half of BP-04.** Chunking, ordering, and SHA-256 verification are host-tested on synthetic fixtures. There is no camera/picker, no Bitmap→WEBP encoder, and no photo screen, so photo sharing does not exist as a feature.
+- **Photo sharing has never sent a real photo.** The transport, digest, ordering, downscale policy and rules are all proven (byte-proof on synthetic fixtures, 40/40 emulator), but the Bitmap→WEBP path, the picker, and the screen have never run against a camera image. That is the largest untested surface in the app.
 - **`app/proguard-rules.pro` is a stub** and no release build has ever run. A missing keep rule there is a runtime crash, not a smaller APK.
 - **Text chat has never survived an app restart on a device.** The prune keeps unread history, but that is a source-level claim.
 - K12's screen-off PTT push, K21 (keyguard), and K17's tightened pairing read remain unproven on any build.

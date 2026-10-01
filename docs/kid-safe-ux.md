@@ -1,7 +1,7 @@
 # Kid-safe UX (6-year-old)
 
 - One giant Call Dad button (≥96dp, high contrast, haptic + ring). One-tap hangup always visible in-call. Auto-reconnect on LAN drop with loud status ("Calling Dad…").
-- One action per screen: Home (call), Chat (giant send), Walkie Talkie (hold to talk), Games, Ask Helper. Log = a missed call raises ONE giant "Call back" card on Home (built; no separate Log screen). No tabs-that-trap, no keyboards by default. **Note: text IS a keyboard, deliberately** — a 6-year-old cannot dictate at this age, and the composer is sandboxed instead (no autocorrect, no links, no intents): see criterion 10.
+- One action per screen: Home (call), Messages (giant send), Pictures (send/view), Walkie Talkie (hold to talk), Games, Ask Helper. A missed call raises ONE giant "Call back" card on Home (built; no separate Log screen). No tabs-that-trap, no keyboards by default. **Note: text IS a keyboard, deliberately** — a 6-year-old cannot dictate at this age, and the composer is sandboxed instead (no autocorrect, no links, no intents): see criterion 10.
 - No escape: no links/browser/store/settings reachable from kid screens; system back lands on Home; parent area behind biometric/PIN gate.
 - Statuses read aloud eventually (TTS lane later): sent→delivered→read as words ("Got there" / "Seen"). Words, not ticks — a tick legend needs a parent to explain it.
 - Fixtures/art: synthetic only (placeholder dad/kid avatars in `assets/`, fake names). Never commit real photos.
@@ -28,6 +28,7 @@ class of invented pass this repo keeps catching.
 | 9 | No real child data in committed screenshots | **PASS (machine)** | `KidUxAuditTest.noScreenshotOrMediaIsCommitted` — no `.png`/`.jpg`/`.jpeg`/`.webp`/`.heic` outside `res/drawable`, `build/`, `.git/`. |
 | 10 | The chat thread is not a way out | **PASS (machine)** | `ChatKidSafetyTest` (7 cases). The chat box is the widest hole the allowlist could have: a message is the one place a GROWN-UP authors text for a child. Bodies are plain `Text` — no `ClickableText`, no `autoLink`, no link preview, no `ACTION_VIEW`, no autocorrect/predictive keyboard. `ChatText` also *rejects* link-shaped text at send time, so the parent cannot arm it in the first place. Asserted against CODE, not comments. |
 | 11 | The thread cannot trap a child | **PASS (machine)** | Back arrow and send are both 96dp via a named `TOUCH_TARGET_DP` constant the test reads — a literal at the call site is exactly what gets "tidied" down to 64dp later. At most 4 `onClick` sites in the whole screen. |
+| 12 | Pictures are not a door to the device | **PASS (machine)** | `PhotoSafetyTest` (6 cases). The app requests **no** `READ_MEDIA_IMAGES`, no `READ/WRITE_EXTERNAL_STORAGE`, and **no `CAMERA`** — picking goes through the permissionless system photo picker, so a 6-year-old cannot browse the camera roll from inside this app. Nothing is written back to `MediaStore`, so a received photo cannot be read by any other app. There is no share or save affordance. An unverified photo renders a sentence, never partial bytes. |
 
 ### Known gaps this sheet is recording rather than hiding
 
@@ -36,9 +37,10 @@ class of invented pass this repo keeps catching.
   vc10; the device describes vc7. Treat every device-dependent row as unknown.
 - **Criterion 2 has never been measured.** No contrast ratio has ever been computed
   for either theme. Treat as unknown, not as passing.
-- **Photo sharing does not exist as a feature.** The header of this file lists
-  "Photo (take/send/view)" and a Log screen; neither is built. `PhotoTransfer` is
-  the transport half only, host-tested, with no camera, encoder, or screen.
+- **The consent screen has never been used.** Two buttons, a gate, and a
+  sequence-numbered grant — all host-tested, none of it seen by a human. The
+  highest-risk untested thing in the app is the one a parent will be looking at
+  the first time the child cannot call.
 - **A fresh install is inert until a parent grants consent.** Absence of a grant
   DENIES (ADR-017), so on a first run the child can reach nothing until the parent
   side grants. That is intended fail-closed behaviour and it is also the most
