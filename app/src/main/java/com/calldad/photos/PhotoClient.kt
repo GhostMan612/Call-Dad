@@ -23,6 +23,7 @@ import com.google.firebase.firestore.Query
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +47,11 @@ data class PhotoMessage(
     val height: Int,
     val totalBytes: Int,
     val verified: Boolean,
+    /**
+     * When it was sent, in epoch millis. Carried because the doc id is a random
+     * auto-id and cannot order anything — see [PhotoClient.prepend].
+     */
+    val createdAtMs: Long = 0L,
     val bytes: ByteArray? = null,
     val failure: String? = null
 ) {
@@ -61,6 +67,7 @@ data class PhotoMessage(
             height == other.height &&
             totalBytes == other.totalBytes &&
             verified == other.verified &&
+            createdAtMs == other.createdAtMs &&
             failure == other.failure &&
             (bytes?.size ?: -1) == (other.bytes?.size ?: -1) &&
             (bytes == null || other.bytes == null || bytes.contentEquals(other.bytes))
@@ -70,6 +77,7 @@ data class PhotoMessage(
         var result = id.hashCode()
         result = 31 * result + fromUid.hashCode()
         result = 31 * result + verified.hashCode()
+        result = 31 * result + createdAtMs.hashCode()
         result = 31 * result + (bytes?.contentHashCode() ?: 0)
         return result
     }
@@ -125,11 +133,24 @@ class PhotoClient(
         registration = null
         seen = mutableSetOf()
         _photos.value = emptyList()
-        // workScope is a long-lived field, not per-start, so it is deliberately
-        // NOT cancelled here: a photo mid-verify when the kid navigates away
-        // should still finish and land in the store. Cancelling it would
-        // interrupt a `get().await()` and leave a half-read transfer the next
-        // visit cannot recover from, since `seen` would no longer have the id.
+    }
+
+    /**
+     * Cancels the work scope. [PhotoViewModel.onCleared] calls this.
+     *
+     * [workScope] is a root `SupervisorJob` and nothing else can complete it, so
+     * without this every `PhotoClient` instance — one per activity-scoped
+     * ViewModel — leaks a live job for the life of the process, and any in-flight
+     * `loadOne` keeps running after the ViewModel is gone: downloading up to
+     * 800KB, reassembling, and publishing into a StateFlow nobody observes.
+     *
+     * `stop()` deliberately does NOT do this, because it is also called on a
+     * pairing change and a photo mid-verify should survive that. Stopping the
+     * listener and ending the object's life are different operations.
+     */
+    fun close() {
+        stop()
+        workScope.cancel()
     }
 
     fun clearProblem() { _problem.value = null }
@@ -255,10 +276,11 @@ class PhotoClient(
         val width = (doc.getLong("width") ?: 0L).toInt()
         val height = (doc.getLong("height") ?: 0L).toInt()
         val from = doc.getString("from").orEmpty()
+        val createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: 0L
         if (total <= 0 || count <= 0 || sha.length != 64) {
             _photos.value = prepend(
                 PhotoMessage(id, from, width, height, total, verified = false,
-                    failure = "That picture didn't arrive.")
+                    createdAtMs = createdAt, failure = "That picture didn't arrive.")
             )
             return
         }
@@ -273,22 +295,22 @@ class PhotoClient(
         val ordered = PhotoTransfer.orderByIndex(byId)
         when (val result = PhotoTransfer.reassemble(ordered, total, sha)) {
             is PhotoTransfer.Reassembled.Ok -> {
-                // Decode BEFORE publishing, so a byte-perfect-but-undecodable
-                // payload is a failure rather than a crash inside Compose.
-                val decoded = withContext(Dispatchers.Default) {
-                    BitmapFactory.decodeByteArray(result.bytes, 0, result.bytes.size)
-                }
-                if (decoded == null) {
-                    _photos.value = prepend(
-                        PhotoMessage(id, from, width, height, total, verified = false,
-                            failure = "That picture couldn't be opened.")
-                    )
-                } else {
-                    _photos.value = prepend(
-                        PhotoMessage(id, from, width, height, total, verified = true,
-                            bytes = result.bytes)
-                    )
-                }
+                // Do NOT decode here as a validity probe. This used to
+                // `BitmapFactory.decodeByteArray`, null-check the result, publish
+                // `result.bytes` and throw the bitmap away — never stored, never
+                // recycled. That is one abandoned ARGB_8888 bitmap per received
+                // photo: ~4.7MB native for a 1080px image, times the 24-photo
+                // window, i.e. well over 100MB of unreachable pixel data and a
+                // guaranteed OutOfMemoryError on a cheap phone.
+                //
+                // The bytes are the contract and the UI decodes them once, in a
+                // `remember` keyed on the id, inside a `runCatching`. Correctness
+                // of the payload is what the digest above just proved; decodability
+                // is the renderer's problem, and it already handles it.
+                _photos.value = prepend(
+                    PhotoMessage(id, from, width, height, total, verified = true,
+                        bytes = result.bytes)
+                )
             }
             is PhotoTransfer.Reassembled.Corrupt -> {
                 // The digest is the point of the whole transport. Never publish
@@ -296,15 +318,25 @@ class PhotoClient(
                 WebRtcLog.transition("Photo failed verification")
                 _photos.value = prepend(
                     PhotoMessage(id, from, width, height, total, verified = false,
+                        createdAtMs = createdAt,
                         failure = "That picture didn't arrive whole. Ask again?")
                 )
             }
         }
     }
 
+    /**
+     * Newest first, and capped to the newest [MAX_VISIBLE].
+     *
+     * Ordered by [PhotoMessage.createdAtMs], NOT by `id`: Firestore auto-ids are
+     * random 20-character strings, so sorting by id put a week-old picture above
+     * an hour-old one and let `take()` keep an arbitrary 24 rather than the 24 a
+     * child would expect to still be able to scroll back to. The listener queries
+     * `createdAt` DESCENDING for the same reason.
+     */
     private fun prepend(photo: PhotoMessage): List<PhotoMessage> =
         (listOf(photo) + _photos.value.filterNot { it.id == photo.id })
-            .sortedByDescending { it.id }
+            .sortedWith(compareByDescending<PhotoMessage> { it.createdAtMs }.thenBy { it.id })
             .take(MAX_VISIBLE)
 
     private companion object {

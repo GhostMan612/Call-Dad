@@ -105,18 +105,59 @@ class CallLogTest {
             rec("missed", at = now - 1_000, outcome = CallOutcome.MISSED),
             rec("answered", at = now - 2_000, outcome = CallOutcome.ANSWERED)
         )
-        val after = CallLog.clearCallbacks(rows, now)
-        // The miss is gone from the card path, and the answered call is still
-        // there: "not right now" must not cost the child their history.
+        val after = CallLog.dismissCallback(rows, now)
+        // The card is gone and the answered call is still there.
         assertNull(CallLog.callbackCard(after, now))
-        assertEquals(1, after.size)
-        assertEquals("answered", after[0].id)
+        assertEquals(2, after.size)
     }
 
     @Test
-    fun dismissingKeepsAStaleMissBecauseItIsAlreadySuppressed() {
+    fun dismissingDoesNotDELETETheMissedRow() {
+        // The original `clearCallbacks` FILTERED the rows out while its own KDoc
+        // promised "history stays" and `CallLogStore` promised the same. One tap on
+        // the card would have silently erased every miss in the window from the
+        // history screen and the parent would never know. It was latent only
+        // because the card was never raised (the no-answer path bypassed the log
+        // funnel), so fixing that bug would have activated this one.
+        val rows = listOf(rec("missed", at = now - 1_000, outcome = CallOutcome.MISSED))
+        val after = CallLog.dismissCallback(rows, now)
+        assertEquals("the missed row must survive being dismissed", 1, after.size)
+        assertEquals(CallOutcome.MISSED, after[0].outcome)
+        assertEquals("it must be marked dismissed, not deleted", now, after[0].dismissedAtMs)
+    }
+
+    @Test
+    fun aDismissedRowNeverOffersTheCardAgain() {
+        var rows = listOf(rec("missed", at = now - 1_000, outcome = CallOutcome.MISSED))
+        assertEquals("missed", CallLog.callbackCard(rows, now)?.id)
+        rows = CallLog.dismissCallback(rows, now)
+        assertNull(CallLog.callbackCard(rows, now))
+        // Still suppressed as time passes: the dismissal is permanent.
+        assertNull(CallLog.callbackCard(rows, now + CallLog.CARD_WINDOW_MS))
+    }
+
+    @Test
+    fun aNEWERMissStillOffersACardAfterAnOlderOneWasDismissed() {
+        // Suppression is per-ROW, not global. Otherwise acting on one card would
+        // permanently silence the callback feature for the rest of the window.
+        var rows = listOf(rec("old", at = now - 60_000, outcome = CallOutcome.MISSED))
+        rows = CallLog.dismissCallback(rows, now)
+        rows = CallLog.add(rows, rec("new", at = now - 500, outcome = CallOutcome.MISSED))
+        assertEquals("new", CallLog.callbackCard(rows, now)?.id)
+    }
+
+    @Test
+    fun dismissingWithNoCardIsANoOp() {
+        val rows = listOf(rec("answered", at = now - 1_000, outcome = CallOutcome.ANSWERED))
+        assertEquals(rows, CallLog.dismissCallback(rows, now))
+    }
+
+    @Test
+    fun aStaleMissIsNeverOfferedEvenWithoutADismissal() {
         val stale = rec("a", at = now - CallLog.CARD_WINDOW_MS - 1, outcome = CallOutcome.MISSED)
-        assertEquals(1, CallLog.clearCallbacks(listOf(stale), now).size)
+        assertNull(CallLog.callbackCard(listOf(stale), now))
+        // And dismissing it changes nothing, because there was nothing to dismiss.
+        assertEquals(1, CallLog.dismissCallback(listOf(stale), now).size)
     }
 
     // ---------- the log itself ----------

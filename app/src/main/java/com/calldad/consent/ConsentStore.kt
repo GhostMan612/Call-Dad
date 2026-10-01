@@ -64,11 +64,35 @@ class ConsentStore(
 
     private var grantReg: ListenerRegistration? = null
     private var revokeReg: ListenerRegistration? = null
+    private var authoredReg: ListenerRegistration? = null
     private var observed: String? = null
     private var ownUid: String? = null
     private var peerUid: String? = null
     private var grants: List<ConsentCert> = emptyList()
     private var revocations: List<ConsentCert> = emptyList()
+
+    /**
+     * True when THIS device has issued a consent cert in this room, i.e. it is
+     * the GRANTOR and therefore the grown-up.
+     *
+     * This is not a convenience — it is the only way the model works at all, and
+     * getting it wrong makes half the app unusable.
+     *
+     * `firestore.rules` requires `grantorUid == request.auth.uid != granteeUid`,
+     * so a member can never write a grant naming THEMSELVES. `SPEC_SHEET` §4 says
+     * the consent cert is "Dad-grants-Kid", so the only cert that ever exists
+     * names the child. A gate that then requires "this device holds a cert" is a
+     * gate that permanently denies the PARENT — and the parent's Messages and
+     * Pictures screens would show "turned off right now" forever, on the one
+     * phone that is supposed to do the allowing.
+     *
+     * So the roles are asymmetric by construction and the derivation has to be
+     * too: a device that has AUTHORED a cert is the grantor and holds every
+     * scope; a device that has only ever been named as a grantee is gated by
+     * [ConsentGate]. Absence still denies — a child who was never granted holds
+     * nothing, and a parent who has never granted has not set anything up.
+     */
+    private var isGrantor = false
 
     /**
      * Subscribes to the pair's consent docs and keeps [scopes] in step.
@@ -90,13 +114,16 @@ class ConsentStore(
         if (pair == null) {
             grantReg?.remove()
             revokeReg?.remove()
+            authoredReg?.remove()
             grantReg = null
             revokeReg = null
+            authoredReg = null
             observed = null
             ownUid = null
             peerUid = null
             grants = emptyList()
             revocations = emptyList()
+            isGrantor = false
             _scopes.value = emptySet()
             _decision.value = ConsentDecision.Denied(ConsentDenial.NO_CERT)
             return
@@ -112,22 +139,35 @@ class ConsentStore(
         val me = ownUid ?: return
         val peer = peerUid ?: return
         val now = System.currentTimeMillis()
-        val all = grants + revocations
-        val held = ConsentScope.entries
-            .filter { ConsentGate.forAction(all, me, peer, it, now).isGranted }
-            .toSet()
-        _scopes.value = held
+        _scopes.value = if (isGrantor) {
+            // The grown-up's own device. The rules make it impossible for them to
+            // hold a cert naming themselves, so gating on "do I hold a grant"
+            // would lock the parent out of the app they are configuring.
+            ConsentScope.entries.toSet()
+        } else {
+            val all = grants + revocations
+            ConsentScope.entries
+                .filter { ConsentGate.forAction(all, me, peer, it, now).isGranted }
+                .toSet()
+        }
         // The headline decision the UI shows. CALL is the coarsest scope the app
         // has, so it is the honest representative of "can this child talk to
         // their grown-up at all".
-        _decision.value = ConsentGate.forAction(all, me, peer, ConsentScope.CALL, now)
+        _decision.value = if (isGrantor) {
+            ConsentDecision.Granted
+        } else {
+            val all = grants + revocations
+            ConsentGate.forAction(all, me, peer, ConsentScope.CALL, now)
+        }
     }
 
     private fun listen(pair: FamilyPair) {
         grantReg?.remove()
         revokeReg?.remove()
+        authoredReg?.remove()
         grantReg = null
         revokeReg = null
+        authoredReg = null
 
         val base = firestore.collection("calls").document(pair.roomId).collection("consents")
 
@@ -152,6 +192,18 @@ class ConsentStore(
                 if (snap.metadata.isFromCache) return@addSnapshotListener
                 grants = snap.documents.mapNotNull { it.toGrant() }
                 recompute()
+            }
+
+        // "Have I ever issued a cert here?" — the parent/child discriminator.
+        // See [isGrantor]: the rules make a self-grant impossible, so this query
+        // is the only way the grown-up's own phone learns it is the grown-up.
+        authoredReg = base.whereEqualTo("grantorUid", pair.ownUid)
+            .addSnapshotListener { snap, err ->
+                if (err != null || snap == null) return@addSnapshotListener
+                if (snap.metadata.isFromCache) return@addSnapshotListener
+                val wasGrantor = isGrantor
+                isGrantor = snap.documents.isNotEmpty()
+                if (wasGrantor != isGrantor) recompute()
             }
 
         revokeReg = firestore.collection("calls").document(pair.roomId)
@@ -233,7 +285,14 @@ class ConsentStore(
         require(granteeUid == pair.peerUid || granteeUid == pair.ownUid) {
             "a cert may only name a member of this pair"
         }
-        require(throughGrantSeq >= 0) { "nothing has been granted at seq 0" }
+        // MUST be >= 1, not >= 0. Every real grant has grantSeq >= 1 (the rules
+        // enforce the floor), so a revocation of seq 0 cancels nothing at all --
+        // it is a write that succeeds, is permanent, and is completely inert. The
+        // caller must treat 0 as "I have not seen a grant yet", not "revoke
+        // everything", and must NOT report success.
+        require(throughGrantSeq >= 1) {
+            "nothing has been granted yet (seq 0), so a revocation would cancel nothing"
+        }
         firestore.collection("calls").document(pair.roomId)
             .collection("revocations")
             .add(

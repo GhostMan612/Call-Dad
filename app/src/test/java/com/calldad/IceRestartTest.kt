@@ -27,6 +27,17 @@
 //   3. Both sides restarting at once. Each side's OFFER overwrites the
 //      other's, leaving one waiting on an SDP already replaced.
 //
+//   4. THE ONE THAT ACTUALLY SHIPPED. The caller published a restart offer and
+//      then never applied the answer to it: `maybeApplyRenegotiation` opened
+//      with `if (amCaller) return`, and the caller had already applied the
+//      ORIGINAL answer for that same seq during setup, so even without that guard
+//      a seq-keyed apply is a permanent skip. The callee half was perfect and the
+//      feature was inert. Nothing about it was visible in review -- it re-gathered
+//      candidates, it published SDP, it had a cooldown and an idempotence latch --
+//      and it could not recover a call, ever. This is the one worth remembering:
+//      a feature that is fully implemented on one side and not the other looks
+//      exactly like a feature that works.
+//
 // As with QuietNotificationTest, these strip comments before scanning:
 // the fix's own comments name IceRestart and publishOffer to DESCRIBE the
 // bug, so a raw scan would match the prose and pass forever.
@@ -198,14 +209,163 @@ class IceRestartTest {
         // The room listener fires repeatedly for one document. Applying the same
         // restart OFFER twice would renegotiate into a second, needless ICE
         // cycle, and a restart that ignores seq could apply to a newer call.
+        //
+        // The idempotence guard is a ROUND, not a boolean. This assertion used to
+        // demand `renegotiationApplied`, which is exactly the defect: a latch set
+        // once and never reset makes a SECOND LOST episode unrecoverable, and
+        // there is no way to tell which of two offers in the same generation is
+        // the new one.
         val apply = body(vm, "private fun maybeApplyRenegotiation(")
         assertTrue(
             "the restart offer must be applied at most once. Body: " + apply,
+            apply.contains("appliedOfferRound")
+        )
+        assertFalse(
+            "the round guard must be a COMPARISON (`<=`), not a bare latch: a latch " +
+                "set once and never reset makes every later restart episode a no-op. " +
+                "Body: " + apply,
             apply.contains("renegotiationApplied")
         )
         assertTrue(
             "the restart offer must be checked against the live seq. Body: " + apply,
             apply.contains("s.seq != doc.seq") || apply.contains("s.seq == doc.seq")
+        )
+    }
+
+    // ---- failure 4 (the one that shipped broken): the caller never finished ----
+
+    @Test
+    fun theCallerAPPLIESItsOwnRestartAnswer() {
+        // THE BUG THIS FILE NOW EXISTS FOR. `maybeApplyRenegotiation` used to
+        // begin `if (amCaller) return`, so the side that published the restart
+        // offer never applied the answer. The feature was fully implemented on
+        // the callee and completely inert on the caller: the restart published an
+        // offer, the callee answered, and the caller discarded it. ICE
+        // re-gathered on the caller's own offer but the peer connection never
+        // received the matching answer, so connectivity never recovered.
+        //
+        // `seq` cannot be the guard, because the caller already applied the
+        // ORIGINAL answer for that same seq during setup.
+        val apply = body(vm, "private fun applyRenegotiationAnswer(")
+        assertTrue(
+            "the caller must have its own answer-applying path. Body: " + apply,
+            apply.isNotBlank()
+        )
+        assertTrue(
+            "the caller must set the remote description from the renegotiated " +
+                "answer, or the restart never completes. Body: " + apply,
+            apply.contains("setRemoteDescription(")
+        )
+        assertTrue(
+            "the caller must guard on the negotiation ROUND, not on seq: it already " +
+                "applied an answer for this seq during setup, so a seq guard is a " +
+                "permanent skip. Body: " + apply,
+            apply.contains("appliedAnswerRound") && apply.contains("negotiationRound")
+        )
+        assertTrue(
+            "the caller must release restartInFlight when the answer lands, or a " +
+                "second LOST episode is blocked forever. Body: " + apply,
+            apply.contains("restartInFlight = false")
+        )
+    }
+
+    @Test
+    fun theConnectedPathDispatchesToBothSides() {
+        // The one-line version of the same bug: a single unguarded call site
+        // reached only the callee.
+        val branch = codeOnly(
+            vm.substringAfter("private fun onSameGeneration(").substringBefore("\n    }")
+        )
+        assertTrue(
+            "the connected path must dispatch to the caller's answer path",
+            branch.contains("applyRenegotiationAnswer")
+        )
+        assertTrue(
+            "the connected path must dispatch to the callee's offer path",
+            branch.contains("maybeApplyRenegotiation")
+        )
+        assertTrue(
+            "the dispatch must be on amCaller, or one side is skipped. Found: " + branch,
+            branch.contains("amCaller")
+        )
+    }
+
+    @Test
+    fun theCalleeEchoesTheRoundItWasGiven() {
+        // If the callee invents a round instead of echoing, the caller's
+        // `negotiationRound <= appliedAnswerRound` guard rejects the answer and
+        // the two sides talk past each other forever.
+        val apply = body(vm, "private fun maybeApplyRenegotiation(")
+        assertTrue(
+            "the callee must publish the answer with the round it received. " +
+                "Body: " + apply,
+            apply.contains("publishRenegotiationAnswer(") &&
+                Regex("""publishRenegotiationAnswer\([^)]*doc\.negotiationRound""")
+                    .containsMatchIn(apply)
+        )
+    }
+
+    @Test
+    fun theRoundIsCarriedThroughTheDocumentAndTheRules() {
+        // The round is the wire contract. If it is not written, read back, or
+        // allowed by the rules, the whole mechanism silently degrades to
+        // "always zero" and the caller skips every answer.
+        val publish = body(signaling, "suspend fun publishRenegotiation(")
+        val answer = body(signaling, "suspend fun publishRenegotiationAnswer(")
+        assertTrue(
+            "publishRenegotiation must WRITE the round. Body: " + publish,
+            publish.contains("negotiationRound")
+        )
+        assertTrue(
+            "publishRenegotiationAnswer must WRITE the round. Body: " + answer,
+            answer.contains("negotiationRound")
+        )
+        assertTrue(
+            "the round must be READ back off the snapshot",
+            signaling.contains("getLong(\"negotiationRound\")")
+        )
+        assertTrue(
+            "CallDocument must carry negotiationRound",
+            signaling.contains("val negotiationRound: Int = 0")
+        )
+    }
+
+    @Test
+    fun theRoundAdvancesOnlyOnAConfirmedPublish() {
+        // Advancing on failure would leave the peer's answer to round N being
+        // compared against N+1, so it is discarded as stale and the two sides
+        // never rendezvous.
+        val restart = body(vm, "private fun attemptIceRestart(")
+        val advanceAt = restart.indexOf("nextNegotiationRound = round + 1")
+        val onSuccessAt = restart.indexOf(".onSuccess")
+        assertTrue(
+            "the round must advance inside onSuccess, i.e. only once the write is " +
+                "confirmed. Body: " + restart,
+            advanceAt > 0 && onSuccessAt >= 0 && advanceAt > onSuccessAt
+        )
+        assertTrue(
+            "a failed publish must release the in-flight latch so the next cooldown " +
+                "tick can retry. Body: " + restart,
+            body(vm, "private fun attemptIceRestart(").contains(".onFailure")
+        )
+    }
+
+    @Test
+    fun theInFlightLatchIsHeldAcrossTheWholeRoundTrip() {
+        // Releasing it right after the publish let a second LOST tick publish a
+        // second offer for a call whose first answer had not arrived, and the two
+        // overwrote each other.
+        val restart = body(vm, "private fun attemptIceRestart(")
+        val setTrue = restart.indexOf("restartInFlight = true")
+        val cleared = restart.lastIndexOf("restartInFlight = false")
+        assertTrue(
+            "the latch must be taken before the publish and released on failure only",
+            setTrue >= 0 && cleared >= 0 && setTrue < cleared
+        )
+        assertFalse(
+            "the latch must NOT be cleared unconditionally after the launch, or a " +
+                "second episode can start before the first answer lands. Body: " + restart,
+            Regex("""\}\s*\n\s*restartInFlight = false""").containsMatchIn(restart)
         )
     }
 
@@ -218,7 +378,8 @@ class IceRestartTest {
             vm.substringAfter("private fun onSameGeneration(").substringBefore("\n    }")
         )
         val endedAt = branch.indexOf("REMOTE_HANGUP")
-        val restartAt = branch.indexOf("maybeApplyRenegotiation")
+        val restartAt = branch.indexOf("applyRenegotiationAnswer")
+            .let { if (it < 0) branch.indexOf("maybeApplyRenegotiation") else it }
         assertTrue(
             "the terminal-state branch must exist",
             endedAt >= 0 && restartAt >= 0

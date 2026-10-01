@@ -117,10 +117,26 @@ class ConsentViewModel(application: Application) : AndroidViewModel(application)
      * The kill switch. Revokes through the HIGHEST sequence seen, so every
      * existing grant is cancelled in one append-only write — and a later grant
      * must carry a higher sequence to take effect again.
+     *
+     * REFUSES to act when no grant has been observed yet. `grants` is populated
+     * only from a non-cached snapshot, so on a cold start — or on the flaky
+     * network a parent reaches for the kill switch *because of* — `highestSeq` is
+     * 0, and a revocation of seq 0 cancels nothing while the UI cheerfully
+     * reports "Turned off." That is precisely the "a kill switch believed to be
+     * off and is not" failure this screen exists to prevent, and it is the worst
+     * possible moment to invent it: a parent in a hurry, on bad signal, trying to
+     * stop something.
      */
     fun revoke() = act {
         val p = requirePair() ?: return@act
-        store.revoke(p, p.peerUid, throughGrantSeq = _state.value.highestSeq)
+        val through = _state.value.highestSeq
+        if (through < 1) {
+            _state.value = _state.value.copy(
+                message = "Can't turn it off yet — still checking. Try again in a moment."
+            )
+            return@act
+        }
+        store.revoke(p, p.peerUid, throughGrantSeq = through)
             .onSuccess {
                 _state.value = _state.value.copy(
                     message = "Turned off. It stays off until you allow it again."

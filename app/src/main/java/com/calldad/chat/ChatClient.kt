@@ -167,8 +167,14 @@ class ChatClient(
         registration?.remove()
         registration = null
         val p = pair ?: return
+        // DESCENDING + limit, so the window is the NEWEST 200. This was ASCENDING,
+        // which made the window the OLDEST 200 while [prune] correctly kept the
+        // newest 200 — so once a thread passed 200 messages the newest ones fell
+        // outside the listener entirely: the child could send message 205 and see
+        // 1-200 on screen. The reducer still sorts ascending, so display order is
+        // unaffected; only the window is wrong.
         registration = firestore.collection("calls").document(p.roomId).collection("chat")
-            .orderBy("createdAt", Query.Direction.ASCENDING)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(MAX_WINDOW.toLong())
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) {

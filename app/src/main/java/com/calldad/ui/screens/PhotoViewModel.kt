@@ -98,21 +98,29 @@ class PhotoViewModel(application: Application) : AndroidViewModel(application) {
         }
         _state.value = s.copy(isSending = true, problem = null, justSent = false)
         viewModelScope.launch {
-            val result = client.send(p, bitmap, s.scopes)
-            _state.value = _state.value.copy(
-                isSending = false,
-                justSent = result.isSuccess,
-                problem = if (result.isSuccess) null
-                else "Couldn't send that picture. Try again."
-            )
-            if (result.isFailure) WebRtcLog.transition("Photo send failed")
-        }
-        // Recycle on the next frame's worth of work rather than inside the
-        // coroutine, because `client.send` scales the bitmap first and recycling
-        // a source that createScaledBitmap may still be reading is a race.
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(RECYCLE_GRACE_MS)
-            if (!bitmap.isRecycled) bitmap.recycle()
+            try {
+                val result = client.send(p, bitmap, s.scopes)
+                _state.value = _state.value.copy(
+                    isSending = false,
+                    justSent = result.isSuccess,
+                    problem = if (result.isSuccess) null
+                    else "Couldn't send that picture. Try again."
+                )
+                if (result.isFailure) WebRtcLog.transition("Photo send failed")
+            } finally {
+                // Recycle WHERE THE WORK ENDS.
+                //
+                // This used to be `delay(5_000)` on a separate coroutine, with a
+                // KDoc claiming it happened "in a `finally`" — there was no
+                // `finally`. A fixed timer is not a synchronisation primitive: a
+                // 1080px source on a low-end phone can still be inside
+                // `createScaledBitmap`/`compress` after 5s under memory pressure,
+                // and recycling then throws into `runCatching`, which turns a
+                // perfectly good photo into "Couldn't send that picture. Try again."
+                // It also leaked: a ViewModel cleared inside the window cancelled
+                // the coroutine and the ~6MB bitmap was never recycled at all.
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
         }
     }
 
@@ -122,13 +130,11 @@ class PhotoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        client.stop()
+        // `close`, not `stop`: the work scope is a root SupervisorJob that only
+        // this can complete, and an in-flight 800KB download would otherwise keep
+        // running for the life of the process and publish into a dead StateFlow.
+        client.close()
         super.onCleared()
-    }
-
-    private companion object {
-        /** Enough for the encode to finish reading the source. */
-        const val RECYCLE_GRACE_MS = 5_000L
     }
 }
 

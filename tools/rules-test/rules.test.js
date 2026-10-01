@@ -95,8 +95,56 @@ test("a new generation must be the writer's own RINGING offer", async () => {
 });
 
 test("seq can never go backwards", async () => {
-  await seed(ringing(KID, DAD, 5));
+  await seed(ringing(KID, DAD, 1));
   await assertFails(updateDoc(doc(db(DAD), "calls", ROOM), { seq: 4 }));
+});
+
+// ---- same-generation ICE-restart renegotiation (renegotiationRound) ----
+
+// The round is the wire contract that lets a reconnect COMPLETE rather than
+// merely be published: it is the only thing that distinguishes a renegotiated
+// answer from the one that originally connected the call, because both live at
+// the same seq. If the rules rejected the field, every restart would write
+// round 0 and the caller would skip the answer forever.
+test("renegotiation: a member may swap SDP in place, keeping seq and CONNECTED", async () => {
+  await seed({ ...ringing(KID, DAD, 1), status: "CONNECTED" });
+  await assertSucceeds(updateDoc(doc(db(KID), "calls", ROOM), {
+    offer: { type: "OFFER", sdp: "v=0-restart" },
+    renegotiating: true,
+    negotiationRound: 1,
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test("renegotiation: the peer answers in place, same seq, same round", async () => {
+  await seed({
+    ...ringing(KID, DAD, 1), status: "CONNECTED",
+    offer: { type: "OFFER", sdp: "v=0-restart" },
+    renegotiating: true, negotiationRound: 1,
+  });
+  await assertSucceeds(updateDoc(doc(db(DAD), "calls", ROOM), {
+    answer: { type: "ANSWER", sdp: "v=0-restart-answer" },
+    renegotiating: false,
+    negotiationRound: 1,
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test("renegotiation: a round CANNOT be reused, rolled back, or invented backwards", async () => {
+  await seed({ ...ringing(KID, DAD, 1), status: "CONNECTED", negotiationRound: 3 });
+  // Going backwards would let a late answer look newer than the offer it answers.
+  await assertFails(updateDoc(doc(db(DAD), "calls", ROOM), { negotiationRound: 2 }));
+  // So would forging one for a live call with no prior round.
+  await seed({ ...ringing(KID, DAD, 1), status: "CONNECTED" });
+  await assertFails(updateDoc(doc(db(DAD), "calls", ROOM), { negotiationRound: -1 }));
+});
+
+test("renegotiation: it is still a live room, so still undeletable, and outsiders still locked out", async () => {
+  await seed({ ...ringing(KID, DAD, 1), status: "CONNECTED", renegotiating: true, negotiationRound: 1 });
+  await assertFails(updateDoc(doc(db(EVE), "calls", ROOM), { negotiationRound: 2 }));
+  await assertFails(deleteDoc(doc(db(KID), "calls", ROOM)));
+  // A renegotiating room must not be usable to spoof a new generation.
+  await assertFails(setDoc(doc(db(EVE), "calls", ROOM), ringing(EVE, KID, 2)));
 });
 
 test("bogus status is rejected", async () => {

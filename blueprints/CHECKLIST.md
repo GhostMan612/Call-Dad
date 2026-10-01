@@ -54,31 +54,50 @@
 - [ ] Human: Studio sync (no new deps) → build → §H matrix (game both ways, simultaneous-tap race, PiP visible, Wi-Fi toggle recovery, clean logcat)
 
 ## Phase 11 — Static rooms + topic wakeup (architect prompt landed 2026-09-20, ADR-013)
-- [x] Static family_channel + seq + status + structured rules + topic FCM + foreground-first FGS + callee observation (role gates + child-only sub REJECTED)
-- [ ] Human: Studio sync (no new deps) → deploy rules+functions (REPLACES old rules) → §G matrix (rules proofs, 3× calls, restart recovery, clean logcat)
+> **SUPERSEDED by ADR-015** (pair-scoped rooms replaced `family_channel`). The `[x]` below records what landed and was then retired; nothing here should be re-ticked.
 
-## Phase 10 — Flavors + games hub + hardening (architect prompt landed 2026-09-20, ADR-012)
-- [x] parent/child flavors (blue/pink, APP_THEME, dynamic off) + full game hub (c4 bounds guard) + camera toggle verified
-- [ ] BLOCKER FIRST: console — register com.calldad.parent + com.calldad.child, merged google-services.json (builds fail until then)
-- [ ] Human: assembleParentDebug + assembleChildDebug → side-by-side install → blue/pink check → feature colors → c4 bounds torture (99/-1/banana) → clean logcat
+- [x] Static family_channel + seq + status + structured rules + topic FCM + foreground-first FGS + callee observation (role gates + child-only sub REJECTED)
+- [ ] Human: Studio sync (no new deps) → deploy rules+functions (REPLACES old rules) → §G matrix — **VOID: superseded by the Contract 8 pair-scoped deploy, which is DONE**
 
 ## Phase 9 — Ringtone + multi-TURN + games hub + voice bot (architect prompt landed 2026-09-20, ADR-011)
 - [x] TURN_URLS + audio-mode set/reset + single-ringer + voice helper (STT→bot→TTS) + game hub + host-tested bot
-- [ ] Human: Studio sync (no new deps) → TURN lines or empty → §K matrix (looping ringtone, vibration, jokes, airplane STT, multi-game sync, clean logcat)
+- [ ] Human: TURN lines or empty → §K matrix (looping ringtone, vibration, jokes, airplane STT, multi-game sync, clean logcat) — **partly superseded: TURN is now Open Relay by default and K8 is device-proven. Ringtone/vibration/jokes/multi-game remain unwitnessed.**
 
-## Phase 3 — Chat + remote (BP-03)
-- [ ] `SovereignCommsEngine` + receipts + voice memo
-- [ ] `RendezvousClient` + relay deploy; remote matrix proof (human)
+## Phase 10 — Flavors + games hub + hardening (architect prompt landed 2026-09-20, ADR-012)
+> **DONE.** Listed after Phase 11/9 in the original file purely by accident of authoring order; moved here so the numbers read in order.
 
-## Phase 4 — Photo + video (BP-04)
-- [ ] `SovereignImageEngine` photo E2E + receipt
-- [ ] Video spike decision (ADR) + LAN video proof (human)
-- [ ] Offline/direct-mode matrix (human)
+- [x] parent/child flavors (blue/pink, APP_THEME, dynamic off) + full game hub (c4 bounds guard) + camera toggle verified
+- [x] Console registration for `com.calldad.parent` + `com.calldad.child` + merged google-services.json (builds fail until then)
+- [x] `assembleParentDebug` + `assembleChildDebug` + side-by-side install + blue/pink check + feature colours + c4 bounds torture (99/-1/banana) + clean logcat — **device-proven through vc7**
 
-## Phase 5 — Hardening (BP-05)
-- [ ] Parent gate + consent cert + kill switch
-- [ ] SQLCipher (per ADR-003), kid-UX + no-escape audits
-- [ ] v0.1 device proof on Moto G + BLU View 5 (human)
+## BP-03 — Chat + remote (was mislabelled "Phase 3", which collided with the Phase 3 delivery phase)
+- [x] `ChatThread` pure reducer: monotonic receipts + idempotent ingest (BP-03's G3 gate, `ChatThreadTest`)
+- [x] `ChatText` no-link rule + `ConsentScope.TEXT` gate (`ChatTextTest`)
+- [x] `ChatClient` over `calls/{room}/chat/`; DELIVERED stamped by the RECEIVER, never on write success
+- [x] `ChatViewModel` + `ChatScreen`; activity-scoped so two listeners cannot race the receipts
+- [x] Rules stanza + emulator tests (bounded body, immutable sender/body, receipts-only update)
+- [x] `ChatKidSafetyTest`: no ClickableText/autoLink/intents/autocorrect, asserted against CODE
+- [x] `RendezvousClient` + relay — **NOT NEEDED, SUPERSEDED by ADR-015**: the Firebase pair room replaced the rendezvous relay, so the donor port is retired rather than ported. The spec's "remote works via rendezvous" is met by pair-scoped Firestore signaling plus an ICE relay for media (ADR-004 WebRtcConfig, K8 device-proven). This line is closed by a DECISION, not by omission.
+- [ ] Human: thread survives app restart on both phones; a 500-char message and a link-shaped message both behave
+
+## BP-04 — Photo + video (was mislabelled "Phase 4")
+- [x] `PhotoTransfer` chunk + zero-padded index + SHA-256 verify (`PhotoTransferTest` byte-proof on synthetic fixtures)
+- [x] `PhotoClient` send/receive; chunks first, manifest last; unverified bytes never published (`PhotoClientTest`)
+- [x] `PhotoViewModel` + `PhotoScreen`; decode gated on `verified`
+- [x] Permissionless system picker: NO `READ_MEDIA_IMAGES`, NO `CAMERA`, no MediaStore write (`PhotoSafetyTest`)
+- [x] Rules stanza: immutable manifest, index==docId, per-chunk and total byte caps
+- [x] Video spike decision — **ADR-005, WebRTC (stream-webrtc-android 1.3.10)**, and the donor UDP `LiveCallSession` port was dropped in its favour. Device-proven both ways.
+- [ ] Human: a real photo is sent, verified, and rendered on the other phone
+- [ ] Human: offline/direct-mode matrix (airplane+WiFi, hotspot host, hotspot join, Wi-Fi-Direct). Source behaviour is bounded — a lost call ends at `LOST_GRACE_MS` and the child returns Home.
+
+## BP-05 — Hardening (was mislabelled "Phase 5")
+- [x] Parent gate (`ParentGate.kt`) + `ConsentScreen` behind it, `remember` not `rememberSaveable`
+- [x] Consent cert + kill switch, fully enforced: append-only seq-range revocation (ADR-017)
+- [x] SQLCipher closed as a deferral-with-justification (ADR-003, sharpened by ADR-018)
+- [x] kid-UX audit sheet + `KidUxAuditTest` (12 criteria, machine/HUMAN split)
+- [x] Release-signing plan (`docs/release-signing.md`, `signingConfigs`, proguard stub)
+- [x] Missed-call callback card + call log (ADR-018: DataStore, not Room)
+- [ ] v0.1 device proof on Moto G + BLU View 5 (human) — the remaining BP-05 gate
 
 ## Contracts 2–6 — Signaling rebuild → pairing → reliability (landed 2026-09-21/22, pushed)
 - [x] C2&3: 7-state CallState + per-call rooms + topic wakeup + wakelock + strings (Mama/Dad)
@@ -127,7 +146,7 @@ Six read-only auditors (call core, media, Firestore rules, FCM wakeup, kid UX, d
 - [x] `sendLocalCandidate` carries the attempt + client reference (was: generation-*n* ICE landed in generation *n+1*)
 - [x] `onPairChanged` writes the room before resetting (was: silent local `Idle`, peer rang to its own timeout)
 - [x] Removed the first-launch system-Settings escape (`MainActivity` was the app's only `startActivity` — the only route out of the sandbox)
-- [x] "Connection lost. Reconnecting…" → "Connection lost…" (`RECONNECTING` is never assigned; no `restartIce` exists) + `RULES.md` §1.7a records reconnect as not implemented
+- [x] "Connection lost. Reconnecting…" → "Connection lost…" (`RECONNECTING` is still never assigned) — **and this line's claim that "no `restartIce` exists" is now OBSOLETE: ICE-restart ships, and the screen string is still correct because the restart is transparent.** Fixed again in Contract 11, where the restart turned out to be published-but-never-answered on the caller side.
 - [x] Raw `Throwable.message` no longer rendered on the child's Error card
 - [x] Speakerphone engaged on ICE connect, not on peer-connection creation (was: caller's phone switched to speaker for the whole 45s ring; a receive-only phone never switched)
 - [x] `VideoRenderer.removeSink` guarded — the `MediaStreamTrack has been disposed` twin of the hangup crash (Compose disposes the sink one frame after `pc.dispose()`); false "no-op" KDoc corrected
@@ -175,3 +194,21 @@ Six read-only auditors (call core, media, Firestore rules, FCM wakeup, kid UX, d
 - [ ] **Operator: re-pair both phones under the tightened K17 read.** The rule is deployed and emulator-tested, but whether a real phone completes a fresh pairing under owner-or-named-peer only is unwitnessed. If the client assumed any-signed-in could read, pairing fails here — which is the correct, safe failure.
 - [ ] **Operator: K11 remainder** — killed-app ring, force-stop, doze, no-answer timeout, lost-peer end, game sync mid-call. All human-witnessed; no host test can assert them.
 - [ ] **Still open (tracked in CURRENT_STATE):** K20 pruning is client-triggered so a fully-dormant pair never prunes (accepted — a Firestore TTL would need a scheduled function and a billed index, and a dormant pair costs cents); TURN creds are long-lived and APK-extractable (accepted, override path documented); K8 proven for a normal NAT, not a symmetric one.
+
+## Contract 11 — v0.1 feature completion + the reconnect fix (2026-10-01)
+
+Source-only work closing the gap between `SPEC_SHEET.md` §2 and the app. No device claim anywhere in this section.
+
+- [x] **Text chat (BP-03)** — thread, monotonic receipts, idempotent ingest, the no-link rule, pair-scoped rules, UI. `ChatThreadTest` + `ChatTextTest` + `ChatKidSafetyTest`.
+- [x] **Call log + missed-call callback card (BP-05 §4)** — the criterion the kid-UX audit had been recording as an open FAIL. `CallLogTest` pins the card, the 24h window, the decline exclusion, the cap and the drop order.
+- [x] **Consent cert + kill switch, enforced (ADR-017)** — was an inert domain model. Grant/revoke path, `ConsentStore`, rules, and a `ConsentScreen` behind `ParentGate`. Revocation redesigned as an append-only **seq range** after two emulator failures showed a `revokedAt` flag is destroyed by a re-grant AND that making it permanent bricks a child's phone on one accidental tap.
+- [x] **Photo sharing (BP-04)** — the Android half, which the previous commit left as transport-only. Encoder, client, permissionless picker, screen, rules. `PhotoTransferTest` + `PhotoClientTest` + `PhotoSafetyTest`.
+- [x] **STORE DECISION: no Room (ADR-018)** — the call log is DataStore, the chat thread is pair-scoped Firestore. `SPEC_SHEET` §2.5's "local Room" and §4's "stay on-device" are both recorded as **NOT met** rather than reinterpreted. ADR-003 stays closed with a sharpened re-open condition.
+- [x] **ICE-restart reconnect FIXED — it shipped broken and was declared working.** `maybeApplyRenegotiation` opened `if (amCaller) return`, so the side that published the restart offer never applied the answer; and the guard that would have caught it was keyed on `seq`, which the caller had already consumed for the original answer. Replaced with a monotonic `negotiationRound` carried through the document and the rules. Six new host tests plus four emulator cases pin it. **This is the single most important bug in this contract** — see the lesson in `LESSONS_LEARNED.md`.
+- [x] **`gate` tool fixed** — it reported GREEN from a tree where `compileParentDebugKotlin` was failing. It had **no `rules` gate at all**, and `r.out || r.err` discarded the Kotlin diagnostics. Now: a real emulator gate with a JVM path, concatenated output, a 200-line tail, and a verdict that says "GREEN BUT n SKIPPED".
+- [x] **`versionCode` 9 → 10 / `0.2.6` → `0.3.0`** — MUST NOT be reused, because absence of a consent grant now DENIES: a phone on 9 and a phone on 10 behave OPPOSITELY on a fresh install, and two phones on the same "version" would disagree about whether the app works.
+- [x] **Blueprints repaired** — three duplicate phase numbers, BP-03/04/05 retitled and re-ticked, superseded phases marked VOID rather than left looking open.
+- [x] **Gate G-C11 host** — GREEN: verify PASS; unit PASS both flavors; lint 0 errors 0 warnings; `functions` 13/13; **rules emulator 44/44**.
+- [x] **Operator: clean `assembleParentDebug`+`assembleChildDebug`** BUILD SUCCESSFUL, `versionCode 10` / `0.3.0` confirmed in `output-metadata.json` for both flavors. Not installed.
+- [ ] **Operator: `firebase deploy --only firestore:rules`.** REQUIRED. The live rules are still the vc9-era set; `chat`, `photos`, `consents`, `revocations` and `negotiationRound` are all denied on a real device until this runs.
+- [ ] **Operator: flash vc10 to both phones** and witness: the consent flow (fresh install is inert until a parent allows), a text message both ways, a real photo sent and verified, the missed-call callback card, and the locked-phone quiet-notification + keyguard checks (K12/K21) that have been open since vc9.

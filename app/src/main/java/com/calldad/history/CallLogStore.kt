@@ -46,10 +46,14 @@ class CallLogStore(private val context: Context) {
         }
     }
 
-    /** Dismisses the callback card without erasing history. */
+    /**
+     * Marks the current callback card as acted on. The row is KEPT — the child
+     * did miss a call, and a log that erases itself when you look at it is not a
+     * log. See [CallLog.dismissCallback] for why this was once a delete.
+     */
     suspend fun dismissCallback(nowMs: Long) {
         context.callLogStore.edit { prefs ->
-            val rows = CallLog.clearCallbacks(decode(prefs[ROWS].orEmpty()), nowMs)
+            val rows = CallLog.dismissCallback(decode(prefs[ROWS].orEmpty()), nowMs)
             prefs[ROWS] = encode(rows)
         }
     }
@@ -65,7 +69,10 @@ class CallLogStore(private val context: Context) {
                 r.startedAtMs.toString(),
                 r.durationMs.toString(),
                 r.outcome.name,
-                if (r.wasOutgoing) "1" else "0"
+                if (r.wasOutgoing) "1" else "0",
+                // Empty for the overwhelming majority of rows, which keeps the
+                // common case one character wider than before.
+                r.dismissedAtMs?.toString().orEmpty()
             ).joinToString(FIELD)
         }
 
@@ -73,6 +80,8 @@ class CallLogStore(private val context: Context) {
         if (raw.isEmpty()) return emptyList()
         return raw.split(SEP).mapNotNull { line ->
             val f = line.split(FIELD)
+            // 5 fields is the pre-dismissal shape and must still decode: an
+            // existing phone must not lose its history because the format grew.
             if (f.size < 5) return@mapNotNull null
             val outcome = runCatching { CallOutcome.valueOf(f[3]) }.getOrNull()
                 ?: return@mapNotNull null
@@ -81,7 +90,8 @@ class CallLogStore(private val context: Context) {
                 startedAtMs = f[1].toLongOrNull() ?: return@mapNotNull null,
                 durationMs = f[2].toLongOrNull() ?: return@mapNotNull null,
                 outcome = outcome,
-                wasOutgoing = f[4] == "1"
+                wasOutgoing = f[4] == "1",
+                dismissedAtMs = f.getOrNull(5)?.takeIf { it.isNotEmpty() }?.toLongOrNull()
             )
         }
     }
@@ -93,7 +103,6 @@ class CallLogStore(private val context: Context) {
          */
         const val SCHEMA = 1
         val ROWS = stringPreferencesKey("rows_v$SCHEMA")
-
         /**
          * ASCII record (0x1E) and unit (0x1F) separators, built from Char() on
          * purpose. Written as `"\u001F"` they are one keystroke from being

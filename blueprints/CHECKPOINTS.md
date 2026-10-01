@@ -1,13 +1,53 @@
 # CHECKPOINTS.md — Call-Dad gates
 
 > No checklist tick without its gate passing. Evidence before status.
+>
+> **Every gate below is either PASSING today or explicitly VOID with a named
+> supersession.** That property did not hold before 2026-10-01: G2 demanded a
+> cipher round-trip and an Opus smoke test for code that was never in the build
+> (no `AudioFrameCipher`, no Concentus — `AGENTS.md` "Not in the build"), and G3
+> demanded a rendezvous-relay proof for a relay ADR-015 deleted. A gate nobody can
+> pass is worse than no gate, because it trains a reader to ignore the ones that
+> matter. Those are now marked VOID with the decision that replaced them.
 
-- **G0 scaffold:** `C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py` exits 0 (tree + required docs + no secrets + no real-child-data strings). Evidence: pasted tail output.
-- **G1 skeleton:** `.\gradlew :app:testParentDebugUnitTest :app:testChildDebugUnitTest` (≥1 test PASS) + `:app:lintParentDebug :app:lintChildDebug` (0 errors for touched modules). Evidence: the gate's own final summary block, pasted. No `assemble*` claims. (Evidence is the operator's paste or the agent's single end-of-phase gate run — never a re-run per edit; RULES §1.4a.)
-- **G2 voice (host):** signaling state-machine unit tests (Invite→Accept/Decline→End + replay/echo guards) + cipher round-trip (encrypt→decrypt, tamper→drop) + Opus encode/decode smoke. Evidence: test counts.
-- **G2-device:** human on Moto G: LAN ring <3s, intelligible voice ≥30s, hangup + redial. Evidence: human pasted `adb devices` + narrative (never claimed by this lane).
-- **G3 chat+remote:** receipt transitions (sent→delivered→read) unit-proven; idempotent ingest (duplicate→single); remote signaling via relay (human proof both networks).
-- **G4 photo+video:** photo chunk→reassemble byte-identical (host fixture) + on-device E2E (human); video spike: decision ADR + LAN preview both ends (human).
-- **G5 hardening:** parent-gate test (kid flow cannot add contact; parent flow can), consent-expiry enforcement, SQLCipher open/close (if ADR-003 yes), kid-UX audit sheet signed, no-escape audit (no browser/store/settings exit).
-- **G-C8 (ADR-015) host:** `:app:testParentDebugUnitTest :app:testChildDebugUnitTest` PASS + `:app:lintParentDebug :app:lintChildDebug` 0 errors + `node --test functions/ring.test.js` PASS + `tools/rules-test` 15/15 on the emulator + verify PASS. STATUS: GREEN 2026-09-24 (lane-run).
-- **G-C8 device (human):** after rules+functions deploy and a fresh re-pair: (1) ring from Home, PTT, Game, Helper and with the app killed; (2) answer, hang up from each side (no crash, other side returns home); (3) no answer → "No answer yet" on caller, ring stops on callee; (4) both tap Call at once → one connected call; (5) kill one app mid-call → other side ends within ~25s; (6) game synced during a call and solo without; (7) pairing blocked without the gate answer; scanning only one direction never changes the contact. Evidence: operator narrative + logcat `-s WebRTC:D`.
+## Standing gate (this lane may run it)
+
+- **G-ALL host:** `tools/verify_project.py` + `:app:testParentDebugUnitTest :app:testChildDebugUnitTest` + `:app:lintParentDebug :app:lintChildDebug` + `node --test functions/*.test.js` + the Firestore rules emulator, via the **`gate` tool**.
+  - STATUS: **GREEN 2026-10-01** — verify PASS; unit PASS both flavors; lint 0 errors 0 warnings; functions 13/13; **rules emulator 44/44**.
+  - The `gate` tool is the sanctioned entry point (RULES §1.4a). It names a SKIPPED suite in the verdict rather than folding it into a green, and it runs the rules emulator with the Studio JBR on PATH so a security gate cannot vanish. Evidence: the verdict line plus the per-gate blocks.
+
+## Historical phases
+
+- **G0 scaffold:** verify_project.py exits 0 (tree + required docs + no secrets + no real-child-data strings). Evidence: pasted tail. **GREEN.**
+- **G1 skeleton:** flavored unit tests PASS + flavored lint 0 errors. Evidence: the gate's own summary block. **GREEN** (superseded in practice by G-ALL).
+- **G2 voice (host):** signaling state-machine tests + replay/echo guards. **GREEN as narrowed.**
+  - **VOID (2026-10-01):** the cipher round-trip and Opus encode/decode clauses. There is no `AudioFrameCipher` in the build and no Concentus; WebRTC supplies DTLS-SRTP and Opus internally (ADR-005). Nothing to test, and a gate that names absent code sends a reader looking for it.
+- **G2-device (human):** ring, intelligible voice ≥30s, hangup + redial on Moto G. **GREEN** — device-proven 2026-09-30.
+- **G3 chat + remote:** receipt transitions proven, duplicate ingest → single row, remote reachability. **GREEN on the host half.**
+  - Receipt transitions and duplicate-ingest single-row: `ChatThreadTest`.
+  - **VOID:** "remote signaling via relay". The rendezvous relay is superseded by pair-scoped Firestore rooms (ADR-015) plus an ICE relay for media (K8, device-proven). The SPEC_SHEET §2.3 "remote works via rendezvous" is met by a different mechanism; the clause is retired rather than left satisfiable only by resurrecting a retired design.
+  - REMAINING (human): a message survives an app restart on both phones.
+- **G4 photo + video:** photo chunk→reassemble byte-identical on a host fixture + device E2E; video decision ADR. **Host half GREEN.**
+  - Byte-proof: `PhotoTransferTest`, synthetic fixtures only. Verdict: a flipped byte, a missing chunk, and reordered chunks are each caught.
+  - Device E2E: **REMAINING (human)** — no real photo has ever been sent.
+  - Video: ADR-005 DECIDED WebRTC; both-way video device-proven 2026-09-30. **GREEN.**
+  - **The donor `SovereignImageEngine` port is NOT required** — the encode/chunk/verify/assemble chain in `PhotoTransfer` + `PhotoClient` is a fresh implementation that meets the same contract, and the byte-proof is the evidence.
+- **G5 hardening:** parent gate, consent enforcement, kid-UX sheet, no-escape audit. **Host half GREEN; device half is the last open v0.1 item.**
+  - Parent gate: `ParentGate` + `ConsentScreenSafetyTest` (parent-only AND findable).
+  - Consent: `ConsentGateTest` (expiry, revocation, scope, party, prospectivity) + `firestore.rules` consents/revocations stanzas.
+  - **VOID (conditional clause):** "SQLCipher open/close (if ADR-003 yes)". ADR-003 is a deferral-with-justification and ADR-018 sharpens when it re-opens (the first LOCAL message/photo store). A conditional gate on a deferred decision is a gate that can never close; it is now a named re-open condition instead.
+  - Kid-UX: `docs/kid-safe-ux.md` 12 criteria with a machine/HUMAN split; `KidUxAuditTest` + `ChatKidSafetyTest` + `PhotoSafetyTest`.
+  - No-escape: no `ACTION_VIEW`/`BROWSABLE`/`SEND`/`WEB_SEARCH`/`market://` in `ui/`; system back pops to Home; the only `startActivity` is internal.
+  - REMAINING (human): the whole v0.1 walkthrough on both phones.
+- **G-C8 device (human, ADR-015):** ring from every screen, answer, hangup each side, no-answer, glare, mid-call kill, game sync, pairing gate. **PARTIAL** — items 1–4 and the mobile-data call are PROVEN; killed-app ring, force-stop, doze, no-answer timeout, lost-peer end and game sync mid-call remain unwitnessed. This is CURRENT_STATE K11.
+- **G-C11 host (2026-10-01):** the reconnect fix. `IceRestartTest` now pins the CALLER side explicitly — the half that shipped missing — plus the round monotonicity in `firestore.rules` (4 emulator cases). **GREEN**, and the reason is written up in ADR-010 (7).
+
+## Rules that gate the rules
+
+The emulator suite is a **security** gate, and a security gate that skips must never read as green. Two clauses in `firestore.rules` were nearly unmeetable and cost real debugging time; both are recorded where they now live so they are not rediscovered:
+
+1. A nested `match` block cannot reliably resolve a wildcard bound in an **ancestor** match block — it throws an *evaluation error* instead of denying, and an evaluation error is indistinguishable from a permission problem in a log line. Everything is one level below the room.
+2. A Firestore path must have an **odd** number of segments to be a collection. A two-segment-below-room collection reference is a document, and the client SDK rejects the call outright.
+
+Run the suite with the JVM on PATH, or it exits non-zero and looks like a pass-by-skip:
+`cd tools\rules-test; $env:JAVA_HOME="C:\android\Android Studio\jbr"; $env:Path="$env:JAVA_HOME\bin;$env:Path"; npx firebase emulators:exec --only firestore --project demo-calldad "node --test"`

@@ -67,7 +67,15 @@ data class CallRecord(
     val startedAtMs: Long,
     val durationMs: Long,
     val outcome: CallOutcome,
-    val wasOutgoing: Boolean
+    val wasOutgoing: Boolean,
+    /**
+     * When the callback card for THIS row was acted on, or null.
+     *
+     * The card is suppressed once this is set, and the row itself is kept. A
+     * separate flag rather than a deletion because a call log that erases itself
+     * when you look at it is not a call log — see [dismissCallback].
+     */
+    val dismissedAtMs: Long? = null
 ) {
     val isCallbackCandidate: Boolean get() = outcome.wantsCallback
 }
@@ -108,11 +116,33 @@ object CallLog {
         rows: List<CallRecord>,
         nowMs: Long
     ): CallRecord? = ordered(rows)
-        .firstOrNull { it.isCallbackCandidate }
+        .firstOrNull { it.isCallbackCandidate && it.dismissedAtMs == null }
         ?.takeIf { nowMs - it.startedAtMs <= CARD_WINDOW_MS }
 
-    fun clearCallbacks(rows: List<CallRecord>, nowMs: Long): List<CallRecord> =
-        rows.filterNot { it.isCallbackCandidate && nowMs - it.startedAtMs <= CARD_WINDOW_MS }
+    /**
+     * Marks a callback card as DISMISSED, keeping the row.
+     *
+     * This used to be called `clearCallbacks` and it DELETED the rows — while its
+     * own KDoc promised "Dismisses the callback card without erasing history" and
+     * `CallLogStore` promised "History stays; only the prompt goes." The code and
+     * its two promises disagreed, and the loser was the history: one tap on the
+     * callback card would have silently removed every miss in the window from the
+     * call log, and the parent would never know. It was latent only because the
+     * card was never raised at all (the no-answer path bypassed the log funnel),
+     * so fixing that bug would have activated this one.
+     *
+     * A stored timestamp of dismissal is the honest representation: the card
+     * stops offering itself, the fact that the call was missed stays true.
+     *
+     * @param dismissedAtMs when the card was acted on. Rows the child has since
+     *   seen a NEWER miss of are not affected.
+     */
+    fun dismissCallback(rows: List<CallRecord>, nowMs: Long): List<CallRecord> {
+        val target = callbackCard(rows, nowMs) ?: return rows
+        return rows.map { row ->
+            if (row.id == target.id) row.copy(dismissedAtMs = nowMs) else row
+        }
+    }
 
     const val CARD_WINDOW_MS = 24L * 60L * 60L * 1000L
 }

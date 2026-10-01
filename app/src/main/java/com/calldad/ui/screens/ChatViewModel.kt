@@ -20,6 +20,7 @@ import com.calldad.chat.ChatMessage
 import com.calldad.chat.ChatText
 import com.calldad.chat.Receipt
 import com.calldad.consent.ConsentScope
+import com.calldad.consent.ConsentStore
 import com.calldad.data.session.FamilyPair
 import com.calldad.data.session.FamilySession
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,12 +45,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val client = ChatClient()
 
+    /**
+     * Consent is read LIVE, not fetched once.
+     *
+     * This was originally missing, and the omission made the entire chat feature
+     * unreachable: `scopes` stayed `emptySet()`, so `ChatScreen`'s
+     * `ConsentScope.TEXT !in state.scopes` was permanently true and the only thing
+     * Messages ever rendered was "Messaging is turned off right now." — a
+     * complete, reviewed, green-gated feature that could not be used. `PhotoViewModel`
+     * had the same wiring from the start, which is the only reason the bug was
+     * in one file and not two.
+     */
+    private val consent = ConsentStore()
+
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var startedFor: String? = null
 
     init {
+        consent.start(application, viewModelScope)
+        viewModelScope.launch {
+            // A parent can withdraw the TEXT grant while the child is mid-
+            // sentence, and the thread must close on its own. Reactive, not
+            // fetched once at open.
+            consent.scopes.collect { held ->
+                _state.value = _state.value.copy(scopes = held)
+            }
+        }
         viewModelScope.launch {
             client.messages.collect { rows ->
                 _state.value = _state.value.copy(messages = rows)
@@ -60,9 +83,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.value = _state.value.copy(problem = p?.message)
             }
         }
-        // Pairing and consent are both read reactively: a child can be paired
-        // while this screen is already open, and a parent can withdraw the TEXT
-        // grant while the child is mid-sentence. Neither may need a restart.
+        // Pairing is read reactively: a child can be paired while this screen is
+        // already open, and a parent can withdraw the TEXT grant while the child
+        // is mid-sentence. Neither may need a restart.
         viewModelScope.launch {
             FamilySession.pair(getApplication()).collect { pair -> onPair(pair) }
         }
@@ -80,11 +103,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             startedFor = pair.roomId
             client.start(pair, viewModelScope)
         }
-        // Only open the thread once, and only while it is actually on screen:
-        // marking read is what tells the other phone the child saw the message,
-        // so doing it on a background destination would tick messages nobody
-        // looked at.
-        markVisibleAsRead()
+        // DELIBERATELY NOT `markVisibleAsRead()` here.
+        //
+        // This collector fires on pairing change, which happens on ANY screen —
+        // including the Call screen, while the child is in a video call. Marking
+        // read from there ticks messages the child never looked at, and the other
+        // phone then shows "Seen" for words they never saw. A receipt that lies
+        // is worse than no receipt, which is the entire reason receipts here are
+        // stamped by the RECEIVER and not on write. Only `ChatScreen` marks read,
+        // and only while it is the current destination.
     }
 
     /** Called when the Chat destination becomes the current destination. */

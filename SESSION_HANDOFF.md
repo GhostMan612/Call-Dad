@@ -11,15 +11,95 @@
 | 1 | `RULES.md` | **CANONICAL** operating law | EVERY session, before any edit |
 | 2 | THIS FILE | Latest deltas, next actions, open decisions, toolchain notes | EVERY session |
 | 3 | `blueprints/CURRENT_STATE.md` | Verified per-file map, known-issue registry, toolchain freeze | before writing code |
-| 4 | `blueprints/ROADMAP.md` | Phase tracker (0–5) with gates | when planning/phases |
+| 4 | `blueprints/ROADMAP.md` | Phase tracker (0–7) with gates | when planning/phases |
 | 5 | `blueprints/CALL_DAD_MASTER_BLUEPRINT.md` | Frozen product spec (v0.1 target) | before novel features |
 | 6 | `blueprints/ARCHITECTURE.md` | UI/comms/data split, storage flow | structural changes |
 | 7 | `blueprints/blueprint-sections/BP-*.md` | Executable task slices per phase | task work |
-| — | `SPEC_SHEET.md/.json` | v0.1 scope contract | scope questions |
+| 8 | `blueprints/CHECKPOINTS.md` | Every gate, each PASSING or explicitly VOID | before claiming a gate |
+| 9 | `blueprints/CHECKLIST.md` | Ticks, each with its evidence | session close |
+| 10 | `blueprints/decisions/ADR-*.md` | Why a decision was made, and what it displaced | before reversing anything |
+| — | `SPEC_SHEET.md/.json` | v0.1 scope contract (JSON carries the drift corrections) | scope questions |
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
-## Where we are (2026-09-30, self-audit of the agent workflow)
+## Where we are (2026-10-01, v0.1 feature completion)
+
+**Read this section first; the rest of the file is history.**
+
+### State
+
+The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**. All seven
+features exist, and the standing gate is green on the built tree: verify PASS ·
+unit PASS both flavors · lint 0 errors 0 warnings · functions 13/13 · **rules
+emulator 44/44**. `versionCode 10` / `0.3.0` is clean-built for both flavors and
+**not installed**.
+
+### The one bug worth reading this handoff for
+
+**ICE-restart reconnect shipped broken and was documented as working.** Not a
+missing feature — a *fully implemented on one side and not the other* one:
+`maybeApplyRenegotiation` opened `if (amCaller) return`, so the side that
+published the restart offer never applied the answer, and the guard that should
+have caught it was keyed on `seq`, which the caller had already consumed for the
+original answer. Every source test and every doc claimed reconnect worked. It
+could not have recovered a call, ever. Fixed with a monotonic `negotiationRound`
+carried through the document and enforced in the rules; `IceRestartTest` now pins
+the caller side explicitly. Written up as ADR-010 §(7).
+
+The general form of it, because it will happen again: **"we send an offer" is
+not "a reconnect".** A reconnect is offer + answer + apply-it, and only the last
+clause was absent while the first two were present and reviewed.
+
+### Second thing worth reading
+
+**The `gate` tool reported GREEN from a tree where `compileParentDebugKotlin` was
+failing.** Two independent causes, both in the tool: it had **no `rules` gate at
+all** (so an entire security suite never ran, silently), and `r.out || r.err`
+discarded stderr — which is where Kotlin's `e:` diagnostics live — so failures
+printed with no reason in them. Both fixed: a real emulator gate with the Studio
+JBR on PATH, concatenated output, a 200-line tail, and a verdict that now reads
+`GATES GREEN BUT n SKIPPED` when anything skipped. **Lesson: a green gate
+certifies the tree, never the behaviour of whoever is running it.**
+
+### Next actions, in order — all operator-side
+
+1. **`firebase deploy --only firestore:rules`. REQUIRED.** The live rules are
+   still the vc9-era set. `chat`, `photos`, `consents`, `revocations` and
+   `negotiationRound` are all denied on a real device until this runs. **Nothing
+   new works without it.**
+2. **Flash vc10 to both phones.** Then, in this order:
+   - **First-run consent.** A fresh install is INERT until a parent opens the
+     shield icon (top-right, beside the gear) and taps "Allow everything".
+     Absence of a grant denies, by design. Expect "the app does nothing" before
+     that, and do not file it as a bug.
+   - The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover)
+     that have been open since vc9 and are **live on the child's phone right now**.
+   - A text message both ways, including a link-shaped one (must be refused).
+   - A real photo sent, verified, rendered. No photo has ever been sent.
+   - The missed-call callback card.
+   - The reconnect: pull Wi-Fi mid-call, or turn on airplane mode, and confirm the
+     call RECOVERS rather than ending. This is the first time the fix is exercised.
+3. **Adopt a release keystore** (`docs/release-signing.md`) if a release artifact
+   is ever wanted. `proguard-rules.pro` is a stub; no release build has ever run.
+
+### Open decisions
+
+- **Room / at-rest crypto (ADR-003, ADR-018).** Closed as a deferral with
+  justification. Re-opens the moment there is a *local* message or photo store.
+- **Consent signature (ADR-017).** Deferred: a signing-key hierarchy with no
+  operator custody story is a trust root, not a feature. The pair-scoped rules
+  stand in for it.
+- **K8 caveat.** TURN proven for a normal NAT on mobile data, not for a
+  symmetric-NAT carrier. Relay creds are APK-extractable — accepted for a
+  two-person family app, not for real child media.
+- **K20.** Client-triggered pruning means a fully dormant pair never prunes.
+  Accepted; a Firestore TTL would need a scheduled function and a billed index.
+
+---
+
+## Historical log (2026-09-30 and earlier)
+
+### Where we were (2026-09-30, self-audit of the agent workflow)
 
 - **A privacy law I wrote myself was violated in six tracked files.** `RULES.md` §1.5a
   has always forbidden putting a real device serial in a committable file. Six files

@@ -92,10 +92,49 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val appliedRemoteCandidates = mutableSetOf<String>()
     private var answerAppliedSeq = -1
 
-    /** Guards the peer's restart OFFER against being applied twice. */
-    private var renegotiationApplied = false
-    /** Guards our own restart OFFER against being published repeatedly. */
+    /**
+     * Highest renegotiation round whose OFFER this device has applied (callee
+     * side). Zero is the original handshake, so a live round 1 offer applies.
+     */
+    private var appliedOfferRound = 0
+
+    /**
+     * Highest round whose ANSWER this device has applied (caller side).
+     *
+     * This is the field whose absence made ICE restart a no-op: the caller
+     * applied the original answer for seq N during setup, and a seq-keyed guard
+     * therefore skipped every subsequent answer for that same generation. A
+     * reconnect published its offer, waited for an answer, and threw it away.
+     */
+    private var appliedAnswerRound = 0
+
+    /**
+     * The next round to PUBLISH. Never advances on failure, so a failed attempt
+     * is retried with the same round rather than racing ahead of a peer that is
+     * still answering an earlier one.
+     */
+    private var nextNegotiationRound = 1
+
+    /**
+     * True between publishing a restart offer and receiving its answer. Held
+     * across the whole round trip, not just the publish: releasing it
+     * immediately let a second LOST tick publish a SECOND offer for a call whose
+     * first answer had not arrived, and the two overwrote each other.
+     */
     private var restartInFlight = false
+
+    /**
+     * Watchdog for a published restart whose answer never came.
+     *
+     * `restartInFlight` is released in exactly three places: this timeout, a
+     * failed publish, and the answer arriving. Without this one it was released
+     * in two, so a restart whose answer was lost — the callee's app backgrounded,
+     * its listener stalled, its write rejected — held the latch for the rest of
+     * the call. The KDoc promised "a handful of offers" over the grace window and
+     * the code delivered exactly ONE, ever, which is indistinguishable from the
+     * feature not existing.
+     */
+    private var restartTimeoutJob: Job? = null
 
     /** Wall-clock of the last restart publish, for the cooldown. */
     private var lastRestartAtMs = 0L
@@ -504,10 +543,22 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     teardownMedia()
                     commitTerminal(CallState.Ended(EndReason.REMOTE_HANGUP))
                 } else {
-                    // Same-generation renegotiation: the peer restarted ICE. The
-                    // terminal checks above still win, so a reconnect arriving
-                    // alongside a hangup can never resurrect the call.
-                    maybeApplyRenegotiation(doc)
+                    // Same-generation renegotiation. The terminal checks above
+                    // still win, so a reconnect arriving alongside a hangup can
+                    // never resurrect the call.
+                    //
+                    // BOTH SIDES need a branch here. The callee answers the
+                    // caller's restart offer; the caller must APPLY that answer.
+                    // Previously this method returned early for the caller, which
+                    // meant the restart was published and then ignored — ICE
+                    // re-gathered on the caller's own new offer but the peer
+                    // connection never got the matching answer, so the feature
+                    // was a no-op that cost a round trip to prove it.
+                    if (amCaller) {
+                        applyRenegotiationAnswer(doc)
+                    } else {
+                        maybeApplyRenegotiation(doc)
+                    }
                 }
             else -> Unit
         }
@@ -519,30 +570,82 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
      * connection offers, so both sides cannot renegotiate simultaneously and
      * overwrite each other (which would leave the peer waiting on an SDP that
      * has already been replaced).
+     *
+     * Idempotent per [negotiationRound], and the round is reset on rejection so
+     * a retry of the SAME round is allowed. Resetting a `Boolean` "already did
+     * this" flag instead is what made repeated restarts impossible even once the
+     * caller side was fixed.
      */
     private fun maybeApplyRenegotiation(doc: CallDocument) {
         val client = rtc ?: return
         if (!doc.renegotiating) return
-        if (renegotiationApplied) return
-        if (amCaller) return
+        if (doc.negotiationRound <= appliedOfferRound) return
         val offer = doc.offer ?: return
         val s = _state.value
         if (s !is CallState.Connected || s.seq != doc.seq) return
 
-        renegotiationApplied = true
+        appliedOfferRound = doc.negotiationRound
         viewModelScope.launch {
             if (!client.setRemoteDescription(offer)) {
                 WebRtcLog.transition("Renegotiation: remote offer rejected")
-                renegotiationApplied = false
+                // Un-apply so a later snapshot (or a fresh restart) can retry.
+                if (appliedOfferRound == doc.negotiationRound) {
+                    appliedOfferRound = doc.negotiationRound - 1
+                }
                 return@launch
             }
             lastDoc?.takeIf { it.seq == doc.seq }?.let { feedRemoteCandidates(it) }
             if (rtc !== client) return@launch
             runCatching {
                 val answer = withTimeout(SETUP_TIMEOUT_MS) { client.createAnswer() }
-                pair?.let { p -> signaling.publishRenegotiationAnswer(p.roomId, doc.seq, answer.sdp) }
+                pair?.let { p ->
+                    signaling.publishRenegotiationAnswer(
+                        p.roomId, doc.seq, answer.sdp, doc.negotiationRound
+                    )
+                }
             }.onFailure {
                 WebRtcLog.transition("Renegotiation: answer failed")
+            }
+        }
+    }
+
+    /**
+     * The caller's half of the restart: apply the answer to its own restart
+     * offer.
+     *
+     * Guarded on [appliedAnswerRound] rather than on `seq`, because the call
+     * already applied the ORIGINAL answer for this very same seq during
+     * setup. A seq-guarded apply is therefore a permanent skip, and the restart
+     * can never complete no matter how many times it is offered.
+     */
+    private fun applyRenegotiationAnswer(doc: CallDocument) {
+        val client = rtc ?: return
+        val answer = doc.answer ?: return
+        // A document that still says `renegotiating` is one where our own offer is
+        // outstanding. It may still carry an answer from BEFORE the restart (a
+        // cache snapshot, or a peer that has not answered yet), and applying that
+        // would re-assert the pre-restart ufrag — the exact failure the restart
+        // exists to escape. Belt-and-braces with the `answer` delete in
+        // `publishRenegotiation`, because either alone leaves a window.
+        if (doc.renegotiating) return
+        if (doc.negotiationRound <= appliedAnswerRound) return
+        val s = _state.value
+        if (s !is CallState.Connected || s.seq != doc.seq) return
+
+        appliedAnswerRound = doc.negotiationRound
+        // The restart completed: release the in-flight latch so a LATER episode
+        // can start a new round, and cancel the watchdog that would otherwise
+        // release it again harmlessly.
+        restartTimeoutJob?.cancel()
+        restartTimeoutJob = null
+        restartInFlight = false
+        WebRtcLog.transition("ICE restart answered (round ${doc.negotiationRound})")
+        viewModelScope.launch {
+            if (!client.setRemoteDescription(answer)) {
+                WebRtcLog.transition("ICE restart: answer rejected")
+                if (appliedAnswerRound == doc.negotiationRound) {
+                    appliedAnswerRound = doc.negotiationRound - 1
+                }
             }
         }
     }
@@ -647,8 +750,20 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         pendingLocalCandidates.clear()
         appliedRemoteCandidates.clear()
         answerAppliedSeq = -1
-        renegotiationApplied = false
+        appliedOfferRound = 0
+        appliedAnswerRound = 0
+        nextNegotiationRound = 1
         restartInFlight = false
+        // `everConnected` resets HERE, at the new-attempt boundary, not only in
+        // `recordCallOutcome`. Two exit paths (a listener `fail()`, and a pairing
+        // change) write a terminal state without going through that funnel, so a
+        // reset confined to the funnel let a call that DID connect leave the flag
+        // true, and the next call — which rang out — was logged as ANSWERED with
+        // zero duration. The child's history then claimed a call that never
+        // happened and suppressed the callback card for the miss that did.
+        everConnected = false
+        restartTimeoutJob?.cancel()
+        restartTimeoutJob = null
         lastRestartAtMs = 0L
         _isCameraOn.value = true
         _isMicOn.value = true
@@ -721,7 +836,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     viewModelScope.launch { signaling.finishCall(p.roomId, seq, "ENDED") }
                 }
                 teardownMedia()
-                _state.value = CallState.NoAnswer(seq)
+                // Through the FUNNEL, not a direct state write. This line used
+                // `_state.value = NoAnswer(seq)`, which is the single most
+                // important exit path in the app -- the child tapped the giant
+                // button and nobody answered -- and it was the one path that never
+                // reached the call log. So `CallOutcome.MISSED` was unreachable
+                // dead code and the missed-call callback card could never appear,
+                // which is the entire reason `CallLog` exists.
+                commitTerminal(CallState.NoAnswer(seq))
             }
         }
     }
@@ -835,20 +957,38 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         val client = rtc ?: return
         val p = pair ?: return
         val seq = s.seq
+        val round = nextNegotiationRound
 
         restartInFlight = true
         lastRestartAtMs = now
-        WebRtcLog.transition("LOST: publishing ICE restart")
+        WebRtcLog.transition("LOST: publishing ICE restart (round $round)")
         viewModelScope.launch {
             runCatching {
                 val offer = withTimeout(SETUP_TIMEOUT_MS) { client.createOffer(iceRestart = true) }
-                signaling.publishRenegotiation(p.roomId, seq, offer.sdp).getOrThrow()
+                signaling.publishRenegotiation(p.roomId, seq, offer.sdp, round).getOrThrow()
             }.onSuccess {
+                // Only advance the round on a CONFIRMED publish. A failed write
+                // must be retryable with the same round, or the peer's answer to
+                // round N would arrive and be compared against N+1 forever.
+                nextNegotiationRound = round + 1
                 lastDoc?.takeIf { it.seq == seq }?.let { feedRemoteCandidates(it) }
+                // The answer may never come. Hold the latch only until it has had
+                // a fair chance, then let the next cooldown tick try again.
+                restartTimeoutJob?.cancel()
+                restartTimeoutJob = viewModelScope.launch {
+                    delay(RESTART_ANSWER_TIMEOUT_MS)
+                    // Guarded on the round: if the answer landed and a NEWER
+                    // round is in flight, this must not stomp on it.
+                    if (restartInFlight && appliedAnswerRound < round) {
+                        WebRtcLog.transition("ICE restart unanswered; releasing latch")
+                        restartInFlight = false
+                    }
+                }
             }.onFailure {
                 WebRtcLog.transition("ICE restart failed")
+                // Release the latch so the next cooldown tick can retry.
+                restartInFlight = false
             }
-            restartInFlight = false
         }
     }
 
@@ -880,7 +1020,13 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         teardownMedia()
-        _state.value = CallState.Error(kind = kind, message = message, seq = seq)
+        // Through the FUNNEL. A transport failure is the case where a parent most
+        // needs to know the call did not happen, and this path wrote the state
+        // directly, so `CallOutcome.FAILED` was unreachable and a failed call left
+        // no row at all. `canTransition` already permits RINGING/Connected -> Error;
+        // if it ever stops, `commitTerminal` falls back to Idle and the child is
+        // not left staring at a dead Error card.
+        commitTerminal(CallState.Error(kind = kind, message = message, seq = seq))
     }
 
     private fun peerDisplayName(): String =
@@ -910,6 +1056,17 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
          * without turning a dead zone into a publish loop.
          */
         const val LOST_RESTART_COOLDOWN_MS = 5_000L
+
+        /**
+         * How long a published restart waits for its answer before the in-flight
+         * latch is released so the next cooldown tick may try again.
+         *
+         * Comfortably longer than a Firestore round trip on mobile data, and
+         * comfortably shorter than [LOST_GRACE_MS] so a lost answer still leaves
+         * time for a real retry inside the same grace window. Four restarts fit
+         * in 20s, which is the "a handful, not one" the KDoc promises.
+         */
+        const val RESTART_ANSWER_TIMEOUT_MS = 8_000L
         const val FIRST_MEDIA_GRACE_MS = 25_000L
         const val INCOMING_RING_MS = 60_000L
     }

@@ -94,11 +94,19 @@ class SignalingClient(
      *
      * Fails with [CallNoLongerRingingException] if the generation moved on, so
      * a reconnect racing a hangup is discarded rather than resurrecting.
+     *
+     * @param round monotonic per-call renegotiation counter. This is what makes
+     *   the reconnect COMPLETABLE rather than merely published: [seq] alone
+     *   cannot distinguish the renegotiated answer from the one that originally
+     *   connected the call, so a caller that has already applied the seq-N
+     *   answer would skip the seq-N renegotiated one and never finish the
+     *   restart. The callee echoes the same round back.
      */
     suspend fun publishRenegotiation(
         callId: String,
         seq: Int,
-        offerSdp: String
+        offerSdp: String,
+        round: Int
     ): Result<Unit> = runCatching {
         firestore.runTransaction(txOptions) { txn ->
             val ref = calls.document(callId)
@@ -112,6 +120,21 @@ class SignalingClient(
             txn.update(ref, mapOf(
                 "offer" to mapOf("type" to "OFFER", "sdp" to offerSdp),
                 "renegotiating" to true,
+                "negotiationRound" to round,
+                // The PREVIOUS answer is DELETED, not left in place. This is the
+                // bug that kept ICE restart from ever completing: the caller
+                // writes this offer, Firestore echoes the write straight back,
+                // and the echoed document still carried the round-0 handshake
+                // answer beside the round-1 offer. The caller then applied that
+                // STALE answer to its own new offer, marked round 1 consumed, and
+                // discarded the real answer when it arrived -- because it now
+                // looked like a duplicate.
+                //
+                // A round number and an answer SDP cannot share a field
+                // without being invalidated together, and this is where that
+                // happens. Renegotiation only runs while CONNECTED, so nothing
+                // re-reads `answer` after the peer replies.
+                "answer" to FieldValue.delete(),
                 "updatedAt" to FieldValue.serverTimestamp()
             ))
         }.await()
@@ -119,16 +142,19 @@ class SignalingClient(
     }
 
     /**
-     * Answers an ICE-restart OFFER, staying in the same generation.
+     * Answers an ICE-restart OFFER, staying in the same generation AND the same
+     * round. Like [publishRenegotiation], this never touches [seq] and never
+     * returns the room to RINGING: a reconnect that re-rings the phone would
+     * alarm the grown-up and hide the call they are already in.
      *
-     * The caller-side twin of [publishRenegotiation]. Like it, this never touches
-     * [seq] and never returns the room to RINGING: a reconnect that re-rings the
-     * phone would alarm the grown-up and hide the call they are already in.
+     * Echoing [round] rather than inventing one is what lets the caller match
+     * this answer to its offer.
      */
     suspend fun publishRenegotiationAnswer(
         callId: String,
         seq: Int,
-        answerSdp: String
+        answerSdp: String,
+        round: Int
     ): Result<Unit> = runCatching {
         firestore.runTransaction(txOptions) { txn ->
             val ref = calls.document(callId)
@@ -142,6 +168,7 @@ class SignalingClient(
             txn.update(ref, mapOf(
                 "answer" to mapOf("type" to "ANSWER", "sdp" to answerSdp),
                 "renegotiating" to false,
+                "negotiationRound" to round,
                 "updatedAt" to FieldValue.serverTimestamp()
             ))
         }.await()
@@ -266,6 +293,7 @@ class SignalingClient(
                 .orEmpty()
                 .mapNotNull { (it as? Map<*, *>)?.toIceCandidateOrNull() },
             renegotiating = getBoolean("renegotiating") ?: false,
+            negotiationRound = (getLong("negotiationRound") ?: 0L).toInt(),
             updatedAtMs = getTimestamp("updatedAt")?.toDate()?.time,
             isFromCache = metadata.isFromCache
         )
@@ -313,6 +341,13 @@ data class CallDocument(
     val calleeCandidates: List<IceCandidate> = emptyList(),
     /** True while the caller's ICE-restart OFFER is awaiting an answer. */
     val renegotiating: Boolean = false,
+    /**
+     * Which renegotiation this `offer`/`answer` belongs to. Zero for the
+     * original handshake. The caller compares rounds to know whether an incoming
+     * answer is NEW or the one it already applied — `seq` cannot tell them apart,
+     * which is the bug this field exists to fix.
+     */
+    val negotiationRound: Int = 0,
     val updatedAtMs: Long? = null,
     val isFromCache: Boolean = false
 ) {

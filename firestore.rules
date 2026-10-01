@@ -53,11 +53,23 @@ service cloud.firestore {
       // Update: members only. A new generation (seq bump) must be a
       // RINGING offer by the writer; within a generation the parties are
       // frozen and seq never moves backwards.
+      //
+      // `negotiationRound` is the same-generation ICE-restart counter (K21
+      // reconnect). It is monotonic WITHIN a generation: a round may not go
+      // backwards, because a late answer to an earlier offer would otherwise look
+      // newer than the offer it is answering, and the caller would discard it.
+      // Zero/absent is the original handshake.
       allow update: if isMember()
                     && partiesValid(request.resource.data)
                     && statusValid(request.resource.data)
                     && request.resource.data.seq is int
                     && request.resource.data.seq >= resource.data.seq
+                    && (!request.resource.data.keys().hasAny(['negotiationRound'])
+                          || (request.resource.data.negotiationRound is int
+                              && request.resource.data.negotiationRound >= 0
+                              && (!resource.data.keys().hasAny(['negotiationRound'])
+                                  || request.resource.data.negotiationRound
+                                     >= resource.data.negotiationRound)))
                     && (request.resource.data.seq == resource.data.seq
                           ? (request.resource.data.callerUid == resource.data.callerUid
                              && request.resource.data.calleeUid == resource.data.calleeUid)
