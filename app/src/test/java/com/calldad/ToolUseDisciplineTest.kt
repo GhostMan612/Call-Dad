@@ -229,6 +229,73 @@ class ToolUseDisciplineTest {
         )
     }
 
+    /**
+     * The `gate` TOOL is the only sanctioned way to run a Gradle test or lint
+     * task. Everything above this test pins a PROXY: the deny list, the wording
+     * in the docs. Those were both true while the agent was running
+     * `:app:testParentDebugUnitTest` six times in one phase, once per failing
+     * test -- exactly the loop RULES 1.4a exists to end, with the gate green
+     * throughout.
+     *
+     * No test inside this process can observe what the agent actually typed. So
+     * this pins the thing that can be pinned: the sanctioned command is named in
+     * the same place the rule is stated, and no document teaches a bare
+     * gradlew test invocation as the thing to reach for. The operator runbooks
+     * in `.opencode/commands/` are the deliberate exception -- a human runs
+     * those -- so they are excluded rather than being treated as violations.
+     */
+    @Test
+    fun theGateToolIsWhatDocumentsTellYouToRun() {
+        val lawDocs = listOf(
+            "AGENTS.md", "RULES.md", "CLAUDE.md",
+            ".opencode/skills/calldad-conventions/SKILL.md"
+        )
+        lawDocs.filter { exists(it) }.forEach { doc ->
+            val text = read(doc)
+            assertTrue(
+                "$doc must tell the agent that the `gate` TOOL is how a gate runs. " +
+                    "The raw gradle task is available to the agent, and naming only " +
+                    "the task names is what made the per-edit loop the path of least " +
+                    "resistance.",
+                text.contains("gate tool") || text.contains("`gate`") ||
+                    text.contains("gate-runner") || text.contains("/verify")
+            )
+        }
+
+        // The failure mode is a document SHOWING the raw invocation as something
+        // to type. Operator runbooks legitimately contain it (a human runs them),
+        // so scope this to the documents an agent follows.
+        val agentFacing = listOf(
+            ".opencode/skills/calldad-conventions/SKILL.md",
+            ".opencode/agents/gate-runner.md"
+        )
+        agentFacing.filter { exists(it) }.forEach { doc ->
+            val text = read(doc)
+            assertFalse(
+                "$doc must not present a bare gradle test invocation as the command " +
+                    "to run. Use the `gate` tool instead. Found:\n$text",
+                Regex("""(?m)^\s*\.?\\?gradlew(\.bat)?\s+:app:test""").containsMatchIn(text)
+            )
+        }
+    }
+
+    @Test
+    fun theLawSaysGateOncePerPhaseNotPerEdit() {
+        val rules = read("RULES.md")
+        assertTrue(
+            "RULES 1.4a must state that the gate runs ONCE at the END of a phase. " +
+                "Without the word 'once' alongside the phase-closing rule, the " +
+                "per-edit loop is a defensible reading.",
+            rules.contains("once", ignoreCase = true) &&
+                rules.contains("END of a phase", ignoreCase = true)
+        )
+        assertTrue(
+            "RULES 1.4a must forbid gating per edit explicitly, since that is the " +
+                "exact behaviour that recurred after the rule was first written",
+            rules.contains("not per edit", ignoreCase = true)
+        )
+    }
+
     @Test
     fun readOnlyAuditorsStillHaveNoShellAccess() {
         // Six auditors run with `bash: deny`, which is why they were never the

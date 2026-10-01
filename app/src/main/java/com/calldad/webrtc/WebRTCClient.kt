@@ -213,9 +213,20 @@ class WebRTCClient(
 
     // -------- signaling operations --------
 
-    suspend fun createOffer(): DomainSessionDescription {
-        val sdp = setLocalAndAwait(RtcSessionDescription.Type.OFFER)
-        WebRtcLog.transition("Local OFFER created")
+    /**
+     * Creates an OFFER. Pass [iceRestart] = true to renegotiate a broken
+     * connection: libwebrtc then re-gathers candidates (new STUN/TURN probes,
+     * fresh host candidates) instead of replaying the dead ones, which is what
+     * makes a reconnect work after a network change (wifi -> cellular, NAT
+     * rebind, a relay that went away). A normal offer is never enough: the old
+     * candidate list is still in the SDP and ICE would converge on the same
+     * unreachable path.
+     */
+    suspend fun createOffer(iceRestart: Boolean = false): DomainSessionDescription {
+        val sdp = setLocalAndAwait(RtcSessionDescription.Type.OFFER, iceRestart)
+        WebRtcLog.transition(
+            if (iceRestart) "Local OFFER created (ICE restart)" else "Local OFFER created"
+        )
         return sdp
     }
 
@@ -435,13 +446,21 @@ class WebRTCClient(
     }
 
     private suspend fun setLocalAndAwait(
-        type: RtcSessionDescription.Type
+        type: RtcSessionDescription.Type,
+        iceRestart: Boolean = false
     ): DomainSessionDescription {
         val pc = peerConnection ?: error("No PeerConnection")
         val deferred = CompletableDeferred<DomainSessionDescription>()
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+            // The IceRestart constraint is what makes libwebrtc discard the
+            // previous candidate set and gather afresh. Without it a reconnect
+            // offer carries the same dead candidates and ICE reconnects to
+            // nothing. Only meaningful on an OFFER; createAnswer ignores it.
+            if (iceRestart) {
+                mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+            }
         }
         val createObserver = object : SdpObserver {
             override fun onCreateSuccess(created: RtcSessionDescription) {

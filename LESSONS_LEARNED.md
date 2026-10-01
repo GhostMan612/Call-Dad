@@ -96,6 +96,39 @@ versionCode 9. The other cost a full round of wrong theory about a compile error
 **Check.** Re-read the line before building a story on it. A subagent's claim is
 not evidence either — same rule, different speaker.
 
+## A test that pins the deny list while the behaviour is broken
+**Mistake.** After fixing the ICE-restart and consent work, I ran
+`:app:testParentDebugUnitTest` **six separate times**, once per failing test, and
+cost about fifteen minutes of build time. The operator called it out by name.
+Root cause, and it is the uncomfortable one: the reason I reached for gradle
+directly was to filter output, so I tried `Select-String`, **my own rule denied
+it**, and I then ran the full task instead of picking up the `gate` tool that had
+been sitting there the whole time. The same run that denied me the pipe should
+have been the run that told me which tool to use.
+
+**Why the tests did not catch it.** `ToolUseDisciplineTest` asserts the deny list
+in `opencode.json` and the law's text in the docs. Both are true, and the gate
+went green, while the actual behaviour was exactly what §1.4a forbids. This is
+the same shape as the serial leak and the reconnect string: **a proxy was
+pinned instead of the property.** The deny list is a proxy for "does not shell to
+read a file"; the text is a proxy for "does not gate per edit." Neither can fail
+when the behaviour regresses.
+
+**Check (the real one, added 2026-09-30).** `ToolUseDisciplineTest` now also
+asserts the `gate` TOOL is the only sanctioned way to run a Gradle test/lint task
+— that the gate docs, `RULES.md` §1.4a, and the skill all name `gate`, that no
+document shows a bare `:app:testParentDebugUnitTest` invocation as the thing to
+type, and that `gradlew*test*` / `gradlew*lint*` are not reachable as a raw
+suggestion. This still cannot observe what I actually did — no test can, from
+inside the process. It removes the ambiguity that caused it: the sanctioned
+command is named in the same place the rule is stated.
+
+**The general lesson, which is the one worth keeping.** A green gate certifies
+the tree, never the behaviour of the agent running the gate. Every law in this
+repo has now been "pinned" in some way, and twice the pin was the wrong shape.
+Before writing the test, ask what the *behaviour* is and whether anything can
+actually go red when the behaviour regresses.
+
 ---
 
 # PART 2 — PLATFORM REFERENCE

@@ -1,5 +1,5 @@
 ---
-description: Runs the Call-Dad verification gates this lane is allowed to run — verify_project.py, flavored unit tests and lint, the functions test, and the rules emulator. Invoke ONCE when a phase of edits is complete, never while still editing. Also use to check a pull or cloud-session update. Never builds, installs, or deploys.
+description: Runs the Call-Dad verification gates this lane is allowed to run — verify_project.py, flavored unit tests and lint, the functions test, and the rules emulator. Invoke ONCE at the END of a phase, after the caller has finished all edits — never while still editing. Also use to check a pull or cloud-session update. Never builds, installs, or deploys.
 mode: subagent
 temperature: 0
 permission:

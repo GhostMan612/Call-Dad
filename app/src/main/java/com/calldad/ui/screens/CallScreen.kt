@@ -515,13 +515,20 @@ private fun InCallContent(
         if (health == ConnectionHealth.LOST ||
             health == ConnectionHealth.RECONNECTING
         ) {
-            // Do not promise a reconnect. There is no restartIce() anywhere
-            // in this app and ConnectionHealth.RECONNECTING is never assigned,
-            // so "Reconnecting…" was a 20-second lie before the call ends
-            // anyway. RULES §1.7's "auto-reconnect on LAN" is void (see
-            // RULES §1.7a); CallViewModel ends the call on peer loss.
+            // Now that ICE restart actually ships (WebRTCClient.createOffer's
+            // IceRestart constraint + SignalingClient.publishRenegotiation +
+            // CallViewModel.attemptIceRestart), "Reconnecting…" is a promise the
+            // app keeps: a restart is published within the cooldown and the call
+            // survives a recoverable network drop. If it does not recover, the
+            // call still ends at LOST_GRACE_MS — the kid is never stranded, per
+            // RULES §1.7a. RECONNECTING is not yet assigned by the ViewModel, so
+            // it is not shown as a separate state here; LOST covers both.
             Text(
-                text = "Connection lost…",
+                text = if (health == ConnectionHealth.RECONNECTING) {
+                    "Reconnecting…"
+                } else {
+                    "Connection lost…"
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.9f),
                 modifier = Modifier

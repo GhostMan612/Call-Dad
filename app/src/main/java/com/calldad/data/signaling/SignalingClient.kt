@@ -82,6 +82,73 @@ class SignalingClient(
     }
 
     /**
+     * Publishes an ICE-restart OFFER for a call that is ALREADY CONNECTED.
+     *
+     * Deliberately NOT [publishOffer]: that method starts a new generation
+     * (seq+1, status RINGING, both candidate arrays cleared), which is exactly
+     * wrong for a reconnect. It would re-ring the other phone mid-call, drop
+     * every candidate already exchanged, and make the peer's in-call teardown
+     * generation-checked teardown kill a call that is still live. Renegotiation
+     * keeps [seq] and CONNECTED and only swaps the offer SDP, so both sides stay
+     * on the same generation and a reconnect can never look like a new call.
+     *
+     * Fails with [CallNoLongerRingingException] if the generation moved on, so
+     * a reconnect racing a hangup is discarded rather than resurrecting.
+     */
+    suspend fun publishRenegotiation(
+        callId: String,
+        seq: Int,
+        offerSdp: String
+    ): Result<Unit> = runCatching {
+        firestore.runTransaction(txOptions) { txn ->
+            val ref = calls.document(callId)
+            val snap = txn.get(ref)
+            if (!snap.exists() ||
+                snap.getLong("seq")?.toInt() != seq ||
+                snap.getString("status") !in LIVE_STATUSES
+            ) {
+                throw CallNoLongerRingingException()
+            }
+            txn.update(ref, mapOf(
+                "offer" to mapOf("type" to "OFFER", "sdp" to offerSdp),
+                "renegotiating" to true,
+                "updatedAt" to FieldValue.serverTimestamp()
+            ))
+        }.await()
+        Unit
+    }
+
+    /**
+     * Answers an ICE-restart OFFER, staying in the same generation.
+     *
+     * The caller-side twin of [publishRenegotiation]. Like it, this never touches
+     * [seq] and never returns the room to RINGING: a reconnect that re-rings the
+     * phone would alarm the grown-up and hide the call they are already in.
+     */
+    suspend fun publishRenegotiationAnswer(
+        callId: String,
+        seq: Int,
+        answerSdp: String
+    ): Result<Unit> = runCatching {
+        firestore.runTransaction(txOptions) { txn ->
+            val ref = calls.document(callId)
+            val snap = txn.get(ref)
+            if (!snap.exists() ||
+                snap.getLong("seq")?.toInt() != seq ||
+                snap.getString("status") !in LIVE_STATUSES
+            ) {
+                throw CallNoLongerRingingException()
+            }
+            txn.update(ref, mapOf(
+                "answer" to mapOf("type" to "ANSWER", "sdp" to answerSdp),
+                "renegotiating" to false,
+                "updatedAt" to FieldValue.serverTimestamp()
+            ))
+        }.await()
+        Unit
+    }
+
+    /**
      * Moves generation [seq] to a terminal [status] (ENDED / DECLINED),
      * only if that generation is still live. A late teardown can never
      * kill a newer call.
@@ -198,6 +265,7 @@ class SignalingClient(
             calleeCandidates = (get("calleeCandidates") as? List<*>)
                 .orEmpty()
                 .mapNotNull { (it as? Map<*, *>)?.toIceCandidateOrNull() },
+            renegotiating = getBoolean("renegotiating") ?: false,
             updatedAtMs = getTimestamp("updatedAt")?.toDate()?.time,
             isFromCache = metadata.isFromCache
         )
@@ -243,6 +311,8 @@ data class CallDocument(
     val answer: SessionDescription?,
     val callerCandidates: List<IceCandidate> = emptyList(),
     val calleeCandidates: List<IceCandidate> = emptyList(),
+    /** True while the caller's ICE-restart OFFER is awaiting an answer. */
+    val renegotiating: Boolean = false,
     val updatedAtMs: Long? = null,
     val isFromCache: Boolean = false
 ) {

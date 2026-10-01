@@ -35,9 +35,13 @@ class VerifyProjectSelfTest {
 
     @Test
     fun theSelfTestFileItselfCarriesAGenesisHeader() {
+        // Gradle runs unit tests with the module dir as CWD (app/), which is why
+        // every path here is tried relative-first then prefixed — the same
+        // trick read() uses, and the same reason a naive single path silently
+        // "fails" for the wrong reason.
         val self = listOf(
-            File("app/src/test/java/com/calldad/VerifyProjectSelfTest.kt"),
-            File("app/app/src/test/java/com/calldad/VerifyProjectSelfTest.kt")
+            File("src/test/java/com/calldad/VerifyProjectSelfTest.kt"),
+            File("app/src/test/java/com/calldad/VerifyProjectSelfTest.kt")
         ).firstOrNull(File::exists)
         assertTrue("self-test file must be locatable", self != null)
         val head = checkNotNull(self).readText().take(400)

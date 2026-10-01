@@ -69,6 +69,22 @@ operator's attention every 5–10 seconds for a file read.
 them as ONE batch of parallel tool calls. A sequential chain of single-purpose
 shell commands is the failure this section exists to prevent.
 
+**Run a gate with the `gate` TOOL, not with a raw gradle invocation.** The
+`gradlew :app:test...` command is the *human's* entry point and the operator
+runbooks in `.opencode/commands/` legitimately show it. The agent's entry point
+is the `gate` tool. Reaching for the raw task is what turned a single phase into
+six sequential test runs on 2026-09-30 — and the pipe I wanted (`Select-String`
+on gradle output) is denied, so the "efficient" path was never available. If you
+find yourself wanting to filter gate output, you are in the wrong tool.
+
+**This rule has already been broken once. Read that as evidence, not history.**
+The deny list and this section's wording were both present, and the gate was
+green, the whole time the per-edit loop was happening. A test can pin the deny
+list and pin this text; neither can observe what you actually ran. So the
+sanctioned command is named here, in the same breath as the rule, and
+`ToolUseDisciplineTest` asserts this section, the skill, and the gate tool's own
+description all agree on it.
+
 **The shell is for:** running a gate (test / lint / verify / emulator / functions
 test / build), `git` mutations the operator ordered, `adb` read-only evidence, and
 `winget`/`npm -g` installs. It is **not** for reading or writing files.
@@ -141,7 +157,7 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
 - **Media + crypto:** WebRTC (Stream fork) with DTLS-SRTP end-to-end media encryption (ADR-005) replaces the custom ECDH + AES-GCM frame cipher (§2.5).
 - **Call flow:** the 7-state machine in `CallState.kt` (§2.6's Invite→Accept/Decline→End, extended with NoAnswer/Error).
 - **Allowlist:** exactly one paired contact per phone, via a pair-scoped Firestore room that only those two UIDs can touch; pairing is parent-gated and mutual (ADR-015).
-- **Reconnect: NOT implemented.** `ConnectionHealth.RECONNECTING` is declared in `ConnectionState.kt` but never assigned, and `restartIce()` appears nowhere in the tree. `CallScreen` renders "Connection lost…" (corrected 2026-09-25; it used to say "Reconnecting…") and `CallViewModel` ends the call after `LOST_GRACE_MS`. §1.7's auto-reconnect promise is **void** until an ICE-restart path exists. Do not restore the word "Reconnecting" without one.
+- **Reconnect: ICE-restart, implemented 2026-09-30 (source).** §1.7's auto-reconnect promise is now satisfied for a recoverable network drop. `WebRTCClient.createOffer(iceRestart = true)` adds the `IceRestart` media constraint, which is what makes libwebrtc discard the dead candidate set and re-gather (a plain re-offer would carry the same unreachable candidates and reconnect to nothing). `SignalingClient.publishRenegotiation` / `publishRenegotiationAnswer` carry the restart OFFER/ANSWER **within the same `seq`** — deliberately not `publishOffer`, which would start a new generation, re-ring the peer mid-call and clear the exchanged candidates. `CallViewModel.attemptIceRestart` publishes once per `LOST_RESTART_COOLDOWN_MS` (5s), caller-side only, because both sides restarting at once would overwrite each other's SDP. **The kid is never stranded:** if the restart does not recover the connection, the call still ends at `LOST_GRACE_MS` and the child returns home (§1.7a). This is a network-drop recovery, NOT the LAN-only calling in §2.3 and NOT the symmetric-NAT carrier proof K8 never made — a symmetric NAT can still fail with no path to recover from. `ConnectionHealth.RECONNECTING` remains unassigned and the UI renders "Connection lost…"; do not add the word "Reconnecting" without also assigning that state, and do not widen this entry to claim more than a re-gather on the same transport.
 - **PTT leaves the device.** §1.7's last bullet is not satisfied by the walkie-talkie as shipped: clips are written to the pair's Firestore room (`ADR-016`) with **no parent opt-in, no setting, and no disclosure**. A parent must be told this before the feature is relied on. Clips are deleted only after they actually play to completion; a clip that fails to decode, is interrupted by a ring, or cannot be deleted is retained rather than silently destroyed.
 - **ML Kit phone-home — ACCEPTED, operator sign-off 2026-09-30 (K9 CLOSED).** §1.7's "no third-party SDKs phoning home" has exactly one named exception. Unbundled ML Kit barcode scanning downloads its model from Google Play Services on first pairing scan and sends Play Services usage metrics to Google. **What leaves the device:** the request to fetch the barcode model, and anonymous Play Services usage telemetry. **What does NOT:** any image, any camera frame, any QR payload, any UID, any pairing nonce, any audio, any video. QR decoding is entirely on-device. The operator weighed this against ZXing-only decode and chose ML Kit because pairing is the one step that must not fail for a six-year-old's grown-up — a barcode read that works on a crooked, dim, moving phone is worth more than a 2.2MB APK saving. The on-device availability check is `ModuleAvailabilityCheck.kt`, and pairing already falls back to ZXing if the module is missing. Revisit only if the app ever handles media that must never transit Google infrastructure, in which case the exception does not cover it.
 - **TURN relay is a third party in the media path — ACCEPTED, operator sign-off 2026-09-30 (K8 CLOSED).** The default relay is Open Relay, a public service run for open-source video with published long-lived credentials. WebRTC media stays DTLS-SRTP encrypted end-to-end, so the relay carries ciphertext and can see metadata (IPs, timing, volume) but not content. Those credentials are extractable from the APK; that is accepted for a two-person family app and is **not** acceptable for anything handling real child media on untrusted networks. `local.properties` overrides `TURN_URLS`/`TURN_USER`/`TURN_PASS` for a private relay, and that is the path to a real deployment. Never log these values (guardrail §G).

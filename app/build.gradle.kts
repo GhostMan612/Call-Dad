@@ -1,6 +1,7 @@
 // Call-Dad app module. BuildConfig fields injected from local.properties (gitignored).
 // Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.6 / versionCode 9.
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -62,6 +63,39 @@ android {
         buildConfigField("String", "CALLEE_UID", "\"$calleeUid\"")
     }
 
+    // ---- Release signing (BP-05 §5, operator-provisioned) ----
+    //
+    // The keystore NEVER enters the repo. The operator creates it once
+    // (keytool, password of their choosing) and points `keystore.properties`
+    // -- gitignored, shaped like local.properties -- at it. Every value falls
+    // back to empty, so a machine without the file still configures and still
+    // builds the debug flavors; only an actual release assemble fails, and it
+    // fails with a clear message rather than silently shipping a debug-signed
+    // APK that no store will accept.
+    //
+    // This exists because "no secrets in repo" was enforced while the release
+    // plan itself did not exist: the ban was real and the plan was missing.
+    val keystorePropsFile = rootProject.file("keystore.properties")
+    val keystoreProps = Properties().apply {
+        if (keystorePropsFile.exists()) {
+            keystorePropsFile.inputStream().use { load(it) }
+        }
+    }
+    val releaseStorePath = keystoreProps.getProperty("storeFile", "")
+    val releaseHasKeystore = releaseStorePath.isNotBlank() &&
+        file(releaseStorePath).exists()
+
+    signingConfigs {
+        if (releaseHasKeystore) {
+            create("release") {
+                storeFile = file(releaseStorePath)
+                storePassword = keystoreProps.getProperty("storePassword", "")
+                keyAlias = keystoreProps.getProperty("keyAlias", "")
+                keyPassword = keystoreProps.getProperty("keyPassword", "")
+            }
+        }
+    }
+
     // Phase 10: audience flavors. BOTH APKs install side-by-side
     // (applicationIdSuffix), enabling two-device testing on one phone.
     // THEME names are operator-ordered: child keeps "Call of Daddy".
@@ -81,6 +115,29 @@ android {
             versionNameSuffix = "-child"
             buildConfigField("String", "APP_THEME", "\"pink\"")
             resValue("string", "app_name", "Call of Daddy")
+        }
+    }
+
+    buildTypes {
+        // No explicit debug block: AGP's default already applies the debug
+        // signing config, which is what every operator device install uses.
+        getByName("release") {
+            // Warn rather than throw: a machine without keystore.properties must
+            // still be able to configure and build debug (the whole test lane
+            // depends on that). What must never happen is a mis-signed release
+            // artifact that silently installs, so the build says so loudly and
+            // docs/release-signing.md says what to do.
+            if (!releaseHasKeystore) {
+                logger.warn(
+                    "Call-Dad: no release keystore configured (keystore.properties " +
+                        "missing or storeFile not found). Any release build will NOT be " +
+                        "correctly signed -- see docs/release-signing.md."
+                )
+            }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 

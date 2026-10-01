@@ -89,6 +89,14 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val appliedRemoteCandidates = mutableSetOf<String>()
     private var answerAppliedSeq = -1
 
+    /** Guards the peer's restart OFFER against being applied twice. */
+    private var renegotiationApplied = false
+    /** Guards our own restart OFFER against being published repeatedly. */
+    private var restartInFlight = false
+
+    /** Wall-clock of the last restart publish, for the cooldown. */
+    private var lastRestartAtMs = 0L
+
     private var roomJob: Job? = null
     private var awaitingFirstSnapshot = true
     private var autoDismissJob: Job? = null
@@ -475,8 +483,47 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 if (doc.status == "ENDED" || doc.status == "DECLINED") {
                     teardownMedia()
                     commitTerminal(CallState.Ended(EndReason.REMOTE_HANGUP))
+                } else {
+                    // Same-generation renegotiation: the peer restarted ICE. The
+                    // terminal checks above still win, so a reconnect arriving
+                    // alongside a hangup can never resurrect the call.
+                    maybeApplyRenegotiation(doc)
                 }
             else -> Unit
+        }
+    }
+
+    /**
+     * Applies a peer's ICE-restart OFFER while the call is already up. Never
+     * publishes anything itself — only the side that noticed the dead
+     * connection offers, so both sides cannot renegotiate simultaneously and
+     * overwrite each other (which would leave the peer waiting on an SDP that
+     * has already been replaced).
+     */
+    private fun maybeApplyRenegotiation(doc: CallDocument) {
+        val client = rtc ?: return
+        if (!doc.renegotiating) return
+        if (renegotiationApplied) return
+        if (amCaller) return
+        val offer = doc.offer ?: return
+        val s = _state.value
+        if (s !is CallState.Connected || s.seq != doc.seq) return
+
+        renegotiationApplied = true
+        viewModelScope.launch {
+            if (!client.setRemoteDescription(offer)) {
+                WebRtcLog.transition("Renegotiation: remote offer rejected")
+                renegotiationApplied = false
+                return@launch
+            }
+            lastDoc?.takeIf { it.seq == doc.seq }?.let { feedRemoteCandidates(it) }
+            if (rtc !== client) return@launch
+            runCatching {
+                val answer = withTimeout(SETUP_TIMEOUT_MS) { client.createAnswer() }
+                pair?.let { p -> signaling.publishRenegotiationAnswer(p.roomId, doc.seq, answer.sdp) }
+            }.onFailure {
+                WebRtcLog.transition("Renegotiation: answer failed")
+            }
         }
     }
 
@@ -580,6 +627,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         pendingLocalCandidates.clear()
         appliedRemoteCandidates.clear()
         answerAppliedSeq = -1
+        renegotiationApplied = false
+        restartInFlight = false
+        lastRestartAtMs = 0L
         _isCameraOn.value = true
         _isMicOn.value = true
         _elapsedSeconds.value = 0
@@ -677,6 +727,10 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     lostSince == 0L -> now
                     else -> lostSince
                 }
+                // Offer the restart BEFORE deciding to give up, and while the grace
+                // window is still open. Attempting it after the give-up branch
+                // would be dead code: the call is already ended by then.
+                if (lostSince != 0L) attemptIceRestart()
                 val lostTooLong = lostSince != 0L && now - lostSince >= LOST_GRACE_MS
                 if (neverConnected || lostTooLong) {
                     WebRtcLog.transition("Connection lost: ending call")
@@ -689,6 +743,55 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
             }
+        }
+    }
+
+    /**
+     * Publishes an ICE-restart OFFER once per LOST episode, caller side only.
+     *
+     * LOST is reached either because the network changed under us (wifi dropped,
+     * NAT rebound, the TURN relay went away) or because the phone's radio is
+     * mid-flap. Both are recoverable, and both are invisible to ICE as a
+     * permanent failure: without a restart the peer connection keeps trying the
+     * candidate set that just died, so the call would ride out the full
+     * [LOST_GRACE_MS] and then end, even though the network came back two
+     * seconds later. This is the difference between a kid calling across town
+     * and the call dying because dad stepped outside for a moment.
+     *
+     * Why caller-only: both sides restarting at once would each overwrite the
+     * other's SDP and leave one waiting on an offer that has already been
+     * replaced. The peer answers via [maybeApplyRenegotiation]. The callee
+     * cannot restart the call it is in, so on a lossy link the callee waits for
+     * the caller to restart -- which is correct, because the caller's view of
+     * the path is the one that failed.
+     *
+     * [LOST_RESTART_COOLDOWN_MS] bounds the cost: one restart attempt per
+     * cooldown, so a phone in a dead zone publishes a handful of offers rather
+     * than one per second for the whole grace window.
+     */
+    private fun attemptIceRestart() {
+        val s = _state.value
+        if (s !is CallState.Connected || !amCaller) return
+        if (restartInFlight) return
+        val now = System.currentTimeMillis()
+        if (now - lastRestartAtMs < LOST_RESTART_COOLDOWN_MS) return
+        val client = rtc ?: return
+        val p = pair ?: return
+        val seq = s.seq
+
+        restartInFlight = true
+        lastRestartAtMs = now
+        WebRtcLog.transition("LOST: publishing ICE restart")
+        viewModelScope.launch {
+            runCatching {
+                val offer = withTimeout(SETUP_TIMEOUT_MS) { client.createOffer(iceRestart = true) }
+                signaling.publishRenegotiation(p.roomId, seq, offer.sdp).getOrThrow()
+            }.onSuccess {
+                lastDoc?.takeIf { it.seq == seq }?.let { feedRemoteCandidates(it) }
+            }.onFailure {
+                WebRtcLog.transition("ICE restart failed")
+            }
+            restartInFlight = false
         }
     }
 
@@ -743,6 +846,13 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         const val SETUP_TIMEOUT_MS = 10_000L
         const val AUTO_DISMISS_MS = 2_000L
         const val LOST_GRACE_MS = 20_000L
+
+        /**
+         * Minimum gap between ICE-restart attempts. One per 5s over a 20s grace
+         * window is 4 attempts, enough to survive a radio flap or a NAT rebind
+         * without turning a dead zone into a publish loop.
+         */
+        const val LOST_RESTART_COOLDOWN_MS = 5_000L
         const val FIRST_MEDIA_GRACE_MS = 25_000L
         const val INCOMING_RING_MS = 60_000L
     }

@@ -6,6 +6,7 @@
 // Location: app/src/main/java/com/calldad/navigation/AppNavigation.kt
 package com.calldad.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -65,6 +66,16 @@ fun AppNavHost(
     navController: NavHostController = rememberNavController(),
     incomingCallRequest: Int = 0
 ) {
+    // BP-05 §4 no-escape: the system back button must land on Home, never on
+    // the device launcher. A child pressing back on the Helper or Game screen
+    // would otherwise drop out of the app into whatever else the phone has,
+    // which is the one escape this app exists to prevent. Screens that need
+    // their own back behaviour (Call, Game) install their own BackHandler
+    // inside their composable, which takes precedence over this one.
+    BackHandler(enabled = navController.previousBackStackEntry != null) {
+        navController.popBackStack(Routes.HOME, inclusive = false)
+    }
+
     // The "Dad is talking" banner must be the OUTERMOST composable, above the
     // NavHost, or the Game screen's full-screen WebView covers it.
     Box(modifier) {

@@ -2,6 +2,10 @@
 # Secrets / signing / Firebase — NEVER commit
 .env
 local.properties
+# Release signing config (BP-05 §5). Holds the keystore path AND both
+# passwords — the app's signing identity. The template is committed; the
+# filled-in copy is not. docs/release-signing.md
+keystore.properties
 *.keystore
 *.jks
 google-services.json
