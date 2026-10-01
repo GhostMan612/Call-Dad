@@ -114,6 +114,20 @@ BANNED_SUFFIXES = (".keystore", ".jks")
 BANNED_STRINGS = ["AIza", "BEGIN PRIVATE KEY"]
 # A signing password ASSIGNED a value (the template's empty placeholder is fine).
 BANNED_PATTERNS = [re.compile(r"RELEASE_STORE_PASSWORD=[^\s#]")]
+
+# RULES 1.5a: never a real device serial in a committable file. The law existed
+# for two sessions while six tracked files violated it, so prose is not enough.
+# Both real forms are matched: a USB serial (>=14 digits) and an adb-mDNS
+# serial (adb-<ALNUM>-<...>._adb-tls-connect._tcp). Synthetic fixtures are the
+# documented exception, per the same synthetic-data rule as every other test.
+#
+# There is no permitted hardcoded device model either: `device-evidence` maps
+# the parent/child roles from the model field of `adb devices -l` at run time.
+BANNED_PATTERNS += [
+    re.compile(r"(?<![0-9])[0-9]{14,}(?![0-9])"),
+    re.compile(r"adb-[A-Za-z0-9]{6,}-[A-Za-z0-9]+"),
+]
+SYNTHETIC_SENTINEL = "synthetic-only"
 TEXT_SUFFIXES = {".md", ".kt", ".kts", ".py", ".js", ".json", ".toml", ".xml",
                  ".html", ".rules", ".properties", ".template", ".txt", ".yml", ".yaml"}
 GENESIS = "As Above, So Below. As Within, So Without."
@@ -175,10 +189,15 @@ def main() -> int:
             if s in text:
                 errors.append(f"banned string {s!r} in {rel}")
         for pat in BANNED_PATTERNS:
-            if pat.search(text):
-                errors.append(f"banned secret pattern in {rel}")
+            m = pat.search(text)
+            if m and SYNTHETIC_SENTINEL not in text:
+                errors.append(f"banned secret/device-identity pattern in {rel}: {m.group(0)!r}")
         if p.suffix in {".kt", ".py"} and GENESIS not in text[:400]:
             errors.append(f"missing Genesis header: {rel}")
+    for f in (ROOT / "fixtures").rglob("*") if (ROOT / "fixtures").is_dir() else ():
+        if f.is_file() and f.suffix in TEXT_SUFFIXES:
+            if SYNTHETIC_SENTINEL not in f.read_text(encoding="utf-8", errors="replace"):
+                errors.append(f"fixture lacks the synthetic-only sentinel: {f.relative_to(ROOT)}")
     if errors:
         print("VERIFY FAIL:")
         for e in errors:

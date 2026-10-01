@@ -47,11 +47,17 @@ export default tool({
   async execute(args) {
     if (args.action === "devices") {
       const r = run(["devices", "-l"])
-      const known = [
-        "adb-ZT4222BMWN-ux3EQE._adb-tls-connect._tcp  -> Moto G (PARENT, wireless, may drop)",
-        "7040016025040287                      -> BLU View 5 (CHILD, USB)",
+      // RULES 1.5a: no real device serial in a committable file. Map the
+      // parent/child roles from the model field of the line above, at run
+      // time -- never from a table baked into this file.
+      return [
+        `adb devices -l:\n${r.out.trim()}`,
+        "",
+        "Map roles from each line's model: Moto G 2025 is the PARENT",
+        "(com.calldad.parent), BLU View 5 is the CHILD (com.calldad.child).",
+        "One flavor per device. The Moto is wireless-adb and its mDNS port",
+        "changes per session; the BLU is usually on USB.",
       ].join("\n")
-      return `adb devices -l:\n${r.out.trim()}\n\nexpected mapping:\n${known}`
     }
 
     if (!args.serial) {

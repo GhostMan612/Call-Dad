@@ -43,7 +43,7 @@ prose says?
    a top finding — every future session will be misled.
 6. **Test claims**: any PASS/FAIL count or device result in a handoff is marked with when and by
    whom. Undated "80 tests PASS" is drift waiting to happen.
-7. **Secrets/redaction**: no real child names, photos, numbers, locations, or device serials in
+7. **Secrets/redaction** (`tools/verify_project.py` now bans a 14+ digit serial and an `adb-<SERIAL>-…` form in tracked files, so this is gate-enforced — but check the tool/config files too, since that is where the real leak was): no real child names, photos, numbers, locations, or device serials in
    docs. `tools/verify_project.py` covers some of this; catch prose leaks it misses.
 
 ## Output format

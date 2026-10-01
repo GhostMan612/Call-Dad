@@ -101,7 +101,7 @@ C:\android\sdk\platform-tools\adb.exe shell getprop ro.build.version.sdk
 1. **External dirs READ-ONLY** — six Sovereign-family paths + Godot/Unity/VS installs.
 2. **NEVER build/install** — lane ends at the gates above. Human builds in Studio.
 3. **Git explicit paths only** — never `git add .` / `-A`. Never claim build/device success. No push unless told.
-4. **Synthetic data only** — no real child names/photos/numbers/locations/device serials in code, tests, fixtures or docs.
+4. **Synthetic data only** — no real child names/photos/numbers/locations/device serials in code, tests, fixtures or docs. Machine-enforced: `tools/verify_project.py` fails the gate on a 14+ digit serial or an `adb-<SERIAL>-…` form in a tracked file. Fixtures need a `synthetic-only` token. Resolve real serials at run time from `adb devices -l`; never bake a mapping into a tool.
 5. **Genesis header** on every new `.kt`/`.py` file (verify_project.py enforces it).
 6. **Kid-safe + parent-gate** — one paired contact, pairing behind the grown-ups gate and a mutual handshake, no accounts/analytics/ads.
 

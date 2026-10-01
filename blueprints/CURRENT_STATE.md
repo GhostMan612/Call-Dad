@@ -43,7 +43,7 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `
 
 | ID | Issue | Status |
 |----|-------|--------|
-| K1 | Studio sync + device install proof | **CLOSED 2026-09-30**: clean `assembleParentDebug`+`assembleChildDebug` (33 tasks executed), both installed, `dumpsys` fingerprint `versionCode=5` on Moto G 2025 (`ZT4222BMWN`) and BLU View 5 (`7040016025040287`) |
+| K1 | Studio sync + device install proof | **CLOSED 2026-09-30**: clean `assembleParentDebug`+`assembleChildDebug` (33 tasks executed), both installed, `dumpsys` fingerprint `versionCode=5` on Moto G 2025 (parent) and BLU View 5 (child) |
 | K2 | minSdk | DECIDED 26 (ADR-001) |
 | K3 | Video approach | DECIDED WebRTC, stream-webrtc-android 1.3.10 (ADR-005) |
 | K4 | Signaling | DECIDED Firestore (ADR-002), pair-scoped rooms (ADR-015) |
@@ -83,12 +83,19 @@ but not on this lane's PATH.
 
 ### Device evidence (VERIFIED, `dumpsys` fingerprint, 2026-09-30)
 
-| Device | Serial | Package | versionCode | versionName |
-|---|---|---|---|---|
-| Moto G 2025 (PARENT) | `ZT4222BMWN` | `com.calldad.parent` | 5 | 0.2.2-parent |
-| BLU View 5 (CHILD) | `7040016025040287` | `com.calldad.child` | 5 | 0.2.2-child |
+| Device | Package | versionCode | versionName |
+|---|---|---|---|
+| Moto G 2025 (PARENT) | `com.calldad.parent` | 7 | 0.2.4-parent |
+| BLU View 5 (CHILD) | `com.calldad.child` | 7 | 0.2.4-child |
 
-One flavor per device; no crossed install. Both match `app/build.gradle.kts`.
+Source is at **versionCode 9 / 0.2.6** — ahead of both phones. See "NOT claimed".
+
+Serials are deliberately absent (RULES §1.5a), and `tools/verify_project.py` now
+fails the gate if one reappears in a tracked file. Resolve them at run time with
+`adb devices -l` or the `device-evidence` tool, which maps roles from each
+line's model field.
+
+One flavor per device; no crossed install.
 
 ### Backend state (VERIFIED live)
 
@@ -98,8 +105,9 @@ One flavor per device; no crossed install. Both match `app/build.gradle.kts`.
 
 ### Operator-witnessed behaviour (CLAIMED by operator, not lane-verified)
 
-- Both phones call and answer each other; video good. **First proven E2E call.**
+- Both phones call and answer each other; video good. **First proven E2E call.** (vc7, still current on hardware.)
 - PTT works both directions.
+- A call completes on **mobile data with Wi-Fi off** (operator-witnessed), so the Open Relay path is proven for a normal NAT (K8).
 - PTT tail clipping FIXED and re-verified on both phones, both directions: no clipping,
   no dropped syllables (K14 closed). The operator's ears are the only instrument for this
   one — the encoder drain is an audio-domain change, so logcat could confirm the send and
@@ -108,7 +116,9 @@ One flavor per device; no crossed install. Both match `app/build.gradle.kts`.
 ### NOT claimed
 
 - **`versionCode 7` IS built, installed and on both phones** (`dumpsys` 10:20:55 parent / 10:21:01 child, one flavor each), and the rules + BOTH functions are live. The **mobile-data call passed** (operator-witnessed), so K8 is proven on hardware rather than only in source.
-- **K12's screen-off PTT push is unproven.** `onPttClipWritten` is deployed and live, but no test has confirmed a quiet notification appears on a locked phone, nor that it stays quiet.
-- **K17's tightened pairing read has not been re-witnessed.** The rule is deployed and emulator-tested; whether a real phone completes a fresh pairing under it is untested.
+- **`versionCode 9` is SOURCE-ONLY.** It has never been built, installed, or witnessed. Both phones are still on **vc7 / 0.2.4**, which means two operator-reported defects are **live on the child's phone right now**: a voice message rings at full volume on a locked phone, and a call ring traps the grown-up on their own lock screen. The fixes are gated and reviewed in source (`QuietNotificationTest`); the device proof is what closes this. **This is the single highest-priority open item.**
+- **K12's screen-off PTT push is unproven on any build.** `onPttClipWritten` is deployed and live. On vc7 the fix was only a notification-priority change, which the platform ignores in favour of the channel — hence the loud ring. vc9 moves the notification to a dedicated `IMPORTANCE_LOW` channel, but nothing has confirmed a quiet notification on a locked phone.
+- **K21 (keyguard takeover) is unproven on any build.** vc9 stops the activity opting into `showWhenLocked`/`turnScreenOn` and makes the full-screen intent conditional on the keyguard. Untested on hardware.
+- **K17's tightened pairing read has not been re-witnessed** since vc7. The rule is deployed and emulator-tested; whether a real phone completes a fresh pairing under it is untested.
 - The relay path has been proven for a normal NAT, not a symmetric one. K8's caveat stands.
 - Killed-app ring, force-stop, doze, no-answer timeout, lost-peer end, and game sync mid-call remain unproven.

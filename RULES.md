@@ -43,6 +43,7 @@ C:\Program Files\Microsoft Visual Studio
 - `blueprints\` IS committed for this project (working docs). `fixtures\` synthetic samples may commit; `*.csv` manifests, local `local.properties`, keystores, `google-services.json` are gitignored — do not "fix" this.
 - Commit messages report gates status (unit test / lint / verify) only. NEVER claim build/install/device success — human builds in Android Studio.
 - No push unless operator explicitly says so.
+- **A blocked commit is an emergency, not a note for the handoff.** `git*add*` / `git*commit*` are `ask`, so green-but-uncommitted work can vanish entirely via a revert or a sync — it happened here. If a commit is denied, stop and escalate in the same turn; never end a session carrying uncommitted work and call it delivered. Details in §1.4a.
 - Source: pathfinder `§1.3`, Atlas `§1.4`, Vision `§1.4`.
 
 ### 1.4a Tool use — the shell is a LAST resort, not a default (HARD RULE)
@@ -77,6 +78,25 @@ gate after every single edit. Fix everything you can see, using `grep`/`edit`,
 then run the gate once as the phase's closing step. Interleaving one gate per
 edit is what turned a one-phase task into three days.
 
+**A phase that cannot be committed is not finished — and a blocked commit is
+an emergency, not a note for later.** `git*commit*` and `git*add*` are `ask`,
+so a denied or unapproved commit leaves finished work sitting uncommitted in a
+working tree where it is one `git reset`, one tool-side revert, or one
+cloud-session sync away from being **gone with no trace in git history**.
+That already happened here: the K12/K21 fixes were gated green, the commit
+was blocked, the work was never re-applied, and the only reason anyone found
+out was a source-scan test that failed on the missing code. Rules that keep
+happening:
+
+- **If a commit you were asked to make is blocked, say so immediately and
+  stop.** Do not end the turn with "you may want to run this" and move on.
+  Ask the operator to run the exact command, or get the block lifted.
+- **Never treat "gates green" as "shipped".** A green gate certifies the tree
+  as it stands *in the working directory*. It is not a claim that the work is
+  recorded anywhere durable.
+- **Before ending a session, confirm the work is in a commit.** If it is not,
+  the session has not delivered. `git status` clean is the finish line.
+
 Corollary: if you catch yourself shelling to look at a file you have already
 read, or to check whether an edit you just made landed, **stop and use `read`/`grep`.**
 
@@ -97,8 +117,13 @@ read, or to check whether an edit you just made landed, **stop and use `read`/`g
 
 **Never write a real device serial, the operator's username, or any other machine identity into a committable file.** Ask for the serial at run time; `adb devices -l` has it.
 
+**This is MACHINE-ENFORCED, not prose.** `tools/verify_project.py` fails the gate on a USB-style serial (14+ digits) or an adb-mDNS serial (`adb-<SERIAL>-…`) in any tracked text file, naming the match. It was added because this law existed for two sessions while six tracked files violated it — the tool that enforces the privacy rule was itself the source of the leak. Do not "work around" the gate by deleting a real serial from the ban list; redact the serial in the file instead. Fixtures may hold synthetic identifiers only, and must carry the literal token `synthetic-only`.
+
 ### 1.5b The agent fleet (`.opencode/`)
 Read-only auditors (none may edit): `call-core-auditor`, `webrtc-media`, `firestore-rules-auditor`, `fcm-wakeup-auditor`, `doc-drift-auditor`, `kid-ux-guardian`, `native-dev`, `comms-porter`. Execution: `gate-runner`. Records: `handoff-writer`. Tools: `gate`, `device-evidence`, `contract-diff`. Commands: `/verify`, `/probe`, `/smoke`, `/sweep`, `/flash`, `/evidence`. A subagent's claim is not evidence: re-read the line before acting on it.
+
+### 1.5c Device state is the operator's to hand back
+Any device check leaves the phone however it found it. Before finishing, confirm nothing that evidence-gathering changed is still changed: **Wi-Fi network joined, airplane mode off, Bluetooth on, DND off, font scale and display size at default, no leftover `adb` pairings, no pulled fixtures left behind.** Restore anything that drifted and say which. Leaving a phone in a test state reads to a parent as "the app broke my phone" — the device belongs to the operator, not the lane.
 
 ### 1.6 Nothing outside the project without approval
 Do not install software, modify system settings, or write outside `C:\Call-Dad` / `C:\venv-hub\call-dad\` / approved tool homes without asking first.

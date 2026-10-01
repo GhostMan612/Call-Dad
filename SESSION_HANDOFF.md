@@ -19,6 +19,47 @@
 
 Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidManifest.xml`) > prose.
 
+## Where we are (2026-09-30, self-audit of the agent workflow)
+
+- **A privacy law I wrote myself was violated in six tracked files.** `RULES.md` §1.5a
+  has always forbidden putting a real device serial in a committable file. Six files
+  carried both serials — and `.opencode/tools/device-evidence.ts:51-52` hardcoded them
+  as an "expected mapping" table, so **the tool whose job is device evidence was the
+  source of the leak.** Serials are now redacted from all six.
+- **That law is now machine-enforced, because prose alone demonstrably failed.**
+  `tools/verify_project.py` fails the gate on a 14+ digit serial or an
+  `adb-<SERIAL>-…` form in any tracked text file, naming the match. `fixtures/` text
+  must carry a `synthetic-only` sentinel so the escape hatch stays honest.
+- **The gate itself now has a test.** `VerifyProjectSelfTest` asserts the device-identity
+  bans exist, are wired into the scan loop (not merely declared), and report the match.
+  A verification gate nobody has watched fail is a gate nobody can trust — that gap is
+  how the serial survived two sessions.
+- **Green gates ≠ shipped, and that cost real work.** The K12 and K21 fixes were written
+  and gated green; the commit was blocked by an over-broad `write*` deny in
+  `opencode.json`; I reported the block, wrote a handoff note suggesting the operator
+  run it, and moved on. The work then vanished from the working tree entirely. The only
+  reason anyone found out was `QuietNotificationTest` failing on the missing code.
+  `RULES.md` §1.4/§1.4a now say a blocked commit is an emergency: stop and escalate in
+  the same turn. The K12/K21 fixes were re-applied and committed (`86f3627`).
+- **`gate-runner`'s description was a per-edit router trigger.** It said "before
+  declaring any change done" in the front matter while its body correctly said "once at
+  the end of a phase". Descriptions are matched on to decide whether to invoke the agent,
+  so the description won. Reworded, and `ToolUseDisciplineTest` now asserts the
+  description and body agree — the old body-only assertion could never catch this.
+- **`opencode.json` deny list corrected.** The over-broad `write*` deny (which blocked
+  legitimate git and piped output) is gone; `sed`, `tee`, `python -c`/`-m`, `node -e`,
+  nested shells, `Start-Process` and `Invoke-Expression` are now denied. Structural fix
+  (narrow allowlist as the default) is proposed, not done.
+- **Doc drift corrected.** `docs/setup-android-studio.md` and `BP-01-skeleton.md` still
+  told the operator to create the project at Kotlin 2.1.0 / AGP 8.13.2 / minSdk 30 with
+  Hilt, Room, SQLCipher, OkHttp, Concentus and KSP — none of which are in the build. Now
+  points at `gradle/libs.versions.toml` as the only source of truth. `GEMINI_HANDOFF.md`
+  is marked superseded. `CURRENT_STATE.md`'s device table said vc5 when the phones are on
+  **vc7**, and said nothing about source being at vc9.
+- **`LESSONS_LEARNED.md` split.** It was mostly platform trivia filed as lessons. Now
+  PART 1 is mistakes-we-actually-made (each with root cause and the check that stops it),
+  PART 2 is platform reference. Added `RULES.md` §1.5c: leave the device as you found it.
+
 ## Where we are (2026-09-30, tool-use correction — RULES §1.4a added)
 
 - **Operator correction, second one this contract.** A three-day plan was being
@@ -115,14 +156,24 @@ Supersedes the Contract 10 block below for current state.
 
 ### Next actions (all human-witnessed; none can be closed by writing code)
 
-1. Re-pair both phones under the tightened K17 read. If the client assumed any-signed-in
+1. **Build and flash vc9 first.** It is source-only. Two operator-reported defects are
+   live on the child's phone until then: a voice message rings at full volume on a locked
+   phone, and a call ring traps the grown-up on their own lock screen. Everything below
+   is tested on vc9, so flashing is the prerequisite, not item one.
+2. **Locked-phone check on vc9** — the one that matters:
+   - send a clip with the receiving app closed and the phone locked: expect a quiet
+     "A message is waiting", no ring, no vibration. On vc7 this rang loudly, because the
+     notification was on the IMPORTANCE_HIGH call channel and the platform ignores
+     per-notification priority from Android 8+. vc9 moves it to a dedicated IMPORTANCE_LOW
+     channel.
+   - have the grown-up's phone locked and ringing: the notification must show and the
+     ring must be audible, but the app must **not** take over the lock screen and must not
+     block unlocking.
+3. Re-pair both phones under the tightened K17 read. If the client assumed any-signed-in
    could read, pairing fails — which is the correct, safe failure.
-2. Screen-off PTT: send a clip with the receiving app closed. Expect a quiet
-   "A message is waiting". **If it rings loudly, the normal priority is wrong and that is a
-   bug, not a preference.**
-3. K11 remainder: killed-app ring, force-stop, doze, no-answer timeout, lost-peer end,
+4. K11 remainder: killed-app ring, force-stop, doze, no-answer timeout, lost-peer end,
    game sync mid-call.
-4. K20, accepted rather than closed: pruning is client-triggered, so a pair that never opens
+5. K20, accepted rather than closed: pruning is client-triggered, so a pair that never opens
    the app never prunes. A Firestore TTL would need a scheduled function and a billed index,
    and a dormant pair costs cents.
 
@@ -141,8 +192,8 @@ kept as dated history, not current state.
   call and answer each other, video good, PTT works both ways.
 - **Build/install evidence (`dumpsys` fingerprint):** clean
   `assembleParentDebug`+`assembleChildDebug` (33 tasks executed from scratch, not
-  up-to-date reuse). Moto G 2025 `ZT4222BMWN` = `com.calldad.parent` vc5;
-  BLU View 5 `7040016025040287` = `com.calldad.child` vc5. One flavor per device.
+  up-to-date reuse). Moto G 2025 = `com.calldad.parent` vc5;
+  BLU View 5 = `com.calldad.child` vc5. One flavor per device.
 - **All five gates GREEN**, including the two that were SKIPPED for the whole of
   Contract 9. `functions` 6/6 and rules emulator 17/17 now actually run: Node 22.23.2
   and the Android Studio JBR were already on the machine, just not on this lane's PATH.
@@ -362,10 +413,17 @@ kept as dated history, not current state.
 - **Device screenshot proved it:** Home shows greeting + one full-screen grey QA card, zero grid. Cause: `GiantActionCard`'s inner `fillMaxSize` Column is safe only inside weighted rows; my unweighted QA card claimed the whole Column and squeezed both grid rows to zero height. Fix: fixed `.height(140.dp)` on the QA card (+ missing `height` import).
 - **Lesson recorded:** never trust "works" without a screenshot; the operator's report was precise and I argued instead of looking. Look first from now on.
 
+## ARCHIVE — superseded, kept for history
+
+Everything below this line predates the current state. Do not act on it. Current
+state is `blueprints/CURRENT_STATE.md`; the short version is at the top of this file.
+
+---
+
 ## Where we are (2026-09-19, operator UX confusion — "no home", grid unseen)
 
 - **Operator report:** only ever sees grey QA card → overlay → Answer → 15s → NOT_FOUND error → Retry ("Ready") / Hang-up (back). Never mentions the 4 colored Home cards — UNCONFIRMED whether the 2x2 grid renders on their build. "Home" jargon retired; describing screens by visible text from now on.
-- **Lane observation (screenshots):** BLU showed only the pulled-down Quick Settings shade (airplane mode ON, WiFi on Dayton House — network OK); then BLU left USB. Moto G present on wireless adb (`adb-ZT4222BMWN-…`), screen ASLEEP (black capture). App Home screen never visually confirmed.
+- **Lane observation (screenshots):** BLU showed only the pulled-down Quick Settings shade (airplane mode ON, WiFi on Dayton House — network OK); then BLU left USB. Moto G present on wireless adb (mdns transport), screen ASLEEP (black capture). App Home screen never visually confirmed.
 - **Standing question for operator:** on the app's first screen, are there 4 colored cards above the grey one? If no green "Call Dad" card is visible, that's a layout bug on the executor — say so and it gets fixed, no choreography will work until it exists.
 - **Choreography (once green card confirmed):** phone A taps GREEN card and waits; phone B taps GREY card → Answer within ~15s.
 

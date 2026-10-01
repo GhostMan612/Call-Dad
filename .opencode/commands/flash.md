@@ -9,7 +9,8 @@ version fingerprint resolved from source, and you state what evidence is still m
 
 ## 1. Resolve the fingerprint (read source, do not build)
 Read `app/build.gradle.kts` for `versionCode` and `versionName`. Report them, e.g.
-`versionCode 4 / versionName 0.2.1`, and the two flavor ids `0.2.1-parent` and `0.2.1-child`.
+`versionCode 9 / versionName 0.2.6`, and the two flavor ids `0.2.6-parent` and `0.2.6-child`.
+Never quote a version from memory or from a doc — read the file every time.
 Note whether the build is dirty (`git status --porcelain`) — a dirty tree invalidates the
 fingerprint, because the operator will build uncommitted bytes.
 
@@ -35,9 +36,10 @@ The agent's own verification is `dumpsys` via the `device-evidence` tool.)
 PARENT = Moto G 2025 (ask the operator for its serial; it is a wireless ADB
 pairing and will drop). CHILD = BLU View 5 (ask the operator for its serial).
 
-Device serials are deliberately NOT written into this repo. RULES.md forbids real
-device identifiers in committed files; read them from `adb devices -l` at run time
-or from the operator's message.
+Device serials are deliberately NOT written into this repo, and `tools/verify_project.py`
+now FAILS the gate if one appears in a tracked file (RULES §1.5a). Read them from
+`adb devices -l` at run time or from the operator's message. Map roles from the model
+field: Moto G 2025 = parent, BLU View 5 = child.
 
 ## 4. Post-install verification the operator must run
 Re-run `device-evidence` `action=version` and require the on-device `versionCode` to equal the

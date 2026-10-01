@@ -2,17 +2,19 @@
 
 > **HISTORICAL (2026-09-24):** this describes the original LAN/UDP donor-port plan. What shipped is Firebase signaling + WebRTC + pair-scoped rooms. Current shape: `AGENTS.md` "Architecture notes", `blueprints/CURRENT_STATE.md` and `blueprints/decisions/ADR-015-pair-rooms.md`.
 
+> **Superseded, kept for the issue list only.** Line 9's version (`v0.2.0/vc3`), its `calls/dad_channel` room, and the "Known issues" below are all CLOSED or REPLACED: pair-scoped rooms (ADR-015), FCM + foreground-service wakeup (ADR-013), and current state in `blueprints/CURRENT_STATE.md`. Do not treat the issue list as open. Toolchain there is still accurate; versions are not.
+
 > Copy/paste to Gemini (Chief R&D). Operator order: recursive live-internet research over similar apps (family/kid calling, WebRTC + Firestore signaling) for bulletproof fixes to the known issues below. Full detail: SESSION_HANDOFF.md, ADRs, CURRENT_STATE.md.
 
 ## What this is
 
-Native Kotlin Android app (`com.calldad`, launcher "Call of Daddy", minSdk 26 / compile-target 35, v0.2.0/vc3). A 6-year-old calls her dad: giant-button voice+video over WebRTC, Firestore SDP/ICE signaling through one hardcoded room (`calls/dad_channel` + `candidates` subcollection, project `calldad-508d7`). Single-Activity + Compose + ViewModel/StateFlow. No Hilt/Room yet. Toolchain: AGP 8.7.2 / Kotlin 2.0.21 / google-services 4.5.0 / Firebase BOM 34.19.0 / `io.getstream:stream-webrtc-android:1.3.10`.
+Native Kotlin Android app (`com.calldad`, launcher "Call of Daddy", minSdk 26 / compile-target 35; at the time of writing v0.2.0/vc3, now v0.2.6/vc9). A 6-year-old calls her dad: giant-button voice+video over WebRTC, Firestore SDP/ICE signaling, project `calldad-508d7`. Single-Activity + Compose + ViewModel/StateFlow. No Hilt/Room. Toolchain: AGP 8.7.2 / Kotlin 2.0.21 / google-services 4.5.0 / Firebase BOM 34.19.0 / `io.getstream:stream-webrtc-android:1.3.10`. The room was `calls/dad_channel` at this point and is now pair-scoped `calls/{uidA_uidB}` (ADR-015).
 
 ## Device-proven working (BLU View 5 + Moto G 2025, same Wi-Fi)
 
 - Caller leg: OFFER published <2s. Full call: OFFER→ANSWER→ICE CONNECTED both sides, two-way video (screenshots lane-witnessed), two-way audio (operator ears), timer, hangup-mirrors-home both sides, zero crashes.
 - Fixes proven on device: double-dispose SIGSEGV, scope-cancelled teardown, grid-squeezed-to-zero layout, self-ring suppression, stale-offer immunity (60s), 15s zombie watchdog, stuck-overlay validation.
-- Gates: `testDebugUnitTest` + `lintDebug` BUILD SUCCESSFUL (33 tasks, 9 host tests); `verify_project.py` PASS.
+- Gates: BUILD SUCCESSFUL (33 tasks, 9 host tests); `verify_project.py` PASS. (Named `:app:testDebugUnitTest` + `:app:lintDebug` back then — those tasks no longer exist. The flavored forms are `testParentDebugUnitTest` / `testChildDebugUnitTest` / `lintParentDebug` / `lintChildDebug`.)
 
 ## Known issues for R&D (operator: research similar apps, bulletproof fixes)
 

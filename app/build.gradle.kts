@@ -1,5 +1,5 @@
 // Call-Dad app module. BuildConfig fields injected from local.properties (gitignored).
-// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.1.
+// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.6 / versionCode 9.
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 
 plugins {
