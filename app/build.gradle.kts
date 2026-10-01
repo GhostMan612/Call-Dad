@@ -31,8 +31,16 @@ android {
         // hole, orphan cleanup, and the clip cap. Bumps because the APK's ICE
         // servers changed: a phone on 6 would silently lack a relay and fail
         // on mobile data, and that is not visible from dumpsys at all.
-        versionCode = 7
-        versionName = "0.2.4"
+        // versionCode 9: re-lands K12 (dedicated IMPORTANCE_LOW PTT channel --
+        // the clip notification shipped on the IMPORTANCE_HIGH call channel and
+        // rang at full volume on a locked phone) and K21 (the activity no longer
+        // opts into showWhenLocked/turnScreenOn, and the full-screen intent is
+        // conditional on the keyguard, so a ring no longer traps the grown-up on
+        // their own lock screen). Bumps because 7 and 9 are behaviourally
+        // different in exactly the case that matters: locked screen. A phone on
+        // 7 rings the whole house for a voice message and blocks the unlock.
+        versionCode = 9
+        versionName = "0.2.6"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

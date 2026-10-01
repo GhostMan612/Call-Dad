@@ -433,7 +433,7 @@ class VoiceClipPttEngine(
          * because played clips delete immediately; the grace period is what
          * keeps a returning parent from losing a weekend of messages.
          */
-        const val MAX_PENDING_CLIPS = 50
-        const val UNPLAYED_GRACE_MS = 24L * 60L * 60L * 1000L
+        const val MAX_PENDING_CLIPS = 200
+        const val UNPLAYED_GRACE_MS = 30L * 24L * 60L * 60L * 1000L
     }
 }

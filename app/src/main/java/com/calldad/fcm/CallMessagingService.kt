@@ -101,11 +101,11 @@ class CallMessagingService : FirebaseMessagingService() {
             }
             nm.notify(
                 NOTIFICATION_ID_CLIP_WAITING,
-                NotificationCompat.Builder(this, CallDadApplication.CHANNEL_INCOMING_CALL)
+                NotificationCompat.Builder(this, CallDadApplication.CHANNEL_PTT_MESSAGE)
                     .setSmallIcon(R.drawable.ic_mic)
                     .setContentTitle("A message is waiting")
                     .setContentText("Tap to hear it")
-                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
                     .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                     .setAutoCancel(true)
                     .setContentIntent(pi)

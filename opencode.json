@@ -42,8 +42,21 @@
       "Get-ChildItem*": "deny",
       "dir*": "deny",
       "ls*": "deny",
-      "write*": "deny",
-      "echo*>*": "deny"
+      "echo*>*": "deny",
+      "sed*": "deny",
+      "tee*": "deny",
+      "python*-c*": "deny",
+      "python*-m*": "deny",
+      "node*-e*": "deny",
+      "node*--eval*": "deny",
+      "bash*": "deny",
+      "sh*": "deny",
+      "wsl*": "deny",
+      "cmd*": "deny",
+      "Start-Process*": "deny",
+      "Invoke-Expression*": "deny",
+      "ForEach-Object*": "deny",
+      "Where-Object*": "deny"
     },
     "external_directory": {
       "*": "ask",

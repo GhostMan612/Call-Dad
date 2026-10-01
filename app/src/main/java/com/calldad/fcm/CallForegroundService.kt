@@ -6,6 +6,7 @@
 // Location: app/src/main/java/com/calldad/fcm/CallForegroundService.kt
 package com.calldad.fcm
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -174,6 +175,15 @@ class CallForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // K21, operator-found: an unconditional full-screen intent is what
+        // launches the activity straight over the keyguard, which trapped the
+        // grown-up on their own lock screen. Only take the screen over when it
+        // is already usable; on a locked phone the notification's CATEGORY_CALL
+        // and PRIORITY_MAX still give a full ringscreen entry, and CallAudioManager
+        // is still the ringer either way.
+        val keyguard = getSystemService(KeyguardManager::class.java)
+        val takeOverScreen = keyguard?.isKeyguardLocked != true
+
         return NotificationCompat.Builder(this, CallDadApplication.CHANNEL_INCOMING_CALL)
             .setSmallIcon(R.drawable.ic_call)
             .setContentTitle(getString(R.string.incoming_call_title))
@@ -183,7 +193,7 @@ class CallForegroundService : Service() {
             .setOngoing(true)
             .setAutoCancel(true)
             .setContentIntent(fullScreenPi)
-            .setFullScreenIntent(fullScreenPi, true)
+            .setFullScreenIntent(fullScreenPi, takeOverScreen)
             .build()
     }
 

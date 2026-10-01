@@ -46,6 +46,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // K21, operator-found: while a call rang, the app kept drawing over the
+        // lock screen and the grown-up could not get past it to unlock their own
+        // phone. An activity that opts into showWhenLocked/turnScreenOn keeps
+        // showing OVER the keyguard once launched, so we never opt in and let
+        // the platform handle a locked screen. API 27+ against a minSdk of 26,
+        // hence the guard -- lint flagged the unguarded form as a crash on 8.0.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        }
         enableEdgeToEdge()
         requestNotificationPermission()
         checkFullScreenIntentAccessOnce()

@@ -77,6 +77,49 @@ class ToolUseDisciplineTest {
             }
     }
 
+    /**
+     * The deny list is a NAME list, so anything that executes arbitrary code is
+     * a hole: it can read or write a file no matter which names are denied.
+     *
+     * `python -c` and `node -e` are the dangerous ones. PowerShell mangles
+     * their quoting, and a mangled `python -c` has corrupted files in the
+     * sibling repos. `bash`/`sh`/`wsl`/`cmd` are worse: they start a whole new
+     * shell in which NONE of these patterns apply, so `bash -c "cat foo"`
+     * evades every entry in the list.
+     */
+    @Test
+    fun arbitraryCodeExecutionIsDenied() {
+        listOf(
+            "python*-c*", "python*-m*", "node*-e*", "node*--eval*",
+            "bash*", "sh*", "wsl*", "cmd*",
+            "Start-Process*", "Invoke-Expression*"
+        ).forEach { pattern ->
+            assertTrue(
+                "opencode.json must deny \"$pattern\" -- it executes arbitrary code " +
+                    "and bypasses every other entry in the list",
+                Regex("\"" + Regex.escape(pattern) + "\"\\s*:\\s*\"deny\"").containsMatchIn(config)
+            )
+        }
+    }
+
+    @Test
+    fun theDenyListDoesNotBlockLegitimateWork() {
+        // Regression guard for a real session failure: "write*": "deny" matched
+        // ANY command containing the substring "write", so `$out = ...` and a
+        // plain `git commit` were both blocked and the agent could not commit
+        // its own work. A deny list that stops version control is worse than
+        // useless. The file-writing intent is already covered precisely by
+        // Set-Content / Add-Content / Out-File.
+        listOf("write*", "commit*", "output*", "show*", "view*", "read*").forEach { overbroad ->
+            assertFalse(
+                "\"$overbroad\": \"deny\" is too broad and collides with legitimate " +
+                    "commands; use the specific cmdlet instead (Set-Content, " +
+                    "Add-Content, Out-File) or delegate to the read/grep/glob/edit tools",
+                Regex("\"" + Regex.escape(overbroad) + "\"\\s*:\\s*\"deny\"").containsMatchIn(config)
+            )
+        }
+    }
+
     // ---- the prose layer: the law must exist and be findable on cold start ----
 
     @Test
@@ -146,6 +189,43 @@ class ToolUseDisciplineTest {
         assertTrue(
             "gate-runner must be told it is a phase-closing step, not a per-edit step",
             runner.contains("phase") && runner.contains("edit")
+        )
+    }
+
+    /**
+     * A subagent's `description` is the DISPATCH SURFACE -- it is what a router
+     * matches on to decide whether to invoke the agent. The body only reaches the
+     * agent after it has already been invoked.
+     *
+     * So a description saying "use before declaring any change done" is a
+     * per-change router trigger, and the body's "once per phase" instruction
+     * never gets a chance to matter. This is exactly the leak RULES 1.4a exists
+     * to close, sitting in the description rather than the body, which is why
+     * the body-only assertion above could never catch it.
+     */
+    @Test
+    fun gateRunnerDescriptionMatchesItsOwnPhaseClosingBody() {
+        val runner = read(".opencode/agents/gate-runner.md")
+        val front = runner.substringBefore("mode: subagent")
+        val description = Regex("""description:\s*(.+)""").find(front)?.groupValues?.get(1).orEmpty()
+        assertTrue("gate-runner must have a description", description.isNotBlank())
+
+        val perChange = listOf(
+            "before declaring any change", "per change", "each change",
+            "every change", "after each edit", "before each edit"
+        )
+        perChange.forEach { phrase ->
+            assertFalse(
+                "gate-runner's DESCRIPTION says \"$phrase\" -- that is a per-change " +
+                    "router trigger and contradicts its own phase-closing body. " +
+                    "The description is matched on; the body is read after. Found: $description",
+                description.contains(phrase, ignoreCase = true)
+            )
+        }
+        assertTrue(
+            "the description should positively state that it runs ONCE at the END of " +
+                "a phase, not per edit. Found: $description",
+            description.contains("END of a phase") || description.contains("once")
         )
     }
 

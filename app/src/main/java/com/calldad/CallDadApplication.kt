@@ -25,6 +25,7 @@ class CallDadApplication : Application() {
         super.onCreate()
         FirebaseApp.initializeApp(this)
         createIncomingCallChannel()
+        createMessageChannel()
         PushTokenRegistrar.leaveLegacyTopic()
         signInAnonymously()
     }
@@ -75,8 +76,35 @@ class CallDadApplication : Application() {
         nm.createNotificationChannel(channel)
     }
 
+    /**
+     * Channel for PUSH-TO-TALK voice messages. These are NOT calls: a waiting
+     * voice message must never ring, buzz, or take over the screen. It is
+     * IMPORTANCE_LOW with no sound and no vibration, so on Android 8+ the
+     * channel's importance is what the phone obeys and the notification's own
+     * priority is ignored. The K12 bug was a voice message built on the
+     * IMPORTANCE_HIGH call channel, which rang at full volume on a locked
+     * phone. Playback is the child's explicit tap.
+     */
+    private fun createMessageChannel() {
+        val nm = getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            CHANNEL_PTT_MESSAGE,
+            "Voice Messages",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "A family member left you a voice message"
+            setShowBadge(true)
+            setSound(null, null)
+            enableVibration(false)
+            enableLights(false)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+        }
+        nm.createNotificationChannel(channel)
+    }
+
     companion object {
         const val CHANNEL_INCOMING_CALL = "incoming_call_v2"
+        const val CHANNEL_PTT_MESSAGE = "ptt_message_v1"
         private const val LEGACY_CHANNEL_INCOMING_CALL = "incoming_call"
     }
 }
