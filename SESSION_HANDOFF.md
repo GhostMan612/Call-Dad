@@ -30,8 +30,12 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 
 The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, the standing gate is
 green on the built tree (verify PASS · unit PASS both flavors · lint 0/0 · functions
-13/13 · **rules emulator 44/44**), and **`firestore.rules` is deployed** (2026-10-01).
-`versionCode 10` / `0.3.0` is clean-built for both flavors and **not installed**.
+13/13 · **rules emulator 44/44**), **`firestore.rules` is deployed** (2026-10-01), and
+`versionCode 10` / `0.3.0` is **installed on both phones** (2026-10-01 08:19).
+
+Nothing in §2 has been exercised on hardware. Not one call, text, photo, consent
+grant or ICE restart has run against this build. Every feature row is
+**built, deployed, installed, and untested** — the gap is now witness, not code.
 
 ### The one bug worth reading this handoff for
 
@@ -66,7 +70,11 @@ certifies the tree, never the behaviour of whoever is running it.**
    and released. `chat`, `photos`, `consents`, `revocations` and `negotiationRound`
    are live. Until this ran every one of them was denied on a real device, so no
    amount of correct code could have made the new features work.
-2. **Flash vc10 to both phones.** Then, in this order:
+2. ~~**Flash vc10 to both phones.**~~ **DONE 2026-10-01 08:19.** `dumpsys`
+   confirms Moto G 2025 (parent) vc10 / 0.3.0-parent and BLU View 5 (child)
+   vc10 / 0.3.0-child, one flavor per device, installed `-r` so the anonymous
+   account, peer UID, pairing and the child's consent grant all survived. **No
+   re-pair needed.** Then, in this order:
    - **First-run consent — check this before anything else, because everything
      else will look broken without it.** A fresh install is INERT: Messages and
      Pictures both read "turned off right now", and the call is gated too. A
@@ -75,8 +83,9 @@ certifies the tree, never the behaviour of whoever is running it.**
      a bug. The grown-up's own phone is not gated — see ADR-017's `isGrantor`,
      because the rules make a self-named grant impossible and a naive gate would
      lock the parent out of the app they are configuring.
-   - The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover)
-     that have been open since vc9 and are **live on the child's phone right now**.
+   - The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover).
+     Fixed in vc10, never verified, open since vc9.
+   - A call, end to end. The existing E2E proof is from vc7.
    - A text message both ways, including a link-shaped one (must be refused).
    - A real photo sent, verified, rendered. No photo has ever been sent.
    - The missed-call callback card.

@@ -107,12 +107,24 @@ while the tool printed green (see `LESSONS_LEARNED.md`).
 
 ### Device evidence (VERIFIED, `dumpsys` fingerprint)
 
-| Device | Package | versionCode | versionName |
-|---|---|---|---|
-| Moto G 2025 (PARENT) | `com.calldad.parent` | 7 | 0.2.4-parent |
-| BLU View 5 (CHILD) | `com.calldad.child` | 7 | 0.2.4-child |
+| Device | Package | versionCode | versionName | installed |
+|---|---|---|---|---|
+| Moto G 2025 (PARENT) | `com.calldad.parent` | 10 | 0.3.0-parent | 2026-10-01 08:19:05 |
+| BLU View 5 (CHILD) | `com.calldad.child` | 10 | 0.3.0-child | 2026-10-01 08:19:19 |
 
-Source is at **versionCode 10 / 0.3.0** — ahead of both phones. See "NOT claimed".
+**The phones are now on the current source for the first time.** They were on
+vc7/0.2.4 while source had moved to vc10 — the widest source/device gap in the
+project's history, and the reason the K12 loud-voice-message and K21
+lock-screen-trap defects were live on the child's phone throughout. Those are now
+closed in the installed build but still **unwitnessed**.
+
+Installed with `-r`, so the anonymous Firebase account, the peer UID, and the
+pairing handshake all survived — no re-pair needed, and the child kept its
+consent grant from the pair room.
+
+One flavor per device; no crossed install. The Moto is a WIRELESS-adb device
+(mDNS), and its advertised host:port changes per session, so resolve it at run
+time with `adb devices -l` rather than hardcoding it.
 
 Serials are deliberately absent (RULES §1.5a), and `tools/verify_project.py` now
 fails the gate if one reappears in a tracked file. Resolve them at run time with
@@ -130,7 +142,7 @@ One flavor per device; no crossed install.
 
 ### Operator-witnessed behaviour (CLAIMED by operator, not lane-verified)
 
-- Both phones call and answer each other; video good. **First proven E2E call.** (vc7, still current on hardware.)
+- Both phones call and answer each other; video good. **First proven E2E call.** (Proven under vc7. Re-prove under vc10 before treating it as current.)
 - PTT works both directions.
 - A call completes on **mobile data with Wi-Fi off** (operator-witnessed), so the Open Relay path is proven for a normal NAT (K8).
 - PTT tail clipping FIXED and re-verified on both phones, both directions: no clipping,
@@ -140,7 +152,17 @@ One flavor per device; no crossed install.
 
 ### NOT claimed
 
-- **`versionCode 10 / 0.3.0` is SOURCE-ONLY.** Never built, never installed, never witnessed. Both phones are on **vc7 / 0.2.4**, which means two operator-reported defects are **live on the child's phone right now**: a voice message rings at full volume on a locked phone, and a call ring traps the grown-up on their own lock screen. The fixes are gated and reviewed in source; the device proof is what closes this. **This remains the single highest-priority open item.**
+- **Every feature in `SPEC_SHEET.md` §2 is BUILT, DEPLOYED and INSTALLED, and none
+  is WITNESSED.** `vc10 / 0.3.0` is on both phones as of 2026-10-01 08:19, and the
+  rules are live. "Installed" is not "working": no phone has yet made a call, sent
+  a text, exchanged a photo, granted a consent, or recovered an ICE restart against
+  this build. Treat every §2 row as **untested on hardware** until an operator
+  says otherwise, and do not read a successful install as evidence of any feature.
+- **The two locked-phone defects are no longer live but are unverified.** A voice
+  message ringing at full volume on a locked phone, and a call ring trapping the
+  grown-up on their own lock screen, were both open on the child's phone under vc7.
+  vc10 contains the fixes (K12 quiet PTT channel, K21 keyguard). Whether they work
+  is exactly the question the next operator session answers.
 - **The Firestore rules deployed live are the vc10 set (2026-10-01).** Chat, photos, consents, revocations and `negotiationRound` are emulator-tested (44/44) AND live. The emulator suite is the only evidence for them until a phone exercises them, so the rules are now deployed-but-unwitnessed, which is a different and better state than emulator-only — but it is not "proven".
 - **The consent kill switch has never been exercised on a device.** The rules are proven against the emulator and the gate logic is host-tested, but no human has granted a scope and watched a child lose it.
 - **Photo sharing has never sent a real photo.** The transport, digest, ordering, downscale policy and rules are all proven (byte-proof on synthetic fixtures, 40/40 emulator), but the Bitmap→WEBP path, the picker, and the screen have never run against a camera image. That is the largest untested surface in the app.

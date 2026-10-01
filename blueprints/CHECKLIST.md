@@ -164,7 +164,7 @@ Six read-only auditors (call core, media, Firestore rules, FCM wakeup, kid UX, d
 - [x] **`RULES.md` §1.4/§1.4a** now treat a blocked commit as an emergency (escalate the same turn), after green-but-uncommitted K12/K21 work was lost from the working tree.
 - [x] **`RULES.md` §1.5c added** — leave the device as you found it (Wi-Fi, airplane, Bluetooth, DND, font scale, no leftover pairings).
 - [x] **Doc drift fixed**: `docs/setup-android-studio.md` and `BP-01-skeleton.md` told the operator to create the project with Kotlin 2.1.0 / AGP 8.13.2 / minSdk 30 + Hilt/Room/SQLCipher/OkHttp/Concentus/KSP, none of which are in the build. Now point at `libs.versions.toml`. `CURRENT_STATE.md`'s device table said vc5; phones are on **vc7**, source at vc9.
-- [ ] **vc9 → device** — highest-priority open item. Until it is flashed, a voice message rings at full volume and a call ring blocks the lock screen, on the child's phone.
+- [x] **vc10 → device DONE 2026-10-01.** Both phones flashed, `dumpsys` confirms: Moto G 2025 (parent) `com.calldad.parent` vc10 / 0.3.0-parent at 08:19:05; BLU View 5 (child) `com.calldad.child` vc10 / 0.3.0-child at 08:19:19. One flavor per device, no crossed install. Installed `-r`, so the anonymous Firebase account, peer UID, pairing handshake and the child's existing consent grant all survived. The vc9→vc7 gap that left the loud-voice-message and lock-screen-trap defects live on the child's phone is closed; whether the fixes work is now a witness question, not an install question.
 - [x] Docs: heartbeat line unticked (never shipped), ADR-015 §6 amended, `RULES.md` §1.5/§1.5a/§1.5b/§1.7a corrected
 - [x] **Gate G-C10 host** — GREEN 2026-09-30: `verify_project.py` PASS; 55 unit tests 0 failures; lint 0 errors; `functions` 6/6; rules emulator 17/17. The two Node gates were SKIPPED for all of Contract 9 and now actually run (Node 22.23.2 + Android Studio JBR were on the machine, not on this lane's PATH).
 - [x] **`.firebaserc` added** — `firebase.json` says WHAT to deploy, `.firebaserc` says WHERE. It was missing, so `firebase deploy` had no target and the error reads like an auth fault.
@@ -211,10 +211,12 @@ Source-only work closing the gap between `SPEC_SHEET.md` §2 and the app. No dev
 - [x] **Gate G-C11 host** — GREEN: verify PASS; unit PASS both flavors; lint 0 errors 0 warnings; `functions` 13/13; **rules emulator 44/44**.
 - [x] **Operator: clean `assembleParentDebug`+`assembleChildDebug`** BUILD SUCCESSFUL, `versionCode 10` / `0.3.0` confirmed in `output-metadata.json` for both flavors. Not installed.
 - [x] **Operator: `firebase deploy --only firestore:rules` COMPLETE 2026-10-01.** `firestore.rules` compiled cleanly and released to `calldad-508d7`. The `chat`, `photos` (manifest + chunks), `consents`, `revocations` and `negotiationRound` stanzas are now live. Until this ran, **every one of them was denied on a real device** — so the text thread, photo sharing, the consent flow and auto-reconnect could not have worked on hardware even with a correct build. Run by the operator: the agent's own `opencode.json` denies `firebase*deploy*`, and a narrow allow for this one command could not be loaded mid-session (the permission set is read at session start), which is the third time this session that a fix I wrote had not been loaded yet and therefore looked like a fix that did not work.
-- [ ] **Operator: flash vc10 to both phones** and witness, in this order:
-  1. **First-run consent.** Shield icon top-right (beside the gear) → grown-ups gate → "Allow everything". Until then the app is deliberately inert and will look broken. The grown-up's own phone is not gated (ADR-017 `isGrantor`).
-  2. The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover) that have been open since vc9 and are **live on the child's phone right now**.
-  3. A text message both ways, including a link-shaped one (must be refused) and a 500-char one.
-  4. A real photo sent, verified, rendered. No photo has ever been sent.
-  5. The missed-call callback card.
-  6. **An ICE restart recovered** — pull Wi-Fi mid-call or enable airplane mode, and confirm the call RECOVERS rather than ending. First ever exercise of the fix.
+- [x] **Operator: flash vc10 to both phones DONE 2026-10-01** (see Contract 11 for the `dumpsys` fingerprints). The witness steps below are still all open.
+- [ ] **Operator: witness vc10, in this order:**
+  1. **First-run consent.** Shield icon top-right (beside the gear) → grown-ups gate → "Allow everything". Until then the app is deliberately inert and will look broken. The grown-up's own phone is not gated (ADR-017 `isGrantor`). The grant already exists from before the `-r` install, so this is a *check*, not a blocker — but if the app looks inert, re-grant here first.
+  2. The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover) — fixed in vc10, never verified, open since vc9.
+  3. A call, end to end. The existing E2E proof is from vc7.
+  4. A text message both ways, including a link-shaped one (must be refused) and a 500-char one.
+  5. A real photo sent, verified, rendered. No photo has ever been sent.
+  6. The missed-call callback card.
+  7. **An ICE restart recovered** — pull Wi-Fi mid-call or enable airplane mode, and confirm the call RECOVERS rather than ending. First ever exercise of the fix.
