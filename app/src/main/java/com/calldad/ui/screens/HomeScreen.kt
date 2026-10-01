@@ -6,6 +6,8 @@
 // Location: app/src/main/java/com/calldad/ui/screens/HomeScreen.kt
 package com.calldad.ui.screens
 
+import android.app.Application
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +16,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsVoice
@@ -26,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -42,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calldad.ui.components.GiantActionCard
 import com.calldad.ui.theme.CallDadTheme
 import com.calldad.ui.theme.CallGreen
+import com.calldad.ui.theme.ChatPurple
 import com.calldad.ui.theme.GameBlue
 import com.calldad.ui.theme.HelperPurple
 import com.calldad.ui.theme.PttOrange
@@ -50,15 +57,26 @@ import com.calldad.ui.theme.PttOrange
 fun HomeScreen(
     onNavigate: (String) -> Unit,
     onOpenPairing: () -> Unit,
+    onStartCall: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: HomeViewModel = viewModel()
+    viewModel: HomeViewModel = viewModel(
+        factory = HomeViewModelFactory(
+            (LocalContext.current.applicationContext as Application)
+        )
+    )
 ) {
     val destinations by viewModel.destinations.collectAsStateWithLifecycle()
+    val callback by viewModel.callback.collectAsStateWithLifecycle()
     val isPaired by callViewModel().isPaired.collectAsStateWithLifecycle()
 
     HomeContent(
         destinations = destinations,
         showPairingHint = isPaired == false,
+        callback = callback,
+        onCallbackTapped = {
+            viewModel.onCallbackTapped()
+            onStartCall()
+        },
         onActionSelected = onNavigate,
         onOpenPairing = onOpenPairing,
         modifier = modifier
@@ -68,15 +86,22 @@ fun HomeScreen(
 /**
  * Stateless. State is hoisted into [HomeViewModel] and the nav lambda.
  *
- * LAYOUT CONTRACT: the 2x2 grid is built from plain Rows inside a Column with
+ * LAYOUT CONTRACT: the grid is built from plain Rows inside a Column with
  * weighted heights. There is NO LazyVerticalGrid and NO scroll container, so
  * there is no nested scrolling for a child to get stuck in — everything is
  * always on screen and always one tap away.
+ *
+ * The callback card takes its space from the rows, not by pushing them off
+ * screen: a grid whose last row can be scrolled out of reach is a grid that
+ * stops being one-tap-everything, and that contract is the reason this screen
+ * has no scroll container at all.
  */
 @Composable
 private fun HomeContent(
     destinations: List<HomeDestination>,
     showPairingHint: Boolean,
+    callback: com.calldad.history.CallRecord?,
+    onCallbackTapped: () -> Unit,
     onActionSelected: (String) -> Unit,
     onOpenPairing: () -> Unit,
     modifier: Modifier = Modifier
@@ -88,7 +113,7 @@ private fun HomeContent(
                     .fillMaxSize()
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
                     text = "Hi! What do you want to do?",
@@ -100,6 +125,12 @@ private fun HomeContent(
                         text = "Grown-ups: tap the gear to pair this phone first.",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.error
+                    )
+                }
+                callback?.let { record ->
+                    CallbackCard(
+                        wasOutgoing = record.wasOutgoing,
+                        onTap = onCallbackTapped
                     )
                 }
 
@@ -151,10 +182,59 @@ private fun HomeContent(
     }
 }
 
+/**
+ * The missed-call callback card (BP-05 §4).
+ *
+ * WHY IT EXISTS. The product is for infrequent scheduled visits, which makes a
+ * missed call the NORMAL case rather than the exception. A 6-year-old who taps
+ * the giant green button, gets no answer, and has no way to try again learns that
+ * the button does not always work — and "the button always works" is the entire
+ * product promise. So a miss raises one card with one action.
+ *
+ * Deliberate choices:
+ *  - ONE card, ever, for the most recent miss. Two would ask a child to choose
+ *    between two moments, which they cannot do.
+ *  - A DECLINE does not raise it. A grown-up who declined is busy, and
+ *    re-ringing them because the child asked again is nagging on their behalf.
+ *  - The wording is a fact, not a feeling. No "are you ok?", no emoji, no
+ *    exclamation count. A child must be able to re-read it and not infer
+ *    something worse than what happened.
+ *  - It is a card, not a dialog: it cannot block anything, and it cannot be
+ *    missed by a child who looks at the tiles first.
+ */
+@Composable
+private fun CallbackCard(wasOutgoing: Boolean, onTap: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clickable(onClick = onTap)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (wasOutgoing) {
+                    "Dad didn't answer. Tap to call again."
+                } else {
+                    "You missed a call. Tap to call again."
+                },
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
 private data class ActionVisuals(val icon: ImageVector, val container: Color)
 
 private fun HomeDestination.visuals(): ActionVisuals = when (this) {
     HomeDestination.CALL -> ActionVisuals(Icons.Filled.Call, CallGreen)
+    HomeDestination.CHAT -> ActionVisuals(Icons.AutoMirrored.Filled.Chat, ChatPurple)
     HomeDestination.PTT -> ActionVisuals(Icons.Filled.SettingsVoice, PttOrange)
     HomeDestination.GAME -> ActionVisuals(Icons.Filled.SportsEsports, GameBlue)
     HomeDestination.HELPER -> ActionVisuals(Icons.Filled.SmartToy, HelperPurple)
@@ -167,6 +247,8 @@ private fun HomeContentPreview() {
         HomeContent(
             destinations = HomeDestination.entries.toList(),
             showPairingHint = false,
+            callback = null,
+            onCallbackTapped = {},
             onActionSelected = {},
             onOpenPairing = {}
         )

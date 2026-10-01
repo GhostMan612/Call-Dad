@@ -1,5 +1,5 @@
 // Call-Dad app module. BuildConfig fields injected from local.properties (gitignored).
-// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.2.6 / versionCode 9.
+// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.3.0 / versionCode 10.
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 import java.util.Properties
 
@@ -40,8 +40,22 @@ android {
         // their own lock screen). Bumps because 7 and 9 are behaviourally
         // different in exactly the case that matters: locked screen. A phone on
         // 7 rings the whole house for a voice message and blocks the unlock.
-        versionCode = 9
-        versionName = "0.2.6"
+        // versionCode 10: the v0.1 feature push. 1:1 text chat, the missed-call
+        // callback card + call log, and the consent cert / kill switch wired to
+        // a real grant-and-revoke path instead of an inert domain model.
+        //
+        // MUST NOT reuse 9, and the reason is consent rather than features. The
+        // app now FAILS CLOSED: absence of a grant denies (ADR-017), so a phone
+        // carrying 9 and a phone carrying 10 behave OPPOSITELY on a fresh install
+        // with no grant -- 9 can call, 10 cannot until a parent grants. Two
+        // phones on the same "version" would disagree about whether the app
+        // works at all, which is the worst possible confusion for a parent
+        // mid-pairing.
+        //
+        // Also 9's rules are not deployed, so 10 additionally carries stanzas
+        // (chat, photos, consents, revocations) that the live rules lack.
+        versionCode = 10
+        versionName = "0.3.0"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

@@ -26,7 +26,32 @@ val PttTransmitRed = Color(0xFFB71C1C)
 val HelperPurple = Color(0xFF6A1B9A)
 val HelperPurpleLight = Color(0xFFF3E5F5)
 
+/**
+ * Chat's tile colour.
+ *
+ * The tile needs a saturated identity to stay legible in the 2x2 grid, so it
+ * gets a hue the child has not already learned — teal, deliberately far from
+ * green (call), blue (games), orange (walkie-talkie) and purple (helper). It is
+ * the one place the "no fifth colour" rule yields, and it yields for a specific
+ * reason: the MESSAGE BUBBLES stay neutral (see `ChatBubbleMine`), because a
+ * bubble is text to be read, while a tile is a door to be found.
+ */
+val ChatPurple = Color(0xFF00796B)
+
 val HangUpRed = Color(0xFFC62828)
+
+// ---- Chat (SPEC_SHEET §2.3) ----------------------------------------------
+// Deliberately NOT a fourth saturated feature colour. A child has already
+// learned green = Dad, blue = games, orange = walkie-talkie, purple = helper;
+// adding a fifth would dilute the cue that makes the Home screen legible at a
+// glance. Chat is the written form of the same conversation, so it reuses the
+// neutrals and separates the two speakers by VALUE, not hue.
+//
+// The "mine" bubble is the deeper neutral on purpose: the child's own words sit
+// behind the most contrast on the screen, so what they said is always the
+// easiest thing to read back.
+val ChatBubbleMine = Color(0xFFDDE7EE)
+val ChatBubbleTheirs = Color(0xFFF1EDE7)
 
 // ---- Neutrals ------------------------------------------------------------
 val WarmCream = Color(0xFFFDF7F0)

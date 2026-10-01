@@ -129,6 +129,39 @@ repo has now been "pinned" in some way, and twice the pin was the wrong shape.
 Before writing the test, ask what the *behaviour* is and whether anything can
 actually go red when the behaviour regresses.
 
+## The gate tool reported GREEN while the compiler was failing
+**Mistake.** Twice on 2026-10-01, `gate` returned "GATES GREEN" from a tree where
+`compileParentDebugKotlin` was FAILED. Two independent causes, both in the tool.
+
+1. **There was no `rules` gate at all.** The Firestore emulator suite was simply
+   not in `gate.ts`, so an entire security gate never ran and nothing said so.
+   Worse, the emulator needs a JVM and exits non-zero without one, so even when
+   invoked by hand it "skipped" silently. I spent a phase believing the new rules
+   stanzas were verified when they had never been executed once.
+2. **`r.out || r.err` discarded the diagnostics.** Kotlin writes `e:` lines to
+   stderr and Gradle writes task lines to stdout, so `||` kept the task lines and
+   threw away the only output that said what was wrong. The gate printed a FAIL
+   with no reason in it, which is why I resorted to shelling out for the error —
+   the very thing §1.4a forbids.
+
+**The shape of it, again.** A gate that runs the tests is a *proxy* for "the
+tests passed". Neither the presence of the rules suite nor the FAIL label says
+anything about whether the thing being reported is true. The properties that
+actually mattered were "every suite is named in the verdict" and "a failure shows
+its reason", and neither had a test.
+
+**Fixed in `gate.ts`:** a real `rules` gate with `JAVA_HOME` pointed at the
+documented Studio JBR so it runs instead of skipping; `out + err` concatenated;
+a 200-line tail, because a short one is a lid, not a tail; and the verdict now
+reads `GATES GREEN BUT n SKIPPED` when anything was skipped, so a security gate
+can never hide inside a green. A skipped *security* gate also prints the exact
+command the operator should run.
+
+**Check.** After this, "all five gates green" in this repo means five gates were
+*named in the output*, and the verdict text distinguishes green from
+green-but-skipped. A claim about gate coverage should be checkable by reading the
+verdict line, not by trusting the habit of saying it.
+
 ---
 
 # PART 2 — PLATFORM REFERENCE

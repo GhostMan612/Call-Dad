@@ -262,19 +262,39 @@ class ToolUseDisciplineTest {
             )
         }
 
-        // The failure mode is a document SHOWING the raw invocation as something
-        // to type. Operator runbooks legitimately contain it (a human runs them),
-        // so scope this to the documents an agent follows.
-        val agentFacing = listOf(
-            ".opencode/skills/calldad-conventions/SKILL.md",
-            ".opencode/agents/gate-runner.md"
+        // The failure mode is a document SHOWING the raw invocation as the command
+        // to type. Two kinds of document are excluded, for two DIFFERENT and
+        // deliberate reasons -- conflating them was the bug in the first version
+        // of this test, which forbade the gate-runner from carrying the commands
+        // that are its entire reason to exist:
+        //
+        //  - `.opencode/commands/` are OPERATOR runbooks. A human types those.
+        //  - `.opencode/agents/gate-runner.md` is the EXECUTOR. Typing
+        //    `:app:testParentDebugUnitTest` is what that subagent is for.
+        //
+        // What must never happen is the raw invocation appearing in the guidance
+        // the main agent reads, because that is the document that made reaching
+        // for gradle the path of least resistance on 2026-09-30.
+        val guidance = listOf(
+            ".opencode/skills/calldad-conventions/SKILL.md"
         )
-        agentFacing.filter { exists(it) }.forEach { doc ->
+        guidance.filter { exists(it) }.forEach { doc ->
             val text = read(doc)
             assertFalse(
                 "$doc must not present a bare gradle test invocation as the command " +
                     "to run. Use the `gate` tool instead. Found:\n$text",
                 Regex("""(?m)^\s*\.?\\?gradlew(\.bat)?\s+:app:test""").containsMatchIn(text)
+            )
+        }
+
+        // And the executor must still name them, or the gate cannot be run at all.
+        // Asserting the ABSENCE here would push a future fix in the wrong
+        // direction: deleting the commands instead of adding the tool.
+        val runner = ".opencode/agents/gate-runner.md"
+        if (exists(runner)) {
+            assertTrue(
+                "$runner IS the executor and must document the tasks it runs",
+                read(runner).contains(":app:testParentDebugUnitTest")
             )
         }
     }

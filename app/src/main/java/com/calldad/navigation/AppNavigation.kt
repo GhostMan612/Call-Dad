@@ -38,6 +38,7 @@ import com.calldad.R
 import com.calldad.ui.components.ParentGate
 import com.calldad.ui.screens.CallScreen
 import com.calldad.ui.screens.CallState
+import com.calldad.ui.screens.ChatScreen
 import com.calldad.ui.screens.GameScreen
 import com.calldad.ui.screens.HelperScreen
 import com.calldad.ui.screens.HomeScreen
@@ -113,6 +114,11 @@ fun AppNavHost(
         composable(Routes.HOME) {
             HomeScreen(
                 onNavigate = navController::navigateGuarded,
+                // The callback card must start an OUTGOING call, so it cannot go
+                // through `navigateGuarded(Routes.CALL)`: that would open the
+                // screen without a mode, and the Call screen defaults to the
+                // caller's own flow. `openCall` is the caller's entry point.
+                onStartCall = { navController.openCall("${Routes.CALL}?mode=caller") },
                 onOpenPairing = {
                     navController.navigate(Routes.PAIRING) { launchSingleTop = true }
                 }
@@ -148,6 +154,12 @@ fun AppNavHost(
         }
         composable(Routes.HELPER) {
             HelperScreen(onBackHome = navController::returnHome)
+        }
+        composable(Routes.CHAT) {
+            // `ChatViewModel` is ACTIVITY-scoped (see `rememberChatViewModel`):
+            // a NavBackStackEntry-scoped instance would be a private copy, so two
+            // Firestore listeners would race to tick the same receipts.
+            ChatScreen(onBackHome = navController::returnHome)
         }
         composable(Routes.PAIRING) {
             // `rememberSaveable`, not `remember`: process death while on the

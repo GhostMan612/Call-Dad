@@ -43,7 +43,7 @@ class ConsentGateTest {
         expiresAt: Long = now + day,
         grantor: String = dad,
         grantee: String = kid,
-        revokedAt: Long? = null
+        grantSeq: Int = 0
     ) = ConsentCert(
         id = id,
         grantorUid = grantor,
@@ -51,7 +51,27 @@ class ConsentGateTest {
         scopes = scopes,
         grantedAtMs = grantedAt,
         expiresAtMs = expiresAt,
-        revokedAtMs = revokedAt
+        grantSeq = grantSeq
+    )
+
+    /**
+     * A revocation, which is its own document: it names the highest grant seq it
+     * cancels and grants nothing itself.
+     */
+    private fun revocation(
+        throughSeq: Int,
+        grantor: String = dad,
+        grantee: String = kid,
+        at: Long = now - 1L
+    ) = ConsentCert(
+        id = "REVOKE_TEST_$throughSeq",
+        grantorUid = grantor,
+        granteeUid = grantee,
+        scopes = emptySet(),
+        grantedAtMs = 0L,
+        expiresAtMs = Long.MAX_VALUE,
+        revokedAtMs = at,
+        revokesGrantSeq = throughSeq
     )
 
     private fun denied(reason: ConsentDenial, certs: List<ConsentCert>, scope: ConsentScope) {
@@ -85,7 +105,7 @@ class ConsentGateTest {
     fun revokedIsBlocked() {
         denied(
             ConsentDenial.REVOKED,
-            listOf(cert(revokedAt = now - 1L)),
+            listOf(cert(grantSeq = 1), revocation(throughSeq = 1)),
             ConsentScope.CALL
         )
     }
@@ -113,18 +133,74 @@ class ConsentGateTest {
         )
     }
 
-    // ---- the kill switch is sticky ----
+    // ---- the kill switch is a RANGE, so it survives a grant write ----
 
     @Test
-    fun aLaterGrantCannotResurrectARevokedOne() {
-        // The kill switch is only trustworthy if revocation dominates. If a new
-        // grant could override an old revocation, "revoke" would be a suggestion
-        // and a kid could be re-exposed by any later grant.
-        val revokedThenGranted = listOf(
-            cert(id = "CONSENT_TEST_1", revokedAt = now - 1L, expiresAt = now + 10 * day),
-            cert(id = "CONSENT_TEST_2", grantedAt = now - 1L, expiresAt = now + 10 * day)
+    fun aGrantAtTheRevokedSequenceStaysDead() {
+        // The revocation covers seq 1. A later document that is ALSO seq 1 is
+        // inside the range and must stay dead — this is the "a later grant
+        // cannot resurrect" property, and it holds for the same seq.
+        denied(
+            ConsentDenial.REVOKED,
+            listOf(
+                cert(id = "CONSENT_TEST_1", grantSeq = 1, expiresAt = now + 10 * day),
+                cert(id = "CONSENT_TEST_2", grantSeq = 1, expiresAt = now + 10 * day),
+                revocation(throughSeq = 1)
+            ),
+            ConsentScope.CALL
         )
-        denied(ConsentDenial.REVOKED, revokedThenGranted, ConsentScope.CALL)
+    }
+
+    @Test
+    fun aGrantBelowTheRevokedSequenceStaysDead() {
+        denied(
+            ConsentDenial.REVOKED,
+            listOf(cert(grantSeq = 0), revocation(throughSeq = 5)),
+            ConsentScope.CALL
+        )
+    }
+
+    @Test
+    fun aDeliberateReGrantAboveTheRevokedSequenceIsHonoured() {
+        // A grown-up who revoked in a row and changed their mind must have a way
+        // back, or one accidental tap bricks the child's phone forever. Only a
+        // STRICTLY higher seq counts, so this is a deliberate act rather than an
+        // accident of ordering — and `firestore.rules` is what guarantees only
+        // the parent can issue that higher seq.
+        assertEquals(
+            ConsentDecision.Granted,
+            ConsentGate.forAction(
+                listOf(
+                    cert(id = "CONSENT_TEST_1", grantSeq = 1, expiresAt = now - 1L),
+                    cert(id = "CONSENT_TEST_2", grantSeq = 2, expiresAt = now + day),
+                    revocation(throughSeq = 1)
+                ),
+                kid, dad, ConsentScope.CALL, now
+            )
+        )
+    }
+
+    @Test
+    fun aRevocationWithNoGrantStillDenies() {
+        // A kid who has never been granted anything, but has been revoked, is
+        // REVOKED rather than NO_CERT: the parent made a decision, and reporting
+        // "you have no permission" instead of "this was taken away" hides it.
+        denied(ConsentDenial.REVOKED, listOf(revocation(throughSeq = 0)), ConsentScope.CALL)
+    }
+
+    @Test
+    fun theHighestRevocationWins() {
+        // Two revocations arrive out of order. The gate must take the max, not
+        // whichever document it happened to see.
+        denied(
+            ConsentDenial.REVOKED,
+            listOf(
+                cert(grantSeq = 3),
+                revocation(throughSeq = 1),
+                revocation(throughSeq = 3)
+            ),
+            ConsentScope.CALL
+        )
     }
 
     @Test
@@ -133,8 +209,24 @@ class ConsentGateTest {
         // grant simply lapsed when a deliberate act is what actually happened.
         denied(
             ConsentDenial.REVOKED,
-            listOf(cert(expiresAt = now - 1L, revokedAt = now - 1L)),
+            listOf(cert(expiresAt = now - 1L, grantSeq = 1), revocation(throughSeq = 1)),
             ConsentScope.CALL
+        )
+    }
+
+    @Test
+    fun aRevocationForAnotherKidIsIrrelevant() {
+        // Revocations are matched on grantee, so a stray doc for a different
+        // child cannot revoke this one. A pair room holds one grantee's docs in
+        // practice; the check is here because "revoke everything in the room" is
+        // the tempting wrong implementation.
+        val otherKid = "OTHER_KID_TEST_UID"
+        val c = listOf(cert(grantSeq = 1))
+        assertEquals(
+            ConsentDecision.Granted,
+            ConsentGate.forAction(
+                c + revocation(throughSeq = 9, grantee = otherKid), kid, dad, ConsentScope.CALL, now
+            )
         )
     }
 
@@ -259,7 +351,7 @@ class ConsentGateTest {
 
     private fun certsFor(reason: ConsentDenial): List<ConsentCert> = when (reason) {
         ConsentDenial.NO_CERT -> emptyList()
-        ConsentDenial.REVOKED -> listOf(cert(revokedAt = now - 1L))
+        ConsentDenial.REVOKED -> listOf(cert(grantSeq = 1), revocation(throughSeq = 1))
         ConsentDenial.EXPIRED -> listOf(cert(expiresAt = now - 1L))
         ConsentDenial.SCOPE_NOT_GRANTED -> listOf(cert(scopes = emptySet()))
         // Issued by someone other than the paired peer, so WRONG_PARTY is the

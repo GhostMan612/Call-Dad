@@ -14,6 +14,9 @@ import com.calldad.R
 import com.calldad.audio.CallAudioManager
 import com.calldad.data.session.FamilyPair
 import com.calldad.data.session.FamilySession
+import com.calldad.history.CallLogStore
+import com.calldad.history.CallOutcome
+import com.calldad.history.CallRecord
 import com.calldad.data.signaling.CallDocument
 import com.calldad.data.signaling.CallNoLongerRingingException
 import com.calldad.data.signaling.CallRoom
@@ -113,6 +116,23 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _elapsedSeconds = MutableStateFlow(0)
     val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
+
+    /**
+     * The call log (SPEC_SHEET §2.5, BP-05 §4). Fed from exactly ONE place —
+     * [commitTerminal] — because that is the single funnel every exit path goes
+     * through: local hangup, decline, no-answer, lost peer, and transport
+     * failure. Recording at each call site instead is how a history ends up
+     * missing the case nobody thought of, and the missed-call callback card is
+     * only as good as this log's completeness.
+     */
+    private val callLog = CallLogStore(getApplication())
+
+    /**
+     * Whether THIS attempt ever reached CONNECTED. Reset when a record is
+     * written, and set by the same code path that starts the elapsed timer, so
+     * the two can never disagree about whether a call happened.
+     */
+    private var everConnected = false
 
     private val _isCameraOn = MutableStateFlow(true)
     val isCameraOn: StateFlow<Boolean> = _isCameraOn.asStateFlow()
@@ -650,12 +670,44 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
             _state.value = CallState.Idle
             return
         }
+        recordCallOutcome(next)
         _state.value = next
         autoDismissJob?.cancel()
         autoDismissJob = viewModelScope.launch {
             delay(AUTO_DISMISS_MS)
             if (_state.value == next) _state.value = CallState.Idle
         }
+    }
+
+    /**
+     * Appends one row to the call log for a call that just reached a terminal
+     * state. Fire-and-forget: a logging failure must never be able to interrupt a
+     * hangup, which is the one interaction that must always work.
+     *
+     * "Did it CONNECT" is the honest signal, not [EndReason]: a REMOTE_HANGUP
+     * after a good call is a perfectly normal answered call, and classifying it
+     * as a failure would put a "Dad didn't answer" card in front of a child who
+     * just had a lovely chat. `everConnected` is the only fact that separates
+     * "it worked" from "it didn't", so it is what this keys on.
+     */
+    private fun recordCallOutcome(terminal: CallState) {
+        val outcome = when {
+            everConnected -> CallOutcome.ANSWERED
+            terminal is CallState.Declined -> CallOutcome.DECLINED
+            terminal is CallState.NoAnswer -> CallOutcome.MISSED
+            else -> CallOutcome.FAILED
+        }
+        val wasOutgoing = amCaller
+        val durationMs = _elapsedSeconds.value.toLong() * 1_000L
+        val record = CallRecord(
+            id = "call-$currentSeq-${System.currentTimeMillis()}",
+            startedAtMs = System.currentTimeMillis() - durationMs,
+            durationMs = durationMs,
+            outcome = outcome,
+            wasOutgoing = wasOutgoing
+        )
+        everConnected = false
+        viewModelScope.launch { callLog.record(record) }
     }
 
     private fun startNoAnswerTimer(seq: Int) {
@@ -677,6 +729,11 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private fun startElapsedTimer() {
         elapsedJob?.cancel()
         _elapsedSeconds.value = 0
+        // Same line that zeroes the duration, so "this call connected" and
+        // "this call had a duration" can never disagree. The call log reads
+        // `everConnected` to tell a good call from a lost one, and this is the
+        // only place that knows.
+        everConnected = true
         elapsedJob = viewModelScope.launch {
             while (isActive) {
                 delay(1_000)

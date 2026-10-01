@@ -36,8 +36,15 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `game/GameWebRtcBridge.kt`, `ui/screens/GameScreen.kt`, `assets/game.html` | 3 games; solo pass-and-play or synced over the call's data channel |
 | `ptt/*`, `ui/screens/Ptt*` | Walkie-talkie: VoiceClipPttEngine (hold-to-record clips over the pair room, ADR-016); simulated engine for host tests only |
 | `helper/KeywordBot.kt`, `ui/screens/Helper*` | Offline voice helper (whole-word keyword matching) |
+| `chat/ChatThread.kt`, `chat/ChatText.kt` | 1:1 Dad thread: monotonic receipts, idempotent ingest, the no-link rule (BP-03, SPEC_SHEET §2.3) |
+| `chat/ChatClient.kt` | The thread over `calls/{room}/chat/`; DELIVERED is stamped by the RECEIVER, never on write success |
+| `ui/screens/ChatViewModel.kt`, `ui/screens/ChatScreen.kt` | Thread UI. Plain `Text` bodies, no autoLink/intents/autocorrect, 96dp controls |
+| `history/CallLog.kt`, `history/CallLogStore.kt` | Call history + the missed-call callback card (BP-05 §4). DataStore, NOT Room — ADR-018 |
+| `consent/ConsentCert.kt` | Grant/revoke/expiry/scope gate. Absence DENIES. Revocation is a seq RANGE, not a flag — ADR-017 |
+| `consent/ConsentStore.kt` | Live certs from `calls/{room}/consents/` + append-only revocations; parent-side grant/revoke |
+| `photos/PhotoTransfer.kt` | Chunked, SHA-256-verified photo transport + downscale policy (BP-04). **Pure half only; no Android encoder or UI yet** |
 
-Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `app/src/test/` (9 classes), `functions/ring.test.js`, `tools/rules-test/rules.test.js`. Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (14 classes), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (40 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
 ## Known-issue registry
 
@@ -65,30 +72,40 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js`. Tests: `
 | K11 | Device matrix for ADR-015 (killed-app ring, glare, no-answer, lost-peer end, game sync, pairing gate) | **PARTIAL, and the only item that needs no code**: two-way call + answer + video + PTT + PTT tail all PROVEN on device. Remaining are human-witnessed behaviours no test can assert: killed-app ring, force-stop, doze, no-answer timeout, lost-peer end, game sync mid-call, mobile-data call now that TURN exists |
 | K20 | Clip pruning and terminal-room deletion are client-triggered, so a pair that never opens the app never prunes | ACCEPTED: Firestore TTL would need a scheduled function and a billed index; the leak only accrues for a pair that stops using the app entirely. Cheaper than a nightly bill, and a dormant pair costs cents. Revisit if the app gains real usage |
 
-## Last gates (2026-09-30, this lane)
+## Last gates (2026-10-01, this lane)
 
-All five gates GREEN. The two Node gates were SKIPPED for the whole of Contract 9 and
-are no longer: Node 22.23.2 and Java (Android Studio JBR) were already on the machine
-but not on this lane's PATH.
+All five gates GREEN. The **rules emulator is now wired into the `gate` tool**;
+before this it was silently omitted, so a whole security gate could go unreported
+while the tool printed green (see `LESSONS_LEARNED.md`).
 
-- `tools/verify_project.py`: PASS (10 dirs + 102 git-tracked files, no secrets).
-- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: PASS, 55 tests, 0 failures.
+- `tools/verify_project.py`: PASS.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: PASS, both flavors.
 - `:app:lintParentDebug :app:lintChildDebug`: PASS, 0 errors, 0 Kotlin warnings.
-- `node --test functions/ring.test.js`: 6/6.
-- Firestore rules emulator suite: 17/17. 22 "evaluation error" log lines were
-  investigated with throwaway probes and are cosmetic: all six legitimate member
-  operations return ALLOWED with no error, so no denial is masking a real allow.
-- `clean assembleParentDebug assembleChildDebug`: BUILD SUCCESSFUL, 33 tasks executed
-  from scratch (not up-to-date reuse). 0 errors, 0 warnings.
+- `node --test functions/*.test.js`: PASS.
+- **Firestore rules emulator: 40/40**, including the chat, photo, consent and
+  kill-switch stanzas. Run with `JAVA_HOME` pointed at the Studio JBR — the
+  emulator refuses to start without a JVM, which is how the suite went missing
+  in the first place.
 
-### Device evidence (VERIFIED, `dumpsys` fingerprint, 2026-09-30)
+### Two things that will surprise an operator
+
+1. **The new rules are NOT deployed.** `chat`, `photos`, `consents` and
+   `revocations` exist in `firestore.rules` and are emulator-tested, but the live
+   rules are still the vc9 set. `firebase deploy --only firestore:rules` is
+   required before chat or consent work on a phone.
+2. **A fresh install is inert until a parent grants.** Absence of a consent cert
+   DENIES (ADR-017), so text and — as wired today — the whole app's communication
+   entry points are closed by default. This is intended fail-closed behaviour,
+   and it is the single most likely cause of "the app does nothing" on first run.
+
+### Device evidence (VERIFIED, `dumpsys` fingerprint)
 
 | Device | Package | versionCode | versionName |
 |---|---|---|---|
 | Moto G 2025 (PARENT) | `com.calldad.parent` | 7 | 0.2.4-parent |
 | BLU View 5 (CHILD) | `com.calldad.child` | 7 | 0.2.4-child |
 
-Source is at **versionCode 9 / 0.2.6** — ahead of both phones. See "NOT claimed".
+Source is at **versionCode 10 / 0.3.0** — ahead of both phones. See "NOT claimed".
 
 Serials are deliberately absent (RULES §1.5a), and `tools/verify_project.py` now
 fails the gate if one reappears in a tracked file. Resolve them at run time with
@@ -115,10 +132,10 @@ One flavor per device; no crossed install.
 
 ### NOT claimed
 
-- **`versionCode 7` IS built, installed and on both phones** (`dumpsys` 10:20:55 parent / 10:21:01 child, one flavor each), and the rules + BOTH functions are live. The **mobile-data call passed** (operator-witnessed), so K8 is proven on hardware rather than only in source.
-- **`versionCode 9` is SOURCE-ONLY.** It has never been built, installed, or witnessed. Both phones are still on **vc7 / 0.2.4**, which means two operator-reported defects are **live on the child's phone right now**: a voice message rings at full volume on a locked phone, and a call ring traps the grown-up on their own lock screen. The fixes are gated and reviewed in source (`QuietNotificationTest`); the device proof is what closes this. **This is the single highest-priority open item.**
-- **K12's screen-off PTT push is unproven on any build.** `onPttClipWritten` is deployed and live. On vc7 the fix was only a notification-priority change, which the platform ignores in favour of the channel — hence the loud ring. vc9 moves the notification to a dedicated `IMPORTANCE_LOW` channel, but nothing has confirmed a quiet notification on a locked phone.
-- **K21 (keyguard takeover) is unproven on any build.** vc9 stops the activity opting into `showWhenLocked`/`turnScreenOn` and makes the full-screen intent conditional on the keyguard. Untested on hardware.
-- **K17's tightened pairing read has not been re-witnessed** since vc7. The rule is deployed and emulator-tested; whether a real phone completes a fresh pairing under it is untested.
-- The relay path has been proven for a normal NAT, not a symmetric one. K8's caveat stands.
-- Killed-app ring, force-stop, doze, no-answer timeout, lost-peer end, and game sync mid-call remain unproven.
+- **`versionCode 10 / 0.3.0` is SOURCE-ONLY.** Never built, never installed, never witnessed. Both phones are on **vc7 / 0.2.4**, which means two operator-reported defects are **live on the child's phone right now**: a voice message rings at full volume on a locked phone, and a call ring traps the grown-up on their own lock screen. The fixes are gated and reviewed in source; the device proof is what closes this. **This remains the single highest-priority open item.**
+- **The Firestore rules deployed live are the vc9-era set.** Chat, photos, consents and revocations are emulator-tested (40/40) and **not deployed**. No new feature works on a device until `firebase deploy --only firestore:rules` runs.
+- **The consent kill switch has never been exercised on a device.** The rules are proven against the emulator and the gate logic is host-tested, but no human has granted a scope and watched a child lose it.
+- **`PhotoTransfer` is the pure half of BP-04.** Chunking, ordering, and SHA-256 verification are host-tested on synthetic fixtures. There is no camera/picker, no Bitmap→WEBP encoder, and no photo screen, so photo sharing does not exist as a feature.
+- **`app/proguard-rules.pro` is a stub** and no release build has ever run. A missing keep rule there is a runtime crash, not a smaller APK.
+- **Text chat has never survived an app restart on a device.** The prune keeps unread history, but that is a source-level claim.
+- K12's screen-off PTT push, K21 (keyguard), and K17's tightened pairing read remain unproven on any build.

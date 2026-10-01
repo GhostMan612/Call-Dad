@@ -14,4 +14,7 @@ object Routes {
     const val GAME = "game"
     const val HELPER = "helper"
     const val PAIRING = "pairing"
+
+    /** 1:1 Dad thread (SPEC_SHEET §2.3, BP-03). */
+    const val CHAT = "chat"
 }

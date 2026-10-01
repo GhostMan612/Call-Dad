@@ -90,6 +90,203 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isMember();
       }
+
+      // Dad<->Kid text thread (SPEC_SHEET §2.3, BP-03).
+      //
+      // Create is the interesting one. The body is bounded in the RULES, not
+      // just in the app: `ChatText.validate` is a client check on a phone the
+      // parent does not control, so a modified build, a replayed request, or a
+      // future caller that forgets the check would otherwise write anything the
+      // rules accept. The app additionally refuses link-shaped text, because
+      // the rules cannot tell "a url" from "a sentence" without becoming a
+      // language parser; the size and field rules below are what the server can
+      // actually guarantee.
+      match /chat/{messageId} {
+        function chatCreateFields() {
+          return request.resource.data.keys().hasOnly(
+                   ['from', 'body', 'createdAt', 'deliveredAt', 'readAt']);
+        }
+        function chatCreateClean() {
+          return !request.resource.data.keys().hasAny(['deliveredAt', 'readAt']);
+        }
+        function chatBodyOk() {
+          return request.resource.data.body is string
+              && request.resource.data.body.size() > 0
+              && request.resource.data.body.size() <= 500;
+        }
+        allow read: if isMember();
+        allow create: if isMember()
+                      && request.resource.data.from == request.auth.uid
+                      && chatBodyOk()
+                      && request.resource.data.createdAt == request.time
+                      && chatCreateFields()
+                      && chatCreateClean();
+        // Receipts only. A member may advance deliveredAt/readAt on any message
+        // but may NOT change who sent it or what it says: rewriting a child's
+        // own words, or the sender, is the one update a mutual allowlist pair
+        // must not permit, because "dad" is the only other party and this app
+        // must never be able to show a child words the grown-up did not send.
+        allow update: if isMember()
+                      && request.resource.data.from == resource.data.from
+                      && request.resource.data.body == resource.data.body
+                      && request.resource.data.createdAt == resource.data.createdAt
+                      && request.resource.data.keys().hasOnly(
+                           ['from', 'body', 'createdAt', 'deliveredAt', 'readAt'])
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['deliveredAt', 'readAt']);
+        allow delete: if isMember();
+      }
+
+      // Photo shares (SPEC_SHEET §2.4, BP-04). The parent doc carries the
+      // verified digest; chunks hang off it. Byte size is capped here so a
+      // corrupted or hostile writer cannot fill a family's storage, and the
+      // 9MB Firestore document limit is respected by construction.
+      match /photos/{photoId} {
+        function photoMetaFields() {
+          return request.resource.data.keys().hasOnly(
+                   ['from', 'totalBytes', 'chunkCount', 'sha256', 'mime', 'width', 'height', 'createdAt']);
+        }
+        allow read: if isMember();
+        allow create: if isMember()
+                      && request.resource.data.from == request.auth.uid
+                      && request.resource.data.totalBytes is int
+                      && request.resource.data.totalBytes > 0
+                      && request.resource.data.totalBytes <= 800000
+                      && request.resource.data.chunkCount is int
+                      && request.resource.data.chunkCount > 0
+                      && request.resource.data.chunkCount <= 32
+                      && request.resource.data.sha256 is string
+                      && request.resource.data.sha256.size() == 64
+                      && request.resource.data.mime == 'image/webp'
+                      && request.resource.data.createdAt == request.time
+                      && photoMetaFields();
+        // Metadata is immutable once written: a sender must not be able to swap
+        // the digest or the size after the fact and make a failed transfer
+        // look verified.
+        allow update: if false;
+        allow delete: if isMember();
+
+        match /chunks/{index} {
+          function chunkOk() {
+            return request.resource.data.from == request.auth.uid
+                && request.resource.data.bytes is bytes
+                && request.resource.data.bytes.size() > 0
+                && request.resource.data.bytes.size() <= 256000
+                && request.resource.data.index is int
+                && request.resource.data.index == int(index)
+                && request.resource.data.keys().hasOnly(
+                     ['from', 'bytes', 'index', 'createdAt']);
+          }
+          allow read: if isMember();
+          allow create: if chunkOk() && request.resource.data.createdAt == request.time;
+          allow update: if false;
+          allow delete: if isMember();
+        }
+      }
+
+      // Consent certs and the kill switch (SPEC_SHEET §4, BP-05 §2, ADR-017).
+      //
+      // One doc per grantee: `calls/{room}/consents/{granteeUid}`.
+      //
+      // THE LOAD-BEARING RULE IS WHO MAY WRITE. A grant must come from the PEER
+      // of the grantee, so a child can never authorise itself: a cert whose
+      // grantorUid is the grantee itself, or anyone but the paired peer, is
+      // denied. "The kid consented" proves nothing if the kid wrote the consent,
+      // and a self-issued cert is the single most likely way a consent feature
+      // becomes decorative.
+      //
+      // This is what lets the signature be deferred: the room id is the two
+      // UIDs, so "a member of this pair" is already established by the room
+      // itself. ADR-017 records the trust-root question that remains.
+      match /consents/{granteeUid} {
+        function grantorIsThePeer(data) {
+          return data.granteeUid is string
+              && data.granteeUid == granteeUid
+              && data.granteeUid in members()
+              && data.grantorUid is string
+              && data.grantorUid == request.auth.uid
+              && data.grantorUid != granteeUid;
+        }
+        function grantFieldsOk(data) {
+          return data.keys().hasOnly(
+                   ['granteeUid', 'grantorUid', 'scopes', 'grantSeq',
+                    'grantedAt', 'expiresAt'])
+              && data.grantedAt == request.time
+              && data.expiresAt is timestamp
+              && data.expiresAt > request.time
+              && data.expiresAt <= request.time + duration.value(90, 'd')
+              && data.grantSeq is int
+              && data.grantSeq >= 1
+              && data.scopes is list
+              && data.scopes.size() > 0
+              && data.scopes.size() <= 4
+              && data.scopes.hasOnly(['CALL', 'TEXT', 'PHOTO', 'PTT'])
+              && data.granteeUid == granteeUid;
+        }
+        allow read: if isMember() && granteeUid in members();
+
+        // The current grant. A parent may CREATE it and REPLACE it (a renewal,
+        // or a deliberate re-grant after a revoke), and the sequence must go
+        // FORWARD -- that is what makes re-granting after a revoke a visible,
+        // auditable act rather than something a stale write can achieve by
+        // accident. `set` from the client is an update once the doc exists, so
+        // both paths are covered.
+        allow create: if isMember()
+                      && grantorIsThePeer(request.resource.data)
+                      && grantFieldsOk(request.resource.data);
+
+        allow update: if isMember()
+                      && grantorIsThePeer(request.resource.data)
+                      && grantorIsThePeer(resource.data)
+                      && request.resource.data.grantSeq > resource.data.grantSeq
+                      && grantFieldsOk(request.resource.data);
+
+        // A grant is never deleted: `delete: if false` is the floor under the
+        // whole feature. Losing the grant document must not silently hand the
+        // device MORE authority, and a room whose pair has gone away is cleaned
+        // up by the whole-room delete rules above, not field by field.
+        allow delete: if false;
+      }
+
+      // Revocations are APPEND-ONLY auto-id documents in a room-level
+      // subcollection: `calls/{room}/revocations/{auto}`.
+      //
+      // Two emulator failures shaped this path, and both are worth the comment:
+      //
+      //  - NOT a `revokedAt` flag on the grant document. A grant write replaces
+      //    the grant document, and the flag goes with it, so the child is
+      //    un-revoked with no trace. No grant write can reach this collection,
+      //    and `update`/`delete` are both `false`, so a written revocation is
+      //    permanent for this pairing.
+      //  - NOT nested under the grant doc. `consents/{grantee}/revocations/...`
+      //    is three path segments below the room, and there a rule referencing a
+      //    wildcard bound in an ANCESTOR match block threw an EVALUATION ERROR
+      //    instead of denying. An evaluation error is indistinguishable from a
+      //    permission problem in a log line, so a correct denial nearly got read
+      //    as "the kill switch is broken". One level below the room is the
+      //    shape `ptt` and `chat` already use and is proven to work, so
+      //    `granteeUid` travels in the document rather than in the path.
+      match /revocations/{revocationId} {
+        function revocationOk(data) {
+          return data.keys().hasOnly(
+                   ['granteeUid', 'grantorUid', 'revokesGrantSeq', 'revokedAt'])
+              && data.granteeUid is string
+              && data.granteeUid in members()
+              && data.grantorUid is string
+              && data.grantorUid == request.auth.uid
+              && data.grantorUid != data.granteeUid
+              && data.revokesGrantSeq is int
+              && data.revokesGrantSeq >= 0
+              && data.revokedAt == request.time;
+        }
+        allow read: if isMember();
+        allow create: if isMember() && revocationOk(request.resource.data);
+        // Permanent. Not "until the parent changes their mind": that is what a
+        // higher grantSeq is for, and making it a delete would reintroduce
+        // exactly the lost-write hole this structure exists to close.
+        allow update: if false;
+        allow delete: if false;
+      }
     }
 
     // Pairing handshake docs: pairings/{uid} = {uid, peerUid, sessionNonce,

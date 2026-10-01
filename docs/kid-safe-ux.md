@@ -1,9 +1,9 @@
 # Kid-safe UX (6-year-old)
 
 - One giant Call Dad button (≥96dp, high contrast, haptic + ring). One-tap hangup always visible in-call. Auto-reconnect on LAN drop with loud status ("Calling Dad…").
-- One action per screen: Home (call), Chat (giant send + voice-memo hold-to-talk), Photo (take/send/view), Log (missed = giant "Call back" card). No tabs-that-trap, no keyboards by default (voice-memo first, text optional with huge keys).
+- One action per screen: Home (call), Chat (giant send), Walkie Talkie (hold to talk), Games, Ask Helper. Log = a missed call raises ONE giant "Call back" card on Home (built; no separate Log screen). No tabs-that-trap, no keyboards by default. **Note: text IS a keyboard, deliberately** — a 6-year-old cannot dictate at this age, and the composer is sandboxed instead (no autocorrect, no links, no intents): see criterion 10.
 - No escape: no links/browser/store/settings reachable from kid screens; system back lands on Home; parent area behind biometric/PIN gate.
-- Statuses read aloud eventually (TTS lane later): sent→delivered→read as icons + words ("Dad got it").
+- Statuses read aloud eventually (TTS lane later): sent→delivered→read as words ("Got there" / "Seen"). Words, not ticks — a tick legend needs a parent to explain it.
 - Fixtures/art: synthetic only (placeholder dad/kid avatars in `assets/`, fake names). Never commit real photos.
 
 ---
@@ -22,21 +22,29 @@ class of invented pass this repo keeps catching.
 | 3 | One action per screen | **PASS (machine, partial)** | Home is a fixed no-scroll 2×2 grid (`HomeScreen.kt`). Verified by inspection; no host test, because "one action" is a judgement per screen. |
 | 4 | No escape (no browser/store/settings) | **PASS (machine)** | `KidUxAuditTest.thereIsNoBrowserOrStoreEscapeFromAnyScreen` — no `ACTION_VIEW`/`ACTION_BROWSABLE`/`ACTION_SEND`/`ACTION_WEB_SEARCH`/`market://` anywhere in `ui/`. The app holds exactly one `startActivity`, internal. **Back-press fixed 2026-09-30**: `AppNavHost` now installs a `BackHandler` that pops to Home, so the system back button can no longer drop a child out to the launcher. Previously only Call and Game intercepted it. |
 | 5 | Loud ring | **HUMAN (partly device-proven)** | `CallAudioManager` is the single ringer. Device-proven for the ring itself. **The voice-message notification was NOT quiet** — K12, fixed in source at vc9, unproven on device. |
-| 6 | Missed-call "Call back" card | **FAIL — not built** | `EndReason.MISSED` exists (`CallState.kt`) and renders as text, but nothing persists it and `HomeScreen` has no callback card. Blocked on local storage, which is what re-opens ADR-003. |
+| 6 | Missed-call "Call back" card | **PASS (machine) + HUMAN (unwitnessed)** | BUILT 2026-10-01. `CallLog.callbackCard` decides (one card, most-recent only, 24h window, MISSED/FAILED but never DECLINED) and `HomeScreen.CallbackCard` renders it at ≥72dp. Persistence is `CallLogStore` (DataStore — ADR-018, **not** Room), and `CallViewModel.commitTerminal` feeds it from the single funnel every exit path uses. `CallLogTest` pins the card, the window, the decline exclusion, the cap and the drop order. **Unwitnessed on a device.** |
 | 7 | Back-stack walk (the system back button) | **PASS (machine, partial)** | `launchSingleTop` on every navigate; every "back home" path uses `popUpTo(HOME)`, so the stack cannot grow unbounded (`AppNavigation.kt`). The press-back walk itself is HUMAN. |
-| 8 | Airplane-recovery | **HUMAN** | Needs two phones and a radio. Untested. The source behaviour is bounded: a lost call ends at `LOST_GRACE_MS` and the child returns Home (§1.7a). |
+| 8 | Airplane-recovery | **HUMAN** | Needs two phones and a radio. Untested. The source behaviour is bounded: a lost call ends at `LOST_GRACE_MS` and the child returns Home (§1.7a), and an ICE restart re-gathers on the same transport before that. |
 | 9 | No real child data in committed screenshots | **PASS (machine)** | `KidUxAuditTest.noScreenshotOrMediaIsCommitted` — no `.png`/`.jpg`/`.jpeg`/`.webp`/`.heic` outside `res/drawable`, `build/`, `.git/`. |
+| 10 | The chat thread is not a way out | **PASS (machine)** | `ChatKidSafetyTest` (7 cases). The chat box is the widest hole the allowlist could have: a message is the one place a GROWN-UP authors text for a child. Bodies are plain `Text` — no `ClickableText`, no `autoLink`, no link preview, no `ACTION_VIEW`, no autocorrect/predictive keyboard. `ChatText` also *rejects* link-shaped text at send time, so the parent cannot arm it in the first place. Asserted against CODE, not comments. |
+| 11 | The thread cannot trap a child | **PASS (machine)** | Back arrow and send are both 96dp via a named `TOUCH_TARGET_DP` constant the test reads — a literal at the call site is exactly what gets "tidied" down to 64dp later. At most 4 `onClick` sites in the whole screen. |
 
 ### Known gaps this sheet is recording rather than hiding
 
-- **Criterion 6 fails.** A missed call is not offered back. This is a real missing
-  feature, not an audit artefact, and it is on the Phase 6 list.
-- **Criterion 5's quiet-notification half is unproven.** "Loud ring" covers the
-  call. The K12 voice-message loudness defect was found by this discipline and fixed
-  in source; the device proof is still owed.
+- **Nothing in this sheet has been re-witnessed on a device since 2026-09-30**, and
+  the phones are on **vc7** while the source is **vc10**. The machine rows describe
+  vc10; the device describes vc7. Treat every device-dependent row as unknown.
 - **Criterion 2 has never been measured.** No contrast ratio has ever been computed
   for either theme. Treat as unknown, not as passing.
+- **Photo sharing does not exist as a feature.** The header of this file lists
+  "Photo (take/send/view)" and a Log screen; neither is built. `PhotoTransfer` is
+  the transport half only, host-tested, with no camera, encoder, or screen.
+- **A fresh install is inert until a parent grants consent.** Absence of a grant
+  DENIES (ADR-017), so on a first run the child can reach nothing until the parent
+  side grants. That is intended fail-closed behaviour and it is also the most
+  likely cause of "the app does nothing" — it belongs on this sheet as a UX fact,
+  not just in an ADR.
 - **Auto-reconnect is no longer void.** `RULES.md` §1.7a's "Reconnect: NOT
-  implemented" entry was replaced 2026-09-30: ICE-restart ships (ADR-017 sibling
-  work), scoped to a recoverable network drop, not LAN-only calling and not a
-  symmetric-NAT carrier proof.
+  implemented" entry was replaced 2026-09-30: ICE-restart ships, scoped to a
+  recoverable network drop, not LAN-only calling and not a symmetric-NAT carrier
+  proof.
