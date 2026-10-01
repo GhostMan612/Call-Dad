@@ -91,14 +91,19 @@ while the tool printed green (see `LESSONS_LEARNED.md`).
 
 ### Two things that will surprise an operator
 
-1. **The new rules are NOT deployed.** `chat`, `photos`, `consents` and
-   `revocations` exist in `firestore.rules` and are emulator-tested, but the live
-   rules are still the vc9 set. `firebase deploy --only firestore:rules` is
-   required before chat or consent work on a phone.
-2. **A fresh install is inert until a parent grants.** Absence of a consent cert
-   DENIES (ADR-017), so text and — as wired today — the whole app's communication
-   entry points are closed by default. This is intended fail-closed behaviour,
-   and it is the single most likely cause of "the app does nothing" on first run.
+1. **A fresh install is inert until a parent grants — CHECK THIS FIRST.**
+   Absence of a consent cert DENIES (ADR-017), so on first launch the Messages
+   and Pictures tiles both read "turned off right now. Ask a grown-up." and the
+   call is gated on a CALL grant. This is intended fail-closed behaviour and it
+   is the single most likely cause of "the app does nothing". The fix is the
+   shield icon top-right (beside the gear): the grown-ups gate, then
+   "Allow everything". The grown-up's OWN phone is not gated — see ADR-017 and
+   the `isGrantor` derivation in `ConsentStore`, because the rules make a
+   self-named grant impossible and a naive gate would lock the parent out of the
+   app they are configuring.
+2. **The rules are live but unwitnessed.** Deployed 2026-10-01 and 44/44 on the
+   emulator, but no phone has executed a single chat write, a photo transfer, a
+   consent grant, or an ICE restart against them.
 
 ### Device evidence (VERIFIED, `dumpsys` fingerprint)
 
@@ -118,8 +123,9 @@ One flavor per device; no crossed install.
 
 ### Backend state (VERIFIED live)
 
-- `firestore.rules` released to `calldad-508d7`.
+- `firestore.rules` released to `calldad-508d7` — **2026-10-01, the vc10 ruleset.** Compiled cleanly and released. This stanzas-in: `chat`, `photos` (manifest + chunks), `consents`, `revocations`, and the `negotiationRound` guards on the call document. Until this deploy, every one of those was denied on a real device, so the app's text thread, photo sharing, consent flow and auto-reconnect could not have worked on hardware even with a correct build.
 - `onCallRoomWritten` live: v2, `us-central1`, nodejs22, 256MB.
+- `onPttClipWritten` live: v2, same region/runtime.
 - `databases/(default)` exists, STANDARD edition.
 
 ### Operator-witnessed behaviour (CLAIMED by operator, not lane-verified)
@@ -135,7 +141,7 @@ One flavor per device; no crossed install.
 ### NOT claimed
 
 - **`versionCode 10 / 0.3.0` is SOURCE-ONLY.** Never built, never installed, never witnessed. Both phones are on **vc7 / 0.2.4**, which means two operator-reported defects are **live on the child's phone right now**: a voice message rings at full volume on a locked phone, and a call ring traps the grown-up on their own lock screen. The fixes are gated and reviewed in source; the device proof is what closes this. **This remains the single highest-priority open item.**
-- **The Firestore rules deployed live are the vc9-era set.** Chat, photos, consents and revocations are emulator-tested (40/40) and **not deployed**. No new feature works on a device until `firebase deploy --only firestore:rules` runs.
+- **The Firestore rules deployed live are the vc10 set (2026-10-01).** Chat, photos, consents, revocations and `negotiationRound` are emulator-tested (44/44) AND live. The emulator suite is the only evidence for them until a phone exercises them, so the rules are now deployed-but-unwitnessed, which is a different and better state than emulator-only — but it is not "proven".
 - **The consent kill switch has never been exercised on a device.** The rules are proven against the emulator and the gate logic is host-tested, but no human has granted a scope and watched a child lose it.
 - **Photo sharing has never sent a real photo.** The transport, digest, ordering, downscale policy and rules are all proven (byte-proof on synthetic fixtures, 40/40 emulator), but the Bitmap→WEBP path, the picker, and the screen have never run against a camera image. That is the largest untested surface in the app.
 - **`app/proguard-rules.pro` is a stub** and no release build has ever run. A missing keep rule there is a runtime crash, not a smaller APK.

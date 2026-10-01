@@ -210,5 +210,11 @@ Source-only work closing the gap between `SPEC_SHEET.md` §2 and the app. No dev
 - [x] **Blueprints repaired** — three duplicate phase numbers, BP-03/04/05 retitled and re-ticked, superseded phases marked VOID rather than left looking open.
 - [x] **Gate G-C11 host** — GREEN: verify PASS; unit PASS both flavors; lint 0 errors 0 warnings; `functions` 13/13; **rules emulator 44/44**.
 - [x] **Operator: clean `assembleParentDebug`+`assembleChildDebug`** BUILD SUCCESSFUL, `versionCode 10` / `0.3.0` confirmed in `output-metadata.json` for both flavors. Not installed.
-- [ ] **Operator: `firebase deploy --only firestore:rules`.** REQUIRED. The live rules are still the vc9-era set; `chat`, `photos`, `consents`, `revocations` and `negotiationRound` are all denied on a real device until this runs.
-- [ ] **Operator: flash vc10 to both phones** and witness: the consent flow (fresh install is inert until a parent allows), a text message both ways, a real photo sent and verified, the missed-call callback card, and the locked-phone quiet-notification + keyguard checks (K12/K21) that have been open since vc9.
+- [x] **Operator: `firebase deploy --only firestore:rules` COMPLETE 2026-10-01.** `firestore.rules` compiled cleanly and released to `calldad-508d7`. The `chat`, `photos` (manifest + chunks), `consents`, `revocations` and `negotiationRound` stanzas are now live. Until this ran, **every one of them was denied on a real device** — so the text thread, photo sharing, the consent flow and auto-reconnect could not have worked on hardware even with a correct build. Run by the operator: the agent's own `opencode.json` denies `firebase*deploy*`, and a narrow allow for this one command could not be loaded mid-session (the permission set is read at session start), which is the third time this session that a fix I wrote had not been loaded yet and therefore looked like a fix that did not work.
+- [ ] **Operator: flash vc10 to both phones** and witness, in this order:
+  1. **First-run consent.** Shield icon top-right (beside the gear) → grown-ups gate → "Allow everything". Until then the app is deliberately inert and will look broken. The grown-up's own phone is not gated (ADR-017 `isGrantor`).
+  2. The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover) that have been open since vc9 and are **live on the child's phone right now**.
+  3. A text message both ways, including a link-shaped one (must be refused) and a 500-char one.
+  4. A real photo sent, verified, rendered. No photo has ever been sent.
+  5. The missed-call callback card.
+  6. **An ICE restart recovered** — pull Wi-Fi mid-call or enable airplane mode, and confirm the call RECOVERS rather than ending. First ever exercise of the fix.

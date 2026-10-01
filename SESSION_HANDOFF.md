@@ -28,11 +28,10 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 
 ### State
 
-The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**. All seven
-features exist, and the standing gate is green on the built tree: verify PASS ·
-unit PASS both flavors · lint 0 errors 0 warnings · functions 13/13 · **rules
-emulator 44/44**. `versionCode 10` / `0.3.0` is clean-built for both flavors and
-**not installed**.
+The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, the standing gate is
+green on the built tree (verify PASS · unit PASS both flavors · lint 0/0 · functions
+13/13 · **rules emulator 44/44**), and **`firestore.rules` is deployed** (2026-10-01).
+`versionCode 10` / `0.3.0` is clean-built for both flavors and **not installed**.
 
 ### The one bug worth reading this handoff for
 
@@ -63,15 +62,19 @@ certifies the tree, never the behaviour of whoever is running it.**
 
 ### Next actions, in order — all operator-side
 
-1. **`firebase deploy --only firestore:rules`. REQUIRED.** The live rules are
-   still the vc9-era set. `chat`, `photos`, `consents`, `revocations` and
-   `negotiationRound` are all denied on a real device until this runs. **Nothing
-   new works without it.**
+1. ~~`firebase deploy --only firestore:rules`~~ **DONE 2026-10-01.** Compiled cleanly
+   and released. `chat`, `photos`, `consents`, `revocations` and `negotiationRound`
+   are live. Until this ran every one of them was denied on a real device, so no
+   amount of correct code could have made the new features work.
 2. **Flash vc10 to both phones.** Then, in this order:
-   - **First-run consent.** A fresh install is INERT until a parent opens the
-     shield icon (top-right, beside the gear) and taps "Allow everything".
-     Absence of a grant denies, by design. Expect "the app does nothing" before
-     that, and do not file it as a bug.
+   - **First-run consent — check this before anything else, because everything
+     else will look broken without it.** A fresh install is INERT: Messages and
+     Pictures both read "turned off right now", and the call is gated too. A
+     parent opens the shield icon (top-right, beside the gear) → grown-ups gate →
+     "Allow everything". Absence of a grant denies, by design. Do not file this as
+     a bug. The grown-up's own phone is not gated — see ADR-017's `isGrantor`,
+     because the rules make a self-named grant impossible and a naive gate would
+     lock the parent out of the app they are configuring.
    - The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover)
      that have been open since vc9 and are **live on the child's phone right now**.
    - A text message both ways, including a link-shaped one (must be refused).
@@ -81,6 +84,18 @@ certifies the tree, never the behaviour of whoever is running it.**
      call RECOVERS rather than ending. This is the first time the fix is exercised.
 3. **Adopt a release keystore** (`docs/release-signing.md`) if a release artifact
    is ever wanted. `proguard-rules.pro` is a stub; no release build has ever run.
+
+### Note for the next agent: a fix I write may not be loaded
+
+Three times in this session I edited something and then found the running process
+still had the old version: the `gate` tool (a stale tool implementation silently
+omitted the rules suite, and printed GREEN), and `opencode.json` (the permission
+set is read at session start, so a new `allow` rule does not apply until the next
+session). A fix that has not been loaded yet looks *exactly* like a fix that did
+not work, and the tempting response is to escalate — different flags, `--force`,
+retrying the deny. Don't. Say so, and hand back the command. **Third instance of
+the same shape: verify the running process is actually using the thing you
+changed before concluding the change was wrong.**
 
 ### Open decisions
 

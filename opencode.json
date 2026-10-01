@@ -17,6 +17,7 @@
       "adb*shell*getprop*": "allow",
       "adb*shell*dumpsys*": "allow",
       "firebase*deploy*": "deny",
+      "firebase*deploy*--only firestore:rules": "allow",
       "git*add*-A*": "deny",
       "git*add*--all*": "deny",
       "git*add*-u*": "deny",
