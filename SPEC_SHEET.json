@@ -21,20 +21,19 @@
     "source": "0.3.1",
     "versionCode": 11,
     "on_device": 10,
-    "on_device_note": "phones are on vc10 / 0.3.0 (flashed 2026-10-01 08:19); source is ahead by one consent-enforcement pass and NOT installed. INSTALLED IS NOT WITNESSED: no SPEC_SHEET section-2 feature has been exercised on hardware."
+    "on_device_note": "BOTH PHONES ARE ON vc11 / 0.3.1 as of 2026-10-02 (child 10:17:56, parent 10:18:11), installed -r so pairing and the consent grant survived. Source and device are the same build for the first time since vc7. INSTALLED IS NOT WITNESSED: no SPEC_SHEET section-2 feature has been exercised on hardware on any build after vc7, and no version of this app has ever demonstrably enforced a kill switch."
   },
   "user": "6-year-old (kid device) <-> Dad (operator device)",
   "allowlist_v01": ["DAD"],
 
   "features_v01": [
-    { "id": "voice_call", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "note": "NOT re-proven on vc10 or vc11. A vc7 proof is not a current-build proof." },
-    { "id": "video_call", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "decision": "ADR-005 WebRTC", "note": "NOT re-proven on vc10 or vc11." },
-    { "id": "text_chat_1to1_receipts", "status": "SHIPPED (source)", "blueprint": "BP-03" },
-    { "id": "voice_memo", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "note": "walkie-talkie voice clips, ADR-016; NOT the Concentus Opus path below. NOT re-proven on vc10 or vc11." },
+{ "id": "voice_call", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "note": "NOT re-proven on any build after vc7, including the vc11 now installed on both phones. A vc7 proof is not a current-build proof." },
+    { "id": "video_call", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "decision": "ADR-005 WebRTC", "note": "NOT re-proven on any build after vc7." },
+    { "id": "voice_memo", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "note": "walkie-talkie voice clips, ADR-016; NOT the Concentus Opus path below. NOT re-proven on any build after vc7." },
     { "id": "photo_share_chunked_verified", "status": "SHIPPED (source)", "blueprint": "BP-04" },
     { "id": "call_log", "status": "SHIPPED (source)", "note": "DataStore, NOT the Room store below — ADR-018" },
     { "id": "allowlist_parent_gate", "status": "SHIPPED" },
-    { "id": "consent_cert_kill_switch", "status": "SHIPPED (source)", "blueprint": "BP-05 §2", "decision": "ADR-017", "note": "vc11 fixes a real enforcement gap: vc10 presented 'Turn everything off' while calling, the walkie talkie (both directions) and photo/chat DOWNLOADS continued unaffected, and the parent's own grant sequence was unreadable so the button could not act." }
+    { "id": "consent_cert_kill_switch", "status": "SHIPPED + INSTALLED ON BOTH PHONES (2026-10-02), NEVER WITNESSED", "blueprint": "BP-05 §2", "decision": "ADR-017", "note": "vc11 fixes a real enforcement gap: vc10 presented 'Turn everything off' while calling, the walkie talkie (both directions) and photo/chat DOWNLOADS continued unaffected, and the parent's own grant sequence was unreadable so the button could not act. vc11 is installed and unverified -- an install is not a witness, and no version of this app has ever demonstrably enforced a kill switch." }
   ],
 
   "spec_requirements_deliberately_not_met": [

@@ -22,10 +22,13 @@ Human-device smoke script (human runs in Studio/on-device, executor records past
    visible as usage). Then "Allow everything" and confirm it all comes back.
 8. No-escape walk (back button, no browser/store/settings exit).
 
-**Which build to flash.** Only flash `vc11 / 0.3.1` or later. `vc10` — which was on both
-phones — presents a parental kill switch that enforces NOTHING on calling or the walkie
-talkie and does not stop photo/chat downloads, so step 7 will fail on it and you will have
-no idea whether the app or the test is wrong.
+**Which build to flash.** Only flash `vc11 / 0.3.1` or later. **vc11 is what both phones
+are running as of 2026-10-02, so on the current setup this whole matrix is runnable
+against what is already installed — do not re-flash unless a `dumpsys` fingerprint says
+otherwise.** `vc10` — which sat on both phones until then — presents a parental kill
+switch that enforces NOTHING on calling or the walkie talkie and does not stop
+photo/chat downloads, so step 7 would fail on it and you would have no idea whether the
+app or the test is wrong.
 
 Record: PASS/FAIL per line + device + build flavor + the `dumpsys` fingerprint. Executor
 never claims; only transcribes human evidence into CURRENT_STATE.

@@ -57,8 +57,8 @@ class DocTruthRegressionTest {
      * app/README.md.
      */
     private val repoRoot: File by lazy {
-        var dir: File = File("").absoluteFile
-        while (dir.parentFile != null) {
+        var dir: File? = File("").absoluteFile
+        while (dir != null) {
             if (File(dir, "gradle/libs.versions.toml").isFile) return@lazy dir
             dir = dir.parentFile
         }

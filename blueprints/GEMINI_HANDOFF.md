@@ -8,7 +8,7 @@
 
 ## What this is
 
-Native Kotlin Android app (`com.calldad`, launcher "Call of Daddy", minSdk 26 / compile-target 35; at the time of writing v0.2.0/vc3, now v0.3.1/vc11 in source with both phones on vc10/0.3.0). A 6-year-old calls her dad: giant-button voice+video over WebRTC, Firestore SDP/ICE signaling, project `calldad-508d7`. Single-Activity + Compose + ViewModel/StateFlow. No Hilt/Room. Toolchain: AGP 8.7.2 / Kotlin 2.0.21 / google-services 4.5.0 / Firebase BOM 34.19.0 / `io.getstream:stream-webrtc-android:1.3.10`. The room was `calls/dad_channel` at this point and is now pair-scoped `calls/{uidA_uidB}` (ADR-015).
+Native Kotlin Android app (`com.calldad`, launcher "Call of Daddy", minSdk 26 / compile-target 35; at the time of writing v0.2.0/vc3, now v0.3.1/vc11 in source and installed on both phones since 2026-10-02). A 6-year-old calls her dad: giant-button voice+video over WebRTC, Firestore SDP/ICE signaling, project `calldad-508d7`. Single-Activity + Compose + ViewModel/StateFlow. No Hilt/Room. Toolchain: AGP 8.7.2 / Kotlin 2.0.21 / google-services 4.5.0 / Firebase BOM 34.19.0 / `io.getstream:stream-webrtc-android:1.3.10`. The room was `calls/dad_channel` at this point and is now pair-scoped `calls/{uidA_uidB}` (ADR-015).
 
 ## Device-proven working (BLU View 5 + Moto G 2025, same Wi-Fi)
 

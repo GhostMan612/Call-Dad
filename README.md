@@ -47,13 +47,13 @@ C:\Call-Dad\
 
 Handoff files (`SESSION_HANDOFF.md`, `blueprints/CURRENT_STATE.md`) must stay Gemini/DeepSeek-readable: deltas + next actions + open decisions, no raw dumps.
 
-## Status (2026-10-01)
+## Status (2026-10-02)
 
-- **Source** `vc11 / 0.3.1`. **Both phones** are on `vc10 / 0.3.0` (flashed 2026-10-01) — source is one pass ahead and **not installed**.
+- **Source and both phones are the same build: `vc11 / 0.3.1`.** Flashed 2026-10-02 (child 10:17:56, parent 10:18:11), one flavor per device, installed `-r` so pairing and the consent grant survived. **No re-pair needed.**
 - **Backend is live.** `firestore.rules` released 2026-10-01 (chat, photos, consents, revocations, `negotiationRound`), plus `onCallRoomWritten` and `onPttClipWritten`.
-- Host gates green against `313e566`: verify PASS · unit **538 (269 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** (both files, via the `gate` tool) · rules emulator **44/44**.
-- **Two things that gate does not tell you:**
-  1. **No `SPEC_SHEET` §2 feature has ever been exercised on hardware.** Not one call, text, photo, consent grant or ICE restart on any current build. The only proven E2E call is from vc7.
-  2. **No version of this app has ever demonstrably enforced a parental kill switch.** vc10 — which is what is on both phones — presents "Turn everything off" while calling, the walkie talkie and photo/chat downloads continue unaffected. Fixed in vc11, in source only.
-- Also: no suite in this repo compiles the app. `8f47512` was pushed to `origin/main` with a duplicated brace and the gate printed GREEN on it; `4a5c555` fixed it. `assembleParentDebug` is the only thing that has ever caught that class.
-- Next: the operator flashes **vc11** and runs the device matrix — the last item of which is the kill switch end to end, which no one has ever watched work (`SESSION_HANDOFF.md`).
+- Host gates green: verify PASS · unit **538 (269 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **44/44**.
+- **The build gate passed too, for the first time in this project's history:** `clean assembleParentDebug assembleChildDebug` BUILD SUCCESSFUL, 77 tasks, **77 executed, 0 from cache** (`--no-build-cache`, so the Kotlin compiler genuinely ran). `8f47512` was pushed to `origin/main` with a duplicated brace and the host gate printed GREEN on it; `e0cb047` is the first commit proven to compile by the compiler rather than merely green.
+- **Two things none of that tells you:**
+  1. **No `SPEC_SHEET` §2 feature has ever been exercised on hardware.** Not one call, text, photo, consent grant or ICE restart on vc11. The only proven E2E call is from vc7. An install is not a witness.
+  2. **No version of this app has ever demonstrably enforced a parental kill switch.** vc10 — which was on both phones until 2026-10-02 — presented "Turn everything off" while calling, the walkie talkie and photo/chat downloads continued unaffected. Fixed in vc11, **installed, still unverified**.
+- Next: the operator runs the witness matrix (`SESSION_HANDOFF.md`) — the last item of which is the kill switch end to end, which no one has ever watched work.

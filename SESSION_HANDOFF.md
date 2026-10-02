@@ -30,15 +30,26 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 
 The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**,
 **`firestore.rules` is deployed** (2026-10-01), and Source is at
-`versionCode 11` / `0.3.1`. The phones are on **vc10 / 0.3.0**
-(flashed 2026-10-01 08:19) and source is one pass ahead.
+`versionCode 11` / `0.3.1`. **Both phones are now on vc11 / 0.3.1** (flashed
+2026-10-02 10:17:56 child / 10:18:11 parent) — source and device are the same
+build for the first time since vc7.
 
 Gates, re-run against `313e566` (= origin/main): verify PASS ·
 unit **538 tests (269 per flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
 functions **13/13** (both files, via the fixed `gate` tool) · **rules emulator 44/44**.
 
-**That certifies the host gates, not a build.** No suite in this repo compiles the
-app — see below.
+**And now the build gate too, for the first time:** `clean
+assembleParentDebug assembleChildDebug` BUILD SUCCESSFUL, **77 tasks, 77
+executed, 0 from cache** (`--no-build-cache`, so the Kotlin compiler genuinely
+ran — the first attempt had 34 `FROM-CACHE` including `compileParentDebugKotlin`
+and was discarded as evidence). Both APKs report `versionCode 11`. Installed `-r`
+to the correct flavor on each device; pairing and the anonymous account
+survived. Operator authorised this across RULES §1.5 in-session.
+
+**What that proves: the tree compiles, packages and installs. It proves nothing
+about behaviour.** Zero vc11 features have been exercised by a human, and the
+parental kill switch is still unwitnessed — which is the whole point of the next
+section.
 
 Nothing in §2 has been exercised on hardware. Not one call, text, photo, consent
 grant or ICE restart has run against any build. Every feature row is
@@ -50,9 +61,10 @@ talkie (both directions, including clips playing aloud), and photo/chat download
 continued unaffected; and the parent's own grant sequence was unreadable on the
 parent's phone, so the button could not act there at all. Calling and the walkie
 talkie are the two OLDEST features in the app — they predate the consent model,
-so nobody went back. Fixed in vc11 and pinned by
-`ConsentEnforcementRegressionTest`. Flash vc11 before trusting any consent
-behaviour on a device.
+so nobody went back. Fixed in vc11, pinned by
+`ConsentEnforcementRegressionTest`, and **installed on both phones as of
+2026-10-02 — still unwitnessed.** No consent behaviour on a device means anything
+until a human checks it.
 
 ### `origin/main` shipped a tree that did not compile — and the gate said GREEN
 
@@ -114,9 +126,14 @@ certifies the tree, never the behaviour of whoever is running it.**
    vc10 / 0.3.0-child, one flavor per device, installed `-r` so the anonymous
    account, peer UID, pairing and the child's consent grant all survived. **No
    re-pair needed.**
-3. **Flash vc11 / 0.3.1 to both phones.** REQUIRED before any consent check means
-   anything: vc10 enforces no part of the kill switch on calling or the walkie
-   talkie. Then, in this order:
+3. ~~**Flash vc11 / 0.3.1 to both phones.**~~ **DONE 2026-10-02.** Built clean
+   (`77 tasks, 77 executed, 0 from cache` under `--no-build-cache`, so the Kotlin
+   compiler genuinely ran) and installed `-r`: `dumpsys` confirms Moto G 2025
+   (parent) vc11 / 0.3.1-parent at 10:18:11 and BLU View 5 (child) vc11 /
+   0.3.1-child at 10:17:56. One flavor per device, the other flavor NOT INSTALLED
+   on each. `peer_store.preferences_pb` and the Firebase auth heartbeat survived
+   on both — **no re-pair needed.** The install proves compilation and packaging
+   only. Everything below is unwitnessed and stays that way until a human says so:
    - **First-run consent — check this before anything else, because everything
      else will look broken without it.** A fresh install is INERT: Messages and
      Pictures both read "turned off right now", and the call is gated too. A
@@ -124,15 +141,19 @@ certifies the tree, never the behaviour of whoever is running it.**
      "Allow everything". Absence of a grant denies, by design. Do not file this as
      a bug. The grown-up's own phone is not gated — see ADR-017's `isGrantor`,
      because the rules make a self-named grant impossible and a naive gate would
-     lock the parent out of the app they are configuring.
+     lock the parent out of the app they are configuring. **Note:** the install was
+     `-r`, not a fresh install, so the child's *existing* grant should still be
+     there — if Messages and Pictures are "turned off" on the child's phone after
+     this, that is the grant, not a fresh-install artefact, and it is the first
+     thing to check.
    - The locked-phone checks (K12 quiet PTT notification, K21 keyguard takeover).
      Fixed in vc10, never verified, open since vc9.
    - A call, end to end. The existing E2E proof is from vc7.
    - A text message both ways, including a link-shaped one (must be refused).
    - A real photo sent, verified, rendered. No photo has ever been sent.
    - The missed-call callback card.
-- The reconnect: pull Wi-Fi mid-call, or turn on airplane mode, and confirm the
-      call RECOVERS rather than ending. This is the first time the fix is exercised.
+   - The reconnect: pull Wi-Fi mid-call, or turn on airplane mode, and confirm the
+     call RECOVERS rather than ending. This is the first time the fix is exercised.
     - **THE KILL SWITCH, and it is the highest-value item in this file.** On the
       parent's phone: shield icon → "Turn everything off". On the CHILD's phone,
       confirm ALL of: the Call button refuses with "Calling is turned off right

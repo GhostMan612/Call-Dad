@@ -21,7 +21,7 @@ class of invented pass this repo keeps catching.
 | 2 | Contrast ratios | **HUMAN** | Needs a rendered frame. Check the giant buttons in both light and dark system themes, and on the child's actual phone at their brightness. Not asserted. |
 | 3 | One action per screen | **PASS (machine, partial)** | Home is a fixed no-scroll 2×2 grid (`HomeScreen.kt`). Verified by inspection; no host test, because "one action" is a judgement per screen. |
 | 4 | No escape (no browser/store/settings) | **PASS (machine)** | `KidUxAuditTest.thereIsNoBrowserOrStoreEscapeFromAnyScreen` — no `ACTION_VIEW`/`ACTION_BROWSABLE`/`ACTION_SEND`/`ACTION_WEB_SEARCH`/`market://` anywhere in `ui/`. The app holds exactly one `startActivity`, internal. **Back-press fixed 2026-09-30**: `AppNavHost` now installs a `BackHandler` that pops to Home, so the system back button can no longer drop a child out to the launcher. Previously only Call and Game intercepted it. |
-| 5 | Loud ring | **HUMAN (partly device-proven)** | `CallAudioManager` is the single ringer. Device-proven for the ring itself. **The voice-message notification was NOT quiet** — K12, fixed in source at vc9 and **carried by vc10, the build on both phones** — unproven on any build. |
+| 5 | Loud ring | **HUMAN (partly device-proven)** | `CallAudioManager` is the single ringer. Device-proven for the ring itself. **The voice-message notification was NOT quiet** — K12, fixed in source at vc9 and carried by vc10 and vc11 — unproven on any build. |
 | 6 | Missed-call "Call back" card | **PASS (machine) + HUMAN (unwitnessed)** | BUILT 2026-10-01. `CallLog.callbackCard` decides (one card, most-recent only, 24h window, MISSED/FAILED but never DECLINED) and `HomeScreen.CallbackCard` renders it at ≥72dp. Persistence is `CallLogStore` (DataStore — ADR-018, **not** Room), and `CallViewModel.commitTerminal` feeds it from the single funnel every exit path uses. `CallLogTest` pins the card, the window, the decline exclusion, the cap and the drop order. **Unwitnessed on a device.** |
 | 7 | Back-stack walk (the system back button) | **PASS (machine, partial)** | `launchSingleTop` on every navigate; every "back home" path uses `popUpTo(HOME)`, so the stack cannot grow unbounded (`AppNavigation.kt`). The press-back walk itself is HUMAN. |
 | 8 | Airplane-recovery | **HUMAN** | Needs two phones and a radio. Untested. The source behaviour is bounded: a lost call ends at `LOST_GRACE_MS` and the child returns Home (§1.7a), and an ICE restart re-gathers on the same transport before that. |
@@ -32,16 +32,16 @@ class of invented pass this repo keeps catching.
 
 ### Known gaps this sheet is recording rather than hiding
 
-- **Nothing in this sheet has been re-witnessed on a device since 2026-09-30**, and
-  the phones are on **vc10 / 0.3.0** (flashed 2026-10-01 08:19) while the source is
-  **vc11 / 0.3.1**. The machine rows describe vc11; the device describes vc10.
-  Treat every device-dependent row as unknown.
-- **The build installed on both phones has a parental kill switch that enforces
-  nothing.** vc10 closes Messages and Pictures while calling, the walkie talkie
-  (both directions, including clips playing aloud) and photo/chat downloads carry
-  on regardless. Fixed in vc11 — in source, on no device. **No version of this app
-  has ever demonstrably enforced a kill switch**, and this sheet says nothing to
-  the contrary about that.
+- **Nothing in this sheet has been re-witnessed on a device since 2026-09-30.** Both
+  phones now run **vc11 / 0.3.1** (installed 2026-10-02), which is the build these
+  machine rows describe — but an install is not a witness, and no vc11 row has
+  been checked by a human. Treat every device-dependent row as unknown.
+- **The build that was on both phones until 2026-10-02 had a parental kill switch
+  that enforced nothing.** vc10 closed Messages and Pictures while calling, the
+  walkie talkie (both directions, including clips playing aloud) and photo/chat
+  downloads carried on regardless. Fixed in vc11, now installed — **and never
+  witnessed. No version of this app has ever demonstrably enforced a kill
+  switch**, and this sheet says nothing to the contrary about that.
 - **Criterion 2 has never been measured.** No contrast ratio has ever been computed
   for either theme. Treat as unknown, not as passing.
 - **The consent screen has never been used.** Two buttons, a gate, and a

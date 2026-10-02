@@ -4,7 +4,8 @@
 >
 > **"Device-proven" in this file means proven under the build named in the same
 > row** — in practice vc5, vc6 or vc7, all superseded. No `SPEC_SHEET` §2 feature
-> has been exercised on vc10 (what is on the phones) or vc11 (what is in source).
+> has been exercised on vc7 or on any later build, including the vc11 currently
+> installed on both phones.
 > A GREEN with no build named is a claim about a build nobody can identify, which
 > is how a four-builds-stale proof survives three audit passes.
 >
@@ -19,8 +20,15 @@
 
 ## Standing gate (this lane may run it)
 
+- **G-BUILD compile (the only check that has ever caught a non-compiling tree):** `clean assembleParentDebug assembleChildDebug`.
+  - STATUS: **GREEN 2026-10-02, under an explicit operator override of RULES §1.5.** `BUILD SUCCESSFUL`, **77 actionable tasks, 77 executed, 0 from cache** (run with `--no-build-cache`). `output-metadata.json` confirms `com.calldad.parent` versionCode 11 / `0.3.1-parent` and `com.calldad.child` versionCode 11 / `0.3.1-child`.
+  - **Run it with `--no-build-cache` or do not believe it.** The first attempt the same day reported **34 tasks `FROM-CACHE`, including `compileParentDebugKotlin`** — a cache hit means Gradle restored a previous successful output, so the compiler never ran and the run proves nothing about the current tree. That result was discarded and re-run. This is the same class as every other finding in this file: the check ran, and the check was not looking at what I thought.
+  - **Then:** install each flavor to its own device with `adb install -r` (never a crossed install; verify the *other* flavor reports NOT INSTALLED before and after). `-r` preserves the anonymous Firebase account, the paired peer UID and the child's consent grant — re-pairing is not needed and re-pairing would destroy the thing under test.
+  - **What it proves:** the tree compiles, packages, and installs with data intact. **What it does not prove:** any behaviour whatsoever. An install is not a witness.
+
 - **G-ALL host:** `tools/verify_project.py` + `:app:testParentDebugUnitTest :app:testChildDebugUnitTest` + `:app:lintParentDebug :app:lintChildDebug` + `node --test functions/*.test.js` + the Firestore rules emulator, via the **`gate` tool**.
-  - STATUS: **GREEN 2026-10-01, re-run with `--rerun-tasks`** — verify PASS (10 dirs + 102 files, including the control-byte ban); unit **538 tests across both flavors (269 per flavor) / 0 failures**; lint **0 errors** both flavors; functions **13/13**; **rules emulator 44/44**. First recorded against `4a5c555` (the brace fix), re-run at `87ab914`, and re-run at `313e566` — which is where `DocTruthRegressionTest` (9 tests, added for the doc-truth defects) took the suite from 520 to 538. Re-run it after any source change rather than inheriting this row. Supersedes the G-C11 row in `CHECKLIST.md`, which was recorded against `8f47512` — a tree that did not compile.
+  - STATUS: **GREEN 2026-10-01, re-run with `--rerun-tasks`** — verify PASS (10 dirs + 102 files, including the control-byte ban); unit **538 tests across both flavors (269 per flavor) / 0 failures**; lint **0 errors** both flavors; functions **13/13**; **rules emulator 44/44**. First recorded against `4a5c555` (the brace fix), re-run at `87ab914`, and re-run at `313e566` — which is where `DocTruthRegressionTest` (9 tests, added for the doc-truth defects) took the suite from 520 to 538. Re-run it after any source change rather than inheriting this row.
+  - **These host gates do not compile the app** — that is what G-BUILD is for, and it did not exist as a row until 2026-10-02. Three commits (`8f47512`, `4a5c555`, `313e566`) carried a full-green G-ALL row and none of them had been through a compiler. `e0cb047` has. Supersedes the G-C11 row in `CHECKLIST.md`, which was recorded against `8f47512` — a tree that did not compile.
   - **What this row does NOT prove: that the app builds.** No suite in this repo compiles the app. `8f47512` was pushed to `origin/main` with a duplicated brace and this gate printed GREEN on it. `assembleParentDebug` is the only thing that has ever caught that class, and `tools/prove_gates_bite.py` now asserts the gate goes red on one via the Kotlin compiler.
   - The `gate` tool is the sanctioned entry point (RULES §1.4a). It names a SKIPPED suite in the verdict rather than folding it into a green, and it runs the rules emulator with the Studio JBR on PATH so a security gate cannot vanish. Evidence: the verdict line plus the per-gate blocks.
   - **The tool runs both function files (13 tests), not just `ring.test.js`.** Until `313e566` it ran 6 of 13 and printed PASS — the exact thing RULES.md warns against in bold. **Caveat when you fix the tool itself: its binary is loaded at session start, so a fix to `gate.ts` is not live in the session that made it.** After editing it, run the raw command to confirm the count, and do not read a 6-test functions line as a regression.

@@ -5,7 +5,7 @@
 > doc-truth pass that pinned the recorded counts to the suite.
 > Superseded history lives in git. **"Device-proven" anywhere below means proven under the
 > build named in that row** — vc5, vc6 or vc7, all superseded. No `SPEC_SHEET` §2 feature has
-> been exercised on vc10 or vc11.
+> been exercised on any build after vc7, including the vc11 installed on both phones.
 
 ## Toolchain (source of truth: `gradle/libs.versions.toml`, ADR-004)
 
@@ -104,6 +104,24 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
   emulator refuses to start without a JVM, which is how the suite went missing
   in the first place.
 
+### The build gate is no longer hypothetical — 2026-10-02
+
+`clean assembleParentDebug assembleChildDebug` **BUILD SUCCESSFUL**, run under an
+explicit operator override of RULES §1.5. **77 actionable tasks, 77 executed, 0
+from cache** — the first run of the day reported 34 `FROM-CACHE` including
+`compileParentDebugKotlin`, i.e. the compiler was skipped, so it was thrown away
+and re-run with `--no-build-cache` to force `compileParentDebugKotlin` and
+`compileChildDebugKotlin` to actually execute. A cached compile is not evidence
+the tree compiles, and this repo has been burned by exactly that class.
+
+`output-metadata.json` confirms `com.calldad.parent` / `versionCode 11` /
+`0.3.1-parent` and `com.calldad.child` / `versionCode 11` / `0.3.1-child`.
+
+**This retires the standing caveat.** Every row above from `8f47512` forward said
+the gates certify the host and not the build; as of this commit, `e0cb047` is
+the first commit in the sequence proven to compile by the compiler itself rather
+than merely green.
+
 ### Three things that will surprise an operator
 
 1. **A fresh install is inert until a parent grants — CHECK THIS FIRST.**
@@ -119,28 +137,37 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 2. **The rules are live but unwitnessed.** Deployed 2026-10-01 and 44/44 on the
    emulator, but no phone has executed a single chat write, a photo transfer, a
    consent grant, or an ICE restart against them.
-3. **The build on both phones is vc10, and vc10 lies about the kill switch.** Both
-   devices run 10 / 0.3.0 (table below) while source is vc11. vc10 does not enforce
-   the consent gate on calling or the walkie talkie in either direction and does not
-   stop chat/photo downloads, so a parent on vc10 is told the app is switched off
-   while it is not. **Any consent check against these phones proves nothing about the
-   current source** — flash vc11 first, then treat the result as the first real
-   evidence this contract has produced.
+3. **The build that sat on both phones until 2026-10-02 was vc10, and vc10 lies
+   about the kill switch.** Both devices now run vc11 / 0.3.1 (table below), but the
+   defect is why the version bump existed: vc10 did not enforce the consent gate on
+   calling or the walkie talkie in either direction and did not stop chat/photo
+   downloads, so a parent on vc10 was told the app was switched off while it was not.
+   **This is now the first build on the phones that should enforce the gate — which is
+   exactly why it must be checked rather than assumed. An install is not a witness.**
 
 ### Device evidence (VERIFIED, `dumpsys` fingerprint)
 
-| Device | Package | versionCode | versionName | installed |
-|---|---|---|---|---|
-| Moto G 2025 (PARENT) | `com.calldad.parent` | 10 | 0.3.0-parent | 2026-10-01 08:19:05 |
-| BLU View 5 (CHILD) | `com.calldad.child` | 10 | 0.3.0-child | 2026-10-01 08:19:19 |
+| Device | Package | versionCode | versionName | installed | SDK |
+|---|---|---|---|---|---|
+| Moto G 2025 (PARENT) | `com.calldad.parent` | **11** | **0.3.1-parent** | 2026-10-02 10:18:11 | 36 |
+| BLU View 5 (CHILD) | `com.calldad.child` | **11** | **0.3.1-child** | 2026-10-02 10:17:56 | 34 |
 
-**Source is now at `versionCode 11` / `0.3.1` and is AHEAD of both phones.**
+**Source and both phones are now the same build: vc11 / 0.3.1.** The gap this
+table exists to measure is closed for the first time since vc7. One flavor per
+device, no crossed install (each device reports the other flavor as NOT
+INSTALLED, verified before and after).
+
+**What the install proves: that the tree compiles, packages, and installs with
+its data intact. What it does not prove: anything about behaviour.** Installed
+`-r`, so the anonymous Firebase account, the paired peer UID
+(`peer_store.preferences_pb`, still dated 2026-09-30) and the child's existing
+consent grant all survived — **no re-pair needed.** Still zero human-witnessed
+feature behaviour on vc11; the kill switch remains unwitnessed.
 
 The vc7 → vc10 flash closed the widest source/device gap in the project's history,
 and with it the K12 loud-voice-message and K21 lock-screen-trap defects that had
 been live on the child's phone throughout. Both fixes are now **installed but
 unwitnessed**.
-
 That "unwitnessed" is not a formality, and the reason is recorded here rather than
 discovered later: **vc10 was found to ship a parental kill switch that enforced
 nothing on calling or the walkie talkie.** Both are the two oldest features in
@@ -148,8 +175,10 @@ the app, both predate the consent model, and neither was ever revisited. A paren
 pressing "Turn everything off" on vc10 closed Messages and Pictures while calling,
 inbound voice clips, and photo/chat downloads carried on regardless — and the
 parent's own grant sequence was structurally unreadable, so the button could not
-act on the phone that owns it. Source is now vc11 / 0.3.1 with the enforcement
-real. Neither build has been witnessed.
+act on the phone that owns it. Both phones now run vc11 / 0.3.1, where the
+enforcement is real in source. **Neither build has been witnessed, and vc11 is the
+first one that should enforce it — which is exactly why it must be checked rather
+than assumed.**
 
 Installed with `-r`, so the anonymous Firebase account, the peer UID, and the
 pairing handshake all survived — no re-pair needed, and the child kept its
@@ -173,7 +202,7 @@ line's model field.
 
 ### Operator-witnessed behaviour (CLAIMED by operator, not lane-verified)
 
-- Both phones call and answer each other; video good. **First proven E2E call.** (Proven under vc7. Re-prove under **vc11** — vc10 also carries the unenforced kill switch, so a call proved on it would not clear the consent gate.)
+- Both phones call and answer each other; video good. **First proven E2E call.** (Proven under vc7. Re-prove under **vc11**, which is what is on both phones now — a call proved on vc10 would not have cleared the consent gate, so that proof was never worth collecting.)
 - PTT works both directions.
 - A call completes on **mobile data with Wi-Fi off** (operator-witnessed), so the Open Relay path is proven for a normal NAT (K8).
 - PTT tail clipping FIXED and re-verified on both phones, both directions: no clipping,
@@ -184,29 +213,32 @@ line's model field.
 ### NOT claimed
 
 - **Every feature in `SPEC_SHEET.md` §2 is BUILT, DEPLOYED and INSTALLED, and none
-  is WITNESSED.** `vc10 / 0.3.0` is on both phones as of 2026-10-01 08:19, and the
-  rules are live. "Installed" is not "working": no phone has yet made a call, sent
-  a text, exchanged a photo, granted a consent, or recovered an ICE restart against
-  this build. Treat every §2 row as **untested on hardware** until an operator
-  says otherwise, and do not read a successful install as evidence of any feature.
+  is WITNESSED.** `vc11 / 0.3.1` is on both phones as of 2026-10-02 (10:17:56 child,
+  10:18:11 parent), and the rules are live. "Installed" is not "working": no phone
+  has yet made a call, sent a text, exchanged a photo, granted a consent, or
+  recovered an ICE restart against this build. Treat every §2 row as **untested on
+  hardware** until an operator says otherwise, and do not read a successful install
+  as evidence of any feature.
 - **The two locked-phone defects are no longer live but are unverified.** A voice
   message ringing at full volume on a locked phone, and a call ring trapping the
   grown-up on their own lock screen, were both open on the child's phone under vc7.
-  vc10 contains the fixes (K12 quiet PTT channel, K21 keyguard). Whether they work
-  is exactly the question the next operator session answers.
+  vc10 contained the fixes (K12 quiet PTT channel, K21 keyguard) and vc11 carries
+  them. Whether they work is exactly the question the next operator session answers.
 - **The Firestore rules deployed live are the vc10 set (2026-10-01).** Chat, photos, consents, revocations and `negotiationRound` are emulator-tested (44/44) AND live. The emulator suite is the only evidence for them until a phone exercises them, so the rules are now deployed-but-unwitnessed, which is a different and better state than emulator-only — but it is not "proven".
 - **The consent kill switch has never been exercised on a device, and the version
-  that was installed was a lie.** vc10 — which is what sits on both phones — ships
-  a "Turn everything off" button that enforced nothing on calling or the walkie
-  talkie, in either direction, and did not stop photo or chat downloads. The
-  parent's own grant sequence was also unreadable on the parent's phone, so the
-  button could not act at all. All of it is fixed in vc11 / 0.3.1 (source) and
-  pinned by `ConsentEnforcementRegressionTest`. Until vc11 is flashed AND a human
-  grants a scope and watches a child lose it, the honest statement is that no
-  version of this app has ever demonstrably enforced a kill switch.
-- **vc11 is not on a phone.** It is source plus a green gate. That is the same
-  position v0.1 was declared "complete" in, twice, and both declarations were
-  wrong.
+  that sat on both phones until 2026-10-02 was a lie.** vc10 ships a "Turn
+  everything off" button that enforced nothing on calling or the walkie talkie, in
+  either direction, and did not stop photo or chat downloads. The parent's own grant
+  sequence was also unreadable on the parent's phone, so the button could not act at
+  all. All of it is fixed in vc11 / 0.3.1, pinned by
+  `ConsentEnforcementRegressionTest`, and vc11 is **now installed on both phones**.
+  Until a human grants a scope and watches a child lose it, the honest statement is
+  that no version of this app has ever demonstrably enforced a kill switch.
+- **vc11 is on the phones and has still never been run by a human.** That is a new
+  position, not a solved one, and it is the same position v0.1 was declared
+  "complete" in, twice — and both declarations were wrong. Compilation, packaging
+  and installation are now proven; behaviour is not, and an install that succeeds
+  is the *weakest* possible evidence that a feature works.
 - **Photo sharing has never sent a real photo.** The transport, digest, ordering, downscale policy and rules are all proven (byte-proof on synthetic fixtures, 44/44 emulator), but the Bitmap→WEBP path, the picker, and the screen have never run against a camera image. That is the largest untested surface in the app.
 - **`app/proguard-rules.pro` is a stub** and no release build has ever run. A missing keep rule there is a runtime crash, not a smaller APK.
 - **Text chat has never survived an app restart on a device.** The prune keeps unread history, but that is a source-level claim.
