@@ -42,6 +42,93 @@ class WiringRegressionTest {
     private fun photoClient() = read("photos/PhotoClient.kt")
 
     /**
+ * The body of the function whose declaration starts with [signature], with
+     * COMMENTS STRIPPED.
+     *
+     * Brace-matched, so it cannot drift when an unrelated member is added or
+     * reordered above it. Comments removed, so a KDoc that names the forbidden
+     * construct in order to explain its absence is not read as its presence.
+     *
+     * Every "does this function still do the forbidden thing" assertion in this
+     * file used `substringAfter(sig).substringBefore(otherMarker)`, and that is a
+     * trap twice over:
+     *
+     *  1. **`substringBefore` returns the ENTIRE remaining source when its
+     *     delimiter is absent.** Moving the second marker silently widened the
+     *     slice to the whole file.
+     *  2. The forbidden token was then found *inside a comment* explaining why it
+     *     must not appear — so `markVisibleAsRead()` and `BitmapFactory
+     *     .decodeByteArray` were both reported as violations of code that
+     *     correctly contained neither.
+     *
+     * Together those made two real regression checks into tests that could only
+     * fail, and both had been failing silently behind a green gate. A slice is
+     * only meaningful if you know where it ends (count braces) and you are
+     * reading CODE (strip comments).
+     */
+    private fun functionBody(source: String, signature: String): String {
+        val start = source.indexOf(signature)
+        require(start >= 0) {
+            "no function starting with '$signature' — this test is now vacuous and " +
+                "must be updated, not deleted"
+        }
+        // An EXPRESSION body (`fun f(): T = expr`) has no brace of its own, and
+        // the first `{` after it belongs to something inside the expression — a
+        // `filterNot { ... }` lambda, say. Brace-matching from there returns the
+        // lambda and nothing else, which silently makes the slice useless.
+        //
+        // `prepend` is exactly that shape, so this is not hypothetical. Detect a
+        // top-level `=` between the signature and the first `{` (paren-depth 0, so
+        // a default-argument `=` does not count) and slice to the next member
+        // declaration instead.
+        val eq = topLevelAssignmentAfter(source, start)
+        if (eq >= 0) {
+            val end = Regex("""(?m)^\s{4}(?:private|internal|public|override|fun|val|var|@)""")
+                .find(source, eq)?.range?.first ?: source.length
+            return stripComments(source.substring(eq, end))
+        }
+
+        val open = source.indexOf('{', start)
+        require(open >= 0) { "'$signature' has no body" }
+        var depth = 0
+        var i = open
+        while (i < source.length) {
+            when (source[i]) {
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) {
+                        return stripComments(source.substring(open + 1, i))
+                    }
+                }
+            }
+            i++
+        }
+        throw AssertionError("unbalanced braces after '$signature'")
+    }
+
+    /** Index of a `=` at paren depth 0 in [source] after [from], or -1. */
+    private fun topLevelAssignmentAfter(source: String, from: Int): Int {
+        var depth = 0
+        var i = from
+        while (i < source.length) {
+            when (source[i]) {
+                '(' -> depth++
+                ')' -> depth--
+                '=' -> if (depth == 0) return i
+                '{', '\n' -> if (source[i] == '{') return -1 // block body, not an expression
+            }
+            i++
+        }
+        return -1
+    }
+
+    /** Comments out of a source slice. `//` first, so `//` inside `/* */` is safe. */
+    private fun stripComments(src: String): String =
+        src.replace(Regex("""(?m)//.*$"""), " ")
+            .replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), " ")
+
+    /**
      * Every `ConsentScope` the chat screen and send path depend on must be
      * derived from a LIVE ConsentStore, not read from a field nobody sets.
      */
@@ -150,9 +237,7 @@ class WiringRegressionTest {
      */
     @Test
     fun photoReceiveDoesNotDecodeAndDiscardABitmap() {
-        val body = photoClient()
-            .substringAfter("private suspend fun loadOne(")
-            .substringBefore("private fun prepend(")
+        val body = functionBody(photoClient(), "private suspend fun loadOne(")
         assertFalse(
             "loadOne must not BitmapFactory.decodeByteArray as a probe. The bitmap is " +
                 "null-checked, the BYTES are published, and the bitmap is abandoned " +
@@ -191,9 +276,7 @@ class WiringRegressionTest {
             "PhotoMessage must carry createdAtMs; the doc id cannot order anything",
             client.contains("val createdAtMs: Long")
         )
-        val prepend = client
-            .substringAfter("private fun prepend(")
-            .substringBefore("private companion object")
+        val prepend = functionBody(client, "private fun prepend(")
         assertFalse(
             "prepend must not sort by id: a Firestore auto-id is random, so a " +
                 "week-old photo sorts above an hour-old one",
@@ -233,9 +316,9 @@ class WiringRegressionTest {
      */
     @Test
     fun pairingChangesDoNotMarkMessagesRead() {
-        val onPair = chatVm()
-            .substringAfter("private suspend fun onPair(")
-            .substringBefore("fun markVisibleAsRead()")
+        val onPair = functionBody(
+            chatVm(), "private suspend fun onPair("
+        )
         assertFalse(
             "onPair must NOT mark read: it runs on pairing change, which happens on " +
                 "every screen including an active call, so a parent would see \"Seen\" " +

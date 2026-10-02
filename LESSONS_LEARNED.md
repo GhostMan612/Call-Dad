@@ -81,6 +81,17 @@ the file as **bytes** rather than `errors="replace"` — the decoding that had b
 hiding it. A file that stops being greppable is a bug in the file, not a quirk
 of git.
 
+## Six tests that could only fail, sitting in a tree the gate called green
+**Mistake.** While fixing a compile error I ran the full five-suite gate and it printed GATES GREEN — on a tree that did not compile. Running `assembleParentDebug` is what found it. Then, underneath, **six unit tests were failing too**, all from the same pass:
+
+- `PhotoSafetyTest` (2) read `app/src/main/AndroidManifest.xml` while the test working directory is `app/`, so both threw `FileNotFoundException`. The gallery-permission kid-safety check had been asserting *nothing at all* while sitting in the suite looking enforced.
+- One of those two was **wrong on its own terms**: it demanded the app hold no CAMERA permission, but the video call legitimately needs one. It only "passed" because the exception fired before the assertion.
+- `RoutesTest` (2) searched for a literal `composable(Routes.CALL)` that no longer exists, because the destination is `route = CALL_ROUTE` where the alias interpolates `"${Routes.CALL}?mode={mode}"`.
+- `WiringRegressionTest` (2) sliced source with `substringAfter(x).substringBefore(y)`. **`substringBefore` returns the entire remaining file when its delimiter is absent**, so moving a marker silently widened the slice — and both tests then found their forbidden token *inside the comment explaining its absence*.
+
+**Root cause.** Every one of these is a check that cannot distinguish "the property holds" from "I am looking at the wrong text". A test that throws is easy to read; a test that greps and misses is not. And three of the six were *introduced by the fix for the first*, so the tree got worse in the act of repairing itself while still reporting green.
+**Check.** Slice source by counting braces, not by guessing at a second marker, and strip comments before asserting a token is absent. Add a `requireNotNull`-style check that a parse found something, so an empty parse fails loudly instead of producing a plausible wrong answer. `prove_gates_bite.py` now injects a **duplicated brace** and asserts red *via the Kotlin compiler* — the earlier control-byte probe proved only that a byte scanner works, and the compiler is the hole this fell through.
+
 ## A gate that had never been seen red, again, and worse
 **Mistake.** The `gate` tool printed GREEN from a tree where
 `compileParentDebugKotlin` was failing: it had no `rules` gate at all, and

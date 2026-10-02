@@ -34,7 +34,20 @@ class PhotoSafetyTest {
         .replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), " ")
         .replace(Regex("""(?m)//.*$"""), " ")
 
-    private fun manifest() = read("app/src/main/AndroidManifest.xml")
+    /**
+ * `src/main/...`, NOT `app/src/main/...`.
+     *
+     * Tests run with the `app/` module directory as the CWD, so `app/` is a SIBLING
+     * of the working directory rather than a child of it. This read `app/src/main/
+     * AndroidManifest.xml`, which does not exist, and every gallery-permission
+     * assertion silently became a FileNotFoundException — i.e. the kid-safety check
+     * reported nothing at all while appearing to be enforced.
+     *
+     * It is the same sibling-vs-child trap `ChatKidSafetyTest` documents for
+     * `$mainDir`, hit here by a `read()` helper that used the raw relative path
+     * while every other read in the class went through `$mainDir`.
+     */
+    private fun manifest() = read("src/main/AndroidManifest.xml")
 
     @Test
     fun theAppHoldsNoGalleryPermission() {
@@ -54,14 +67,45 @@ class PhotoSafetyTest {
         }
     }
 
+    /**
+     * The PHOTO path must not need the camera.
+     *
+     * This test used to assert the app holds no `CAMERA` permission at all, and
+     * that assertion is simply WRONG: the app legitimately holds CAMERA for the
+     * video call (Phase 3, ADR-005). It only ever "passed" because
+     * [manifest] was reading a path that did not exist and every assertion in the
+     * method was throwing `FileNotFoundException` before it ran.
+     *
+     * So the property worth pinning is the narrow one: **capturing a photo is the
+     * grown-up's job on their own phone**, and the child's flow reaches an image
+     * only through the permissionless system picker. A camera in the manifest is
+     * fine; a camera in the PHOTO code path is not.
+     */
     @Test
-    fun theAppTakesNoCameraPermission() {
-        // Capturing a photo is the grown-up's job on their own phone. A child
-        // holding a camera on this device is a capability the product never
-        // promised, and CameraX here exists for the video call, not for a roll.
-        assertFalse(
-            "this app must not hold CAMERA for photos",
-            manifest().contains("android.permission.CAMERA")
+    fun thePhotoPathDoesNotUseTheCamera() {
+        listOf(
+            "src/main/java/com/calldad/photos/PhotoClient.kt",
+            "src/main/java/com/calldad/ui/screens/PhotoScreen.kt",
+            "src/main/java/com/calldad/ui/screens/PhotoViewModel.kt"
+        ).forEach { path ->
+            val text = code(path)
+            assertFalse(
+                "$path must not request or open the camera. Photo sharing uses the " +
+                    "permissionless system picker so the app holds no camera handle " +
+                    "of its own; a child must not be able to point this app at the " +
+                    "room they are sitting in.",
+                text.contains("Manifest.permission.CAMERA") ||
+                    text.contains("ACTION_IMAGE_CAPTURE")
+            )
+        }
+
+        // And the call's camera permission must stay OPTIONAL, or the app cannot
+        // install on a device without one — which is the QA/emulator path the
+        // manifest comment describes.
+        assertTrue(
+            "the camera FEATURE must stay required=\"false\" so an audio-only device " +
+                "can install; the manifest comment says so and nothing enforced it",
+            manifest().contains("""android.hardware.camera" android:required="false""")
         )
     }
 

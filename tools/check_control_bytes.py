@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# ============================================================
+# As Above, So Below. As Within, So Without.
+# The Future Dictates the Past and the Past is Always Present.
+# ============================================================
 """Scan tracked text files for literal control bytes and report them.
 
 Used by tools/verify_project.py as a gate: a stray 0x00 or 0x1F in a .kt file
