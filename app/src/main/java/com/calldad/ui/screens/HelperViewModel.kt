@@ -209,6 +209,14 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
                 ?.trim()
+                // BOUNDED. This string is the only path by which anything the
+                // microphone hears reaches the UI, and it is stored in state,
+                // rendered, and passed to TTS. `maxSpeechInputLength` already caps
+                // it, but a recognizer is a pluggable OEM component and the cap is
+                // a hint, not a contract — an unbounded transcript in a
+                // `StateFlow` held by an activity-scoped ViewModel is a memory
+                // problem at best and a very large `speak()` argument at worst.
+                ?.take(MAX_TRANSCRIPT_CHARS)
             if (text.isNullOrEmpty()) {
                 _state.update { it.copy(
                     status = HelperStatus.ERROR,
@@ -268,6 +276,18 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 }
+
+/**
+ * Hard ceiling on a recognised transcript.
+ *
+ * Generous enough that no real child utterance is ever truncated — a six-year-old
+ * speaking continuously runs out of breath well before this — while keeping the
+ * worst case bounded. `maxSpeechInputLength` already exists, but the recognizer
+ * is an OEM-supplied component and that cap is a request, not a guarantee, and
+ * this string is the only path by which anything the microphone hears reaches the
+ * UI, the retained ViewModel state, and TTS.
+ */
+private const val MAX_TRANSCRIPT_CHARS = 2_000
 
 /** Manual factory: AndroidViewModel has no zero-arg constructor. */
 class HelperViewModelFactory(

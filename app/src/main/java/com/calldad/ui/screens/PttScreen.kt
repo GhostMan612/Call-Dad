@@ -79,6 +79,10 @@ fun PttScreen(
         targetValue = when {
             state.isTransmitting -> com.calldad.ui.theme.PttTransmitRed
             state.isReceiving -> ReceiveBlue
+            // Dimmed rather than a distinct colour: a child should still
+            // recognise the screen they know, but see at a glance that the
+            // button will not respond.
+            !state.isAllowed -> NeutralAmber.copy(alpha = 0.25f)
             else -> NeutralAmber
         },
         animationSpec = tween(150),
@@ -86,6 +90,7 @@ fun PttScreen(
     )
 
     val statusLabel = when {
+        !state.isAllowed -> "TURNED OFF"
         state.isTransmitting -> "TALKING…"
         state.isReceiving -> "LISTEN…"
         state.justSent -> "SENT!"
@@ -93,6 +98,11 @@ fun PttScreen(
     }
 
     val hintLabel = when {
+        // Says the reason on the screen, permanently, rather than leaving a
+        // button that silently refuses. A control that does nothing when pressed
+        // is the one state a child cannot act on, and the grown-up who can fix
+        // it may not be holding the phone.
+        !state.isAllowed -> "The walkie talkie is turned off right now. Ask a grown-up to turn it on."
         state.isTransmitting -> "Let go when you're done"
         state.isReceiving -> "Listen!"
         state.justSent -> "Dad will hear it right away"
@@ -142,6 +152,7 @@ fun PttScreen(
             PttCenterButton(
                 isTransmitting = state.isTransmitting,
                 isReceiving = state.isReceiving,
+                isAllowed = state.isAllowed,
                 onPress = viewModel::onPress,
                 onRelease = viewModel::onRelease
             )
@@ -189,6 +200,7 @@ fun PttScreen(
 private fun PttCenterButton(
     isTransmitting: Boolean,
     isReceiving: Boolean,
+    isAllowed: Boolean,
     onPress: () -> Unit,
     onRelease: () -> Unit,
     modifier: Modifier = Modifier
@@ -220,7 +232,13 @@ private fun PttCenterButton(
     }
     val contentColor = when {
         isReceiving -> ReceiveBlue
-        else -> if (isTransmitting) com.calldad.ui.theme.PttTransmitRed else NeutralAmber
+        isTransmitting -> com.calldad.ui.theme.PttTransmitRed
+        // Visibly inert when the grant is absent. The button is NOT disabled —
+        // `onPress` stays wired so the refusal message and the haptic-free
+        // tap are handled in one place, and so a child pressing it learns why
+        // rather than finding a control that mysteriously does nothing.
+        !isAllowed -> NeutralAmber.copy(alpha = 0.35f)
+        else -> NeutralAmber
     }
 
     Box(

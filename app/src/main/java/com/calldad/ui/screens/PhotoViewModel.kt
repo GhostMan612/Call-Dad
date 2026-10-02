@@ -69,7 +69,15 @@ class PhotoViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // Consent is read reactively so a parent revoking PHOTO closes the
             // screen on its own, mid-view, without the child needing to restart.
-            consent.scopes.collect { _state.value = _state.value.copy(scopes = it) }
+            consent.scopes.collect { held ->
+                _state.value = _state.value.copy(scopes = held)
+                // The RECEIVE half. Without this the client kept downloading
+                // photo chunks on a revoked child's phone while the screen showed
+                // nothing — invisible to the user, real on the data plan, and
+                // exactly the traffic a parent expects to stop when they switch
+                // sharing off. Hiding the grid was never the whole gate.
+                client.setInboundAllowed(ConsentScope.PHOTO in held)
+            }
         }
     }
 

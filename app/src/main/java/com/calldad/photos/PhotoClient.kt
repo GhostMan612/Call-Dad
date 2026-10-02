@@ -116,6 +116,21 @@ class PhotoClient(
     private var registration: ListenerRegistration? = null
     private var seen = mutableSetOf<String>()
 
+    /**
+     * The pair, kept so [setInboundAllowed] can re-subscribe. `onPair` is driven
+     * by a Flow and the only other holder of this value is a collector, so
+     * without it a grant change arriving before pairing could not be applied
+     * later.
+     */
+    private var pair: FamilyPair? = null
+
+    /**
+     * Whether inbound photos may be fetched and shown (ADR-017).
+     *
+     * Defaults to FALSE — absence denies. See [setInboundAllowed].
+     */
+    private var inboundAllowed = false
+
     private val workScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun start(context: Context, scope: CoroutineScope) {
@@ -155,13 +170,51 @@ class PhotoClient(
 
     fun clearProblem() { _problem.value = null }
 
-    private fun onPair(pair: FamilyPair?) {
+    /**
+     * The receive-side consent gate (ADR-017).
+     *
+     * [send] already checked the PHOTO grant; this covers the half that was
+     * missing. Defaults to FALSE: absence denies, and a client that has not yet
+     * observed a decision must not start pulling a photo library.
+     *
+     * Re-subscribing on every toggle is intentional — a listener attached while
+     * the gate was shut would otherwise sit idle and miss everything that
+     * arrived during the shut period, so the thread would silently have a hole
+     * in it.
+     */
+    fun setInboundAllowed(allowed: Boolean) {
+        if (inboundAllowed == allowed) return
+        inboundAllowed = allowed
+        if (!allowed) {
+            // Drop what is already held. Leaving a revoked child's phone holding
+            // 24 decoded pictures in memory is the tail of the same problem.
+            _photos.value = emptyList()
+            _problem.value = null
+        }
+        pair?.let { onPair(it) }
+    }
+
+    private fun onPair(next: FamilyPair?) {
         registration?.remove()
         registration = null
         seen = mutableSetOf()
         _photos.value = emptyList()
-        if (pair == null) return
-        registration = firestore.collection("calls").document(pair.roomId).collection("photos")
+        pair = next
+        if (next == null) return
+        // [inboundAllowed] is checked here as well as in [send], because this is
+        // the RECEIVE path and it is the one that was unguarded. `PhotoScreen`
+        // hid the grid without a PHOTO grant, but the client kept downloading up
+        // to 24 photos' worth of 800KB chunks on a revoked child's phone —
+        // invisible to the user, real on the data plan, and precisely the traffic
+        // a parent turning sharing off expects to stop.
+        //
+        // Absence DENIES, and `inboundAllowed` defaults to false so a
+        // not-yet-observed grant is a closed door rather than an open one.
+        if (!inboundAllowed) {
+            WebRtcLog.transition("Photo receive gated off")
+            return
+        }
+        registration = firestore.collection("calls").document(next.roomId).collection("photos")
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(MAX_VISIBLE.toLong())
             .addSnapshotListener { snap, err ->
@@ -171,16 +224,18 @@ class PhotoClient(
                     return@addSnapshotListener
                 }
                 if (snap.metadata.isFromCache) return@addSnapshotListener
+                // Revocation can land while the listener is already attached.
+                if (!inboundAllowed) return@addSnapshotListener
                 val fresh = snap.documentChanges
                     .filter { it.type == DocumentChange.Type.ADDED }
                     .map { it.document }
-                    .filter { it.getString("from") == pair.peerUid }
+                    .filter { it.getString("from") == next.peerUid }
                     .filter { seen.add(it.id) }
                 if (fresh.isNotEmpty()) {
                     // Sequentially, not with forEach { async { } }: two 800KB
                     // transfers racing on a phone's uplink is what makes a send
                     // feel broken, and the emulator suite is per-write anyway.
-                    workScope.launch { fresh.forEach { loadOne(pair, it) } }
+                    workScope.launch { fresh.forEach { loadOne(next, it) } }
                 }
             }
     }
@@ -198,6 +253,14 @@ class PhotoClient(
         scopes: Set<ConsentScope>
     ): Result<String> {
         if (ConsentScope.PHOTO !in scopes) {
+            return Result.failure(IllegalStateException("no photo consent"))
+        }
+        // Re-checked against the LIVE receive-side gate as well. `scopes` is a
+        // snapshot the caller read at some earlier moment, so a send landing in
+        // the same frame a parent revokes PHOTO would otherwise upload — and
+        // unlike chat there is no optimistic row to make that visible, so the
+        // failure would be entirely silent.
+        if (!inboundAllowed) {
             return Result.failure(IllegalStateException("no photo consent"))
         }
         return runCatching {

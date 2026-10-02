@@ -21,7 +21,7 @@ private val Context.callLogStore: DataStore<Preferences> by
 /**
  * The call log, on-device only.
  *
- * Serialised as a ``-joined record list rather than one preference key per
+ * Serialised as a `\x1F`-joined record list rather than one preference key per
  * column, because DataStore preferences are a flat map and a per-column layout
  * would need a migration every time a column is added. The wire format is
  * deliberately dull and versioned by [SCHEMA]: fields are positional, so an

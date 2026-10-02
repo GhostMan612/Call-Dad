@@ -73,6 +73,15 @@ enum class PttFailureKind {
     AUDIO_FOCUS_LOST,
     /** Sovereign Mantle module not on the classpath. */
     ENGINE_UNAVAILABLE,
+    /**
+     * The parental PTT grant is absent (ADR-017).
+     *
+     * Distinct from [PERMISSION_DENIED], which is a MICROPHONE permission and is
+     * something the child can fix; this one is a grown-up's decision and is not.
+     * Collapsing the two would tell a child to ask for something they cannot
+     * grant, or — worse — offer a "Try Again" that can never succeed.
+     */
+    NOT_ALLOWED,
     /** Underlying engine reported a failure. */
     TRANSPORT_ERROR,
     UNKNOWN

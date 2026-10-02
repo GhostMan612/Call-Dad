@@ -15,6 +15,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.calldad.consent.ConsentDecision
+import com.calldad.consent.ConsentStore
 import com.calldad.ptt.PttAudioManager
 import com.calldad.ptt.PttAudioState
 import com.calldad.ptt.PttEngine
@@ -32,7 +34,20 @@ data class PttUiState(
     val isSending: Boolean = false,
     val isReceiving: Boolean = false,
     val justSent: Boolean = false,
-    val lastError: String? = null
+    val lastError: String? = null,
+    /**
+     * False when the PTT grant is absent, so the screen can SAY so.
+     *
+     * A separate field from [lastError] on purpose: a consent denial is not an
+     * error, it is the correct result of a permission decision. Routing it
+     * through `lastError` meant an unrelated audio failure clearing the field
+     * would silently wipe "ask a grown-up" and leave a button that does nothing
+     * when pressed — which is the one state a child cannot act on.
+     *
+     * Defaults to FALSE so a cold start is dead until a grant arrives. Absence
+     * denies; an allowlist app that fails open is not an allowlist app.
+     */
+    val isAllowed: Boolean = false
 )
 
 class PttViewModel(application: Application) : AndroidViewModel(application) {
@@ -54,9 +69,55 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(PttUiState())
     val state: StateFlow<PttUiState> = _state.asStateFlow()
 
-    init {
+    /**
+ * The PTT grant, observed live (ADR-017).
+ *
+ * The walkie talkie had no consent check at all — it is the second-oldest
+ * feature and predates the consent model, so it shipped "ALREADY SHIPPED
+ * without a cert" and nobody went back. That left the kill switch covering
+ * messages and photos while the child could still talk to their grown-up
+ * indefinitely. `firestore.rules` cannot close this: the PTT room is written by
+ * pair membership, so an unenforced client is the only enforcement there is.
+ */
+private val consent = ConsentStore()
+
+init {
+        consent.start(application, viewModelScope)
         watchEngine()
+        viewModelScope.launch {
+            consent.decision.collect { d -> onConsentChanged(d) }
+        }
     }
+
+    /**
+     * A revoked PTT grant stops the button AND tears down anything in flight.
+     */
+    private fun onConsentChanged(decision: ConsentDecision?) {
+        val allowed = decision?.isGranted == true
+        pttAllowed = allowed
+        _state.value = _state.value.copy(isAllowed = allowed)
+        // The INBOUND half. Gating `onPress` stops a child sending, but without
+        // this a revoked child's phone still played every clip in the room,
+        // unprompted, on whatever screen it was on. A kill switch that leaves
+        // the microphone-to-speaker path open is not a kill switch.
+        voiceClips.setInboundAllowed(allowed)
+        if (allowed) return
+        // Tear down anything in flight. A parent who hits the kill switch
+        // mid-clip must not be left with the child's recording still uploading
+        // after the button has gone dead.
+        if (_state.value.isTransmitting || _state.value.isSending) {
+            onRelease()
+        }
+    }
+
+    /**
+     * Mirrors [PttUiState.isAllowed] for the synchronous check in [onPress].
+     *
+     * The state field alone cannot gate the press: a press can land in the same
+     * frame the revocation arrives, and the handler must refuse on the value it
+     * can read without waiting for recomposition.
+     */
+    private var pttAllowed = false
 
     /** (Re)subscribes inbound audio from whichever engine is active. */
     private fun watchEngine() {
@@ -91,6 +152,12 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onPress() {
         if (_state.value.isTransmitting || _state.value.isSending) return
+        if (!pttAllowed) {
+            _state.value = _state.value.copy(
+                lastError = "The walkie talkie is turned off right now. Ask a grown-up to turn it on."
+            )
+            return
+        }
 
         val focusFailure = audioManager.requestFocus()
         if (focusFailure != null) {

@@ -185,7 +185,16 @@ def main() -> int:
             continue
         if p.suffix not in TEXT_SUFFIXES and p.name not in {".gitignore", ".gitattributes"}:
             continue
-        text = p.read_text(encoding="utf-8", errors="replace")
+        # Read as BYTES first. A literal control byte (0x00, 0x1F) in a source
+        # file makes git treat it as binary, which silently breaks grep, diff and
+        # review on that exact file -- and it was found inside a comment in
+        # ChatText.kt explaining why control characters matter. Reading with
+        # errors="replace" would have hidden it rather than reporting it, so the
+        # check is byte-level and explicitly does NOT excuse itself.
+        raw = p.read_bytes()
+        if b"\x00" in raw:
+            errors.append(f"NUL byte in {rel} (git will treat it as binary)")
+        text = raw.decode("utf-8", errors="replace")
         for s in BANNED_STRINGS:
             if s in text:
                 errors.append(f"banned string {s!r} in {rel}")
@@ -195,6 +204,21 @@ def main() -> int:
                 errors.append(f"banned secret/device-identity pattern in {rel}: {m.group(0)!r}")
         if p.suffix in {".kt", ".py"} and GENESIS not in text[:400]:
             errors.append(f"missing Genesis header: {rel}")
+        # Same class as the NUL byte, one step quieter: a C0 control or DEL that
+        # git does not treat as binary but that still breaks grep -P, diff
+        # highlighting, and any reviewer who opens the file. Tab, LF and CR are
+        # legitimate in text.
+        bad = [
+            (i, b) for i, b in enumerate(raw)
+            if (b < 0x20 and b not in (0x09, 0x0A, 0x0D)) or b == 0x7F
+        ]
+        if bad:
+            first = bad[0]
+            line_no = raw[:first[0]].count(b"\n") + 1
+            errors.append(
+                f"literal control byte 0x{first[1]:02X} in {rel}:{line_no} "
+                f"({len(bad)} total) -- write the ESCAPE TEXT, not the raw byte"
+            )
     for f in (ROOT / "fixtures").rglob("*") if (ROOT / "fixtures").is_dir() else ():
         if f.is_file() and f.suffix in TEXT_SUFFIXES:
             if SYNTHETIC_SENTINEL not in f.read_text(encoding="utf-8", errors="replace"):

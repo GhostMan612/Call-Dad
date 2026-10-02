@@ -60,6 +60,7 @@ import com.calldad.ui.theme.HangUpRed
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 data class ConsentUiState(
@@ -85,14 +86,21 @@ class ConsentViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         viewModelScope.launch {
-            store.scopes.collect { held ->
-                // `highestSeq` is read from the raw certs so a renewal can be
-                // issued with a strictly higher sequence. The rules enforce the
-                // increase, but the client has to know the current value or every
-                // re-grant after a revoke is a guaranteed PERMISSION_DENIED.
-                val seq = store.observedCerts().maxOfOrNull { it.grantSeq } ?: 0
-                _state.value = _state.value.copy(held = held, highestSeq = seq)
-            }
+            // Merge the derived scopes with the cert tick. They are two different
+            // signals and BOTH are required: `scopes` carries what is permitted,
+            // while the tick fires when a cert changes without changing the
+            // derived set — which is every renewal on the grantor side, since the
+            // grantor's scope set is always "everything" from the moment it
+            // becomes the grantor. Watching only `scopes` left `highestSeq`
+            // frozen at its first value, so the second "Allow everything"
+            // rewrote seq 1 over seq 1 and the rules denied it.
+            combine(store.scopes, store.certTick) { held, _ -> held }
+                .collect { held ->
+                    _state.value = _state.value.copy(
+                        held = held,
+                        highestSeq = store.highestObservedSeq()
+                    )
+                }
         }
     }
 

@@ -72,6 +72,29 @@ class ConsentStore(
     private var revocations: List<ConsentCert> = emptyList()
 
     /**
+     * Grants THIS device AUTHORED — i.e. the ones naming the PEER as grantee.
+     *
+     * This is a separate list from [grants] and it is load-bearing, not a
+     * convenience. [grants] is the query `granteeUid == ownUid`, which on the
+     * GROWN-UP'S OWN PHONE returns nothing at all: the rules forbid a member
+     * writing a grant naming themselves, so no document ever names the parent
+     * as grantee. An earlier version derived `highestSeq` from [grants] alone,
+     * which on the parent is permanently empty — and therefore:
+     *
+     *  - `revoke()` read `through = 0` and REFUSED every time, so the kill
+     *    switch button could never do anything on the one phone that owns it;
+     *  - `grant()` computed `next = 0 + 1 = 1` on every tap, so the second
+     *    "Allow everything" tried to write seq 1 over seq 1 and was rejected by
+     *    the rules' monotonicity check — a PERMISSION_DENIED with no way to
+     *    recover except re-pairing.
+     *
+     * Both are silent: the UI reports "Can't turn it off yet — still checking"
+     * forever, which reads as a network problem rather than a wiring error. The
+     * parent side of an asymmetric model must read the OTHER side of it.
+     */
+    private var authoredGrants: List<ConsentCert> = emptyList()
+
+    /**
      * True when THIS device has issued a consent cert in this room, i.e. it is
      * the GRANTOR and therefore the grown-up.
      *
@@ -123,6 +146,7 @@ class ConsentStore(
             peerUid = null
             grants = emptyList()
             revocations = emptyList()
+            authoredGrants = emptyList()
             isGrantor = false
             _scopes.value = emptySet()
             _decision.value = ConsentDecision.Denied(ConsentDenial.NO_CERT)
@@ -186,12 +210,14 @@ class ConsentStore(
                     // kill switch.
                     grants = emptyList()
                     recompute()
+                    notifyCertsChanged()
                     WebRtcLog.transition("Consent grant read failed; denying")
                     return@addSnapshotListener
                 }
                 if (snap.metadata.isFromCache) return@addSnapshotListener
                 grants = snap.documents.mapNotNull { it.toGrant() }
                 recompute()
+                notifyCertsChanged()
             }
 
         // "Have I ever issued a cert here?" — the parent/child discriminator.
@@ -199,11 +225,24 @@ class ConsentStore(
         // is the only way the grown-up's own phone learns it is the grown-up.
         authoredReg = base.whereEqualTo("grantorUid", pair.ownUid)
             .addSnapshotListener { snap, err ->
-                if (err != null || snap == null) return@addSnapshotListener
+                if (err != null || snap == null) {
+                    // Fail closed on the role itself. Keeping the last known
+                    // `isGrantor = true` after a read error would leave the
+                    // grown-up with every scope on a phone that may no longer
+                    // be the grantor in this room.
+                    authoredGrants = emptyList()
+                    val wasGrantor = isGrantor
+                    isGrantor = false
+                    if (wasGrantor) recompute()
+                    notifyCertsChanged()
+                    return@addSnapshotListener
+                }
                 if (snap.metadata.isFromCache) return@addSnapshotListener
+                authoredGrants = snap.documents.mapNotNull { it.toGrant() }
                 val wasGrantor = isGrantor
                 isGrantor = snap.documents.isNotEmpty()
                 if (wasGrantor != isGrantor) recompute()
+                else if (isGrantor) notifyCertsChanged()
             }
 
         revokeReg = firestore.collection("calls").document(pair.roomId)
@@ -213,12 +252,14 @@ class ConsentStore(
                 if (err != null || snap == null) {
                     revocations = emptyList()
                     recompute()
+                    notifyCertsChanged()
                     WebRtcLog.transition("Consent revocation read failed; denying")
                     return@addSnapshotListener
                 }
                 if (snap.metadata.isFromCache) return@addSnapshotListener
                 revocations = snap.documents.mapNotNull { it.toRevocation() }
                 recompute()
+                notifyCertsChanged()
             }
     }
 
@@ -307,8 +348,49 @@ class ConsentStore(
         Unit
     }
 
-    /** The raw certs, for the parent-facing "what have I allowed" screen. */
-    fun observedCerts(): List<ConsentCert> = grants
+    /**
+     * The raw certs, for the parent-facing "what have I allowed" screen.
+     *
+     * Returns BOTH roles' certs — the ones naming this device as grantee AND
+     * the ones this device authored. The parent screen reads the highest
+     * `grantSeq` from here to decide what sequence a renewal or a revocation
+     * must use, and on a grown-up's phone the authored list is the only one
+     * that is ever non-empty. See [authoredGrants].
+     */
+    fun observedCerts(): List<ConsentCert> = grants + authoredGrants
+
+    /**
+     * The highest grant sequence this device can see, across BOTH roles.
+     *
+     * The rules require a replacement grant to carry a strictly higher
+     * `grantSeq`, and a revocation must name a real one. So this has to be the
+     * max over everything visible, and "everything visible" differs by role —
+     * which is precisely the trap [observedCerts] documents.
+     */
+    fun highestObservedSeq(): Int =
+        (grants + authoredGrants).maxOfOrNull { it.grantSeq } ?: 0
+
+    /**
+     * A monotonic tick that fires whenever any observed cert changes, INCLUDING
+     * changes that leave [scopes] itself identical.
+     *
+     * This exists because [scopes] is a [kotlinx.coroutines.flow.StateFlow] and
+     * therefore conflates equal values. On the grantor side the derived scope set
+     * is [ConsentScope.entries] from the moment it becomes the grantor and never
+     * varies again — so a second "Allow everything", which raises `grantSeq` and
+     * is exactly what the sequence bookkeeping depends on, would emit NOTHING and
+     * leave the view model's `highestSeq` stale. The UI would then write seq N
+     * again and be denied by the rules' monotonicity check, forever.
+     *
+     * Re-assigning a StateFlow's own value does not work for this (the conflation
+     * is the point), hence a separate counter.
+     */
+    private val _certTick = MutableStateFlow(0L)
+    val certTick: Flow<Long> = _certTick.asStateFlow()
+
+    private fun notifyCertsChanged() {
+        _certTick.value = _certTick.value + 1
+    }
 
     /** The revocations in force, for the same screen. */
     fun observedRevocations(): List<ConsentCert> = revocations

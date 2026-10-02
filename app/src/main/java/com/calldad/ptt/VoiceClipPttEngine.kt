@@ -82,6 +82,22 @@ class VoiceClipPttEngine(
 
     private val playbackBlocked = MutableStateFlow(false)
 
+    /**
+     * The PTT consent gate, both directions (ADR-017).
+     *
+     * Defaults to FALSE. Absence denies, and every other gate in this app fails
+     * closed — an engine that defaulted to PERMISSIVE would make "the caller
+     * forgot to wire the grant" look identical to "the walkie talkie
+     * mysteriously stopped working", and the second of those is a support call
+     * while the first is a safety hole. A wrong-looking mute is cheap; a
+     * microphone that stays open after the switch was flipped is not.
+     *
+     * @Volatile because the player reads it from a different coroutine than the
+     * one the view model writes it from.
+     */
+    @Volatile
+    private var inboundAllowed = false
+
     private var recorder: MediaRecorder? = null
     private var recordFile: File? = null
     private var recordStartedAt = 0L
@@ -107,7 +123,21 @@ class VoiceClipPttEngine(
         playerJob = scope.launch { runPlayer() }
     }
 
-    /** A live video call owns the audio: clips wait until it ends. */
+/**
+     * The PTT consent gate, both directions (ADR-017).
+     *
+     * Read by the listener, the player, AND the send path, so a revocation takes
+     * effect on all three at once rather than only at the button. The send-side
+     * check is deliberately NOT redundant with `PttViewModel.onPress`: a press is
+     * a gesture rather than an atomic action, so the finger can go down while the
+     * grant is live and come up after it is gone, with a finished recording
+     * sitting on disk ready to upload.
+     */
+    fun setInboundAllowed(allowed: Boolean) {
+        inboundAllowed = allowed
+    }
+
+/** A live video call owns the audio: clips wait until it ends. */
     fun setPlaybackBlocked(blocked: Boolean) {
         playbackBlocked.value = blocked
         if (blocked) stopPlayer()
@@ -117,6 +147,18 @@ class VoiceClipPttEngine(
 
     override suspend fun startTransmitting(): Result<Unit> {
         if (recorder != null) return Result.success(Unit)
+        // Consent before the microphone, not after. Opening the mic first and
+        // then refusing leaves a recorder running that nothing will ever stop
+        // cleanly, and on a revoked phone that is an open microphone the child
+        // believes is closed.
+        if (!inboundAllowed) {
+            return Result.failure(
+                PttFailure(
+                    PttFailureKind.NOT_ALLOWED,
+                    "The walkie talkie is turned off right now. Ask a grown-up to turn it on."
+                )
+            )
+        }
         if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -201,6 +243,19 @@ class VoiceClipPttEngine(
             file.delete()
             return Result.failure(
                 PttFailure(PttFailureKind.TRANSPORT_ERROR, "Pair the phones first.")
+            )
+        }
+        // The send-side gate, checked here as well as in `PttViewModel.onPress`.
+        //
+        // A press is a gesture, not an atomic action: the finger goes down while
+        // the grant is live and comes up after it has been revoked, and by then
+        // the recording is finished and fully formed. Gating only the press meant
+        // exactly that case uploaded anyway — the one moment a parent most
+        // expects the traffic to stop.
+        if (!inboundAllowed) {
+            file.delete()
+            return Result.failure(
+                PttFailure(PttFailureKind.NOT_ALLOWED, "The walkie talkie is turned off right now.")
             )
         }
         return runCatching {
@@ -290,6 +345,13 @@ class VoiceClipPttEngine(
         registration = null
         seenClips.clear()
         if (p == null) return
+        // Revocation can land while the listener is already attached, so the gate
+        // is honoured here as well as in [setInboundAllowed]. Without this, a live
+        // listener kept queueing clips straight into the player.
+        if (!inboundAllowed) {
+            WebRtcLog.transition("PTT receive gated off")
+            return
+        }
         registration = firestore.collection("calls").document(p.roomId).collection("ptt")
             .orderBy("createdAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snap, err ->
@@ -335,6 +397,11 @@ class VoiceClipPttEngine(
 
     private suspend fun runPlayer() {
         for (clip in playQueue) {
+            // Wait out the gate rather than dropping the clip. Dropping it would
+            // destroy a message the sender was told had been SENT; waiting means
+            // a parent who revokes and then re-allows does not lose the words in
+            // between. Same shape as the call-active gate immediately below.
+            while (!inboundAllowed) delay(250)
             playbackBlocked.first { !it }
             while (recorder != null) delay(200)
             val roomId = pair?.roomId

@@ -12,6 +12,8 @@ import androidx.lifecycle.viewModelScope
 import com.calldad.BuildConfig
 import com.calldad.R
 import com.calldad.audio.CallAudioManager
+import com.calldad.consent.ConsentDecision
+import com.calldad.consent.ConsentStore
 import com.calldad.data.session.FamilyPair
 import com.calldad.data.session.FamilySession
 import com.calldad.history.CallLogStore
@@ -167,6 +169,24 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
     private val callLog = CallLogStore(getApplication())
 
     /**
+     * The CALL grant, observed live (ADR-017).
+     *
+     * Calling is the feature the consent model exists to protect, and it was
+     * the one feature reading nothing at all: neither [startCall] nor
+     * [answerCall] consulted a scope, so "Turn everything off" closed Messages
+     * and Pictures and left the one thing a 6-year-old uses most wide open. The
+     * scope list is named [call, text, photo] precisely so CALL is a first-class
+     * grant, and `firestore.rules` cannot help here — the call room is written by
+     * pair membership alone, so an unenforced client is the only enforcement
+     * there is.
+     */
+    private val consent = ConsentStore()
+
+    /** Null until the first decision arrives; treated as DENIED meanwhile. */
+    private val _callConsent = MutableStateFlow<ConsentDecision?>(null)
+    private val callConsent: StateFlow<ConsentDecision?> = _callConsent.asStateFlow()
+
+    /**
      * Whether THIS attempt ever reached CONNECTED. Reset when a record is
      * written, and set by the same code path that starts the elapsed timer, so
      * the two can never disagree about whether a call happened.
@@ -199,11 +219,55 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
+        consent.start(app, viewModelScope)
         viewModelScope.launch {
             FamilySession.pair(app).collectLatest { p ->
                 onPairChanged(p)
             }
         }
+        viewModelScope.launch {
+            consent.decision.collect { d -> onConsentChanged(d) }
+        }
+    }
+
+    // -------- consent --------
+
+    /**
+     * The CALL grant, live.
+     *
+     * A parent can turn calling off mid-ring, so this is observed rather than
+     * checked once. Ending a call the grown-up has just revoked is the entire
+     * point of a kill switch: the child must not keep talking because the
+     * permission was live when the button was pressed.
+     *
+     * Absence DENIES. Before the first decision arrives there is no evidence the
+     * call is allowed, and an allowlist app that fails open on a cold start is
+     * not an allowlist app.
+     */
+    private fun onConsentChanged(decision: ConsentDecision?) {
+        _callConsent.value = decision
+        if (decision?.isGranted == true) return
+        val live = _state.value
+        val inCall = live is CallState.Ringing || live is CallState.Connected
+        if (!inCall) return
+        WebRtcLog.transition("CALL consent withdrawn; ending the call")
+        // `endCall`, not a bespoke teardown: it is the one path proven to stop
+        // the ringtone, dismiss the foreground service, publish ENDED so the
+        // peer's phone does not go on ringing, and record the outcome. Calling
+        // anything else here would leave the other phone ringing at nobody.
+        endCall()
+    }
+
+    private fun callAllowed(): Boolean = _callConsent.value?.isGranted == true
+
+    /**
+     * Uses [CallErrorKind.PERMISSION_DENIED], which is deliberately NOT in
+     * [CallErrorKind.isRecoverable] — so a child is not offered "Try Again" for
+     * a thing that will not change until a grown-up acts. Re-prompting a kid to
+     * retry a denied permission is how you train them to keep tapping.
+     */
+    private fun refuseCall(reason: String) {
+        _state.value = CallState.Error(CallErrorKind.PERMISSION_DENIED, reason)
     }
 
     // -------- public API --------
@@ -218,6 +282,12 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 CallErrorKind.NOT_PAIRED,
                 "Not paired yet. Ask a grown-up to pair the phones."
             )
+            return
+        }
+        // AFTER the pairing check, so an unpaired phone gets the pairing message
+        // rather than a consent one, and BEFORE any offer is published.
+        if (!callAllowed()) {
+            refuseCall("Calling is turned off right now. Ask a grown-up to turn it on.")
             return
         }
 
@@ -264,13 +334,41 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Try Again from NoAnswer or a recoverable Error: a brand-new call. */
-    fun onReRing() = startCall()
+    /**
+     * Try Again from NoAnswer or a recoverable Error: a brand-new call.
+     *
+     * Re-checks the grant rather than delegating blind. `startCall` already
+     * refuses, so this is belt-and-braces for the case where the retry button is
+     * reachable while consent is absent — and it keeps the reason visible rather
+     * than letting a child hammer "Try Again" against a permission that will not
+     * change until a grown-up acts. [CallErrorKind.PERMISSION_DENIED] is not
+     * recoverable, so this screen does not normally offer it; the guard is here
+     * because that coupling lives in the UI, not here, and can drift.
+     */
+    fun onReRing() {
+        if (!callAllowed()) {
+            refuseCall("Calling is turned off right now. Ask a grown-up to turn it on.")
+            return
+        }
+        startCall()
+    }
 
     fun answerCall() {
         val s = _state.value as? CallState.Ringing ?: return
         if (!s.isIncoming || answering) return
         val p = pair ?: return
+        // Answering is a CALL action too. Gating only the outgoing path would
+        // leave a parent who revoked calling unable to stop a call already
+        // ringing on the child's phone.
+        if (!callAllowed()) {
+            // Decline through the normal path so the peer's phone stops ringing
+            // and the call is logged, then explain. Publishing ENDED is the
+            // important half: otherwise a revoked child's phone declines
+            // silently and the parent's phone rings out for nothing.
+            declineCall()
+            refuseCall("Calling is turned off right now. Ask a grown-up to turn it on.")
+            return
+        }
         answering = true
         CallAudioManager.stop()
         CallForegroundService.dismiss(app)
@@ -483,6 +581,21 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
         if (doc.status == "RINGING" && !mineAsCaller) {
             if (publishingOffer) return
+            // An incoming ring is a CALL action, and a revoked CALL grant must
+            // refuse it HERE — at the point the phone would start ringing — not
+            // only when the child taps Answer. Otherwise a parent who has turned
+            // calling off still gets their own phone ringing at full volume, and
+            // the fix in `answerCall` never runs because nobody pressed anything.
+            //
+            // The room document is marked ENDED rather than ignored: the peer is
+            // mid-publish, and leaving it RINGING means their phone rings out for
+            // a call this side silently refused.
+            if (!callAllowed()) {
+                WebRtcLog.transition("Incoming ring refused: no CALL grant")
+                currentSeq = doc.seq
+                viewModelScope.launch { signaling.finishCall(p.roomId, doc.seq, "ENDED") }
+                return
+            }
             if (!fresh || doc.offer == null) {
                 currentSeq = doc.seq
                 return

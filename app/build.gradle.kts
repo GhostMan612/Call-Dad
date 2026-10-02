@@ -52,10 +52,22 @@ android {
         // works at all, which is the worst possible confusion for a parent
         // mid-pairing.
         //
-        // Also 9's rules are not deployed, so 10 additionally carries stanzas
-        // (chat, photos, consents, revocations) that the live rules lack.
-        versionCode = 10
-        versionName = "0.3.0"
+        // versionCode 11: the CONSENT ENFORCEMENT pass. 10 shipped a parental
+        // kill switch that enforced nothing on calling or the walkie talkie —
+        // the two oldest features, which predate the consent model and were never
+        // revisited — and a parent-side grant sequence that was structurally
+        // unreadable, so the switch's button could not do anything on the phone
+        // that owns it. Both silent; both green. 11 also gates every FEATURE's
+        // Firestore LISTENER, not just its screen, so revocation stops the device
+        // reading rather than only stopping the UI drawing.
+        //
+        // MUST NOT reuse 10, and the reason is behavioural, not cosmetic. 10
+        // presents "Turn everything off" and then keeps calling, keeps playing
+        // inbound voice clips out loud, and keeps downloading photos. A parent on
+        // 10 believes the app is switched off when it is not — which is the worst
+        // failure this app has, because it is a safety control that lies.
+        versionCode = 11
+        versionName = "0.3.1"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

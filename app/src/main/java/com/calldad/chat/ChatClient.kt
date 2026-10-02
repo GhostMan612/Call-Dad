@@ -64,6 +64,12 @@ class ChatClient(
     /** Ids this receiver has already stamped delivered. Deliver-once per id. */
     private val stampedDelivered = mutableSetOf<String>()
 
+    /**
+     * Whether inbound messages may be read (ADR-017). Defaults to FALSE —
+     * absence denies. See [setInboundAllowed].
+     */
+    private var inboundAllowed = false
+
     private val localSeq = AtomicLong(0)
 
     /** A kid-safe problem string. Never a uid, timestamp, or Firestore message. */
@@ -86,6 +92,32 @@ class ChatClient(
     fun clearProblem() { _problem.value = null }
 
     /**
+     * The receive-side consent gate (ADR-017).
+     *
+     * [send] checked the TEXT grant on every send, and `ChatScreen` hid the
+     * thread without one — but the listener itself was never gated, so a
+     * revoked child's phone kept pulling up to 200 messages out of the room.
+     * Messages are far smaller than photos, so the cost is trivial; the
+     * PRINCIPLE is not. "Turn everything off" has to mean the device stops
+     * reading, not merely that the screen stops drawing. Anything else is a
+     * switch that only changes what is visible, which is not what a parent
+     * pressing it is being told.
+     *
+     * Defaults to FALSE, and re-subscribes on toggle so nothing that arrived
+     * while the gate was shut is left as a permanent hole in the thread.
+     */
+    fun setInboundAllowed(allowed: Boolean) {
+        if (inboundAllowed == allowed) return
+        inboundAllowed = allowed
+        if (!allowed) {
+            _messages.value = emptyList()
+            stampedDelivered.clear()
+            _problem.value = null
+        }
+        pair?.let { listen() }
+    }
+
+    /**
      * Sends one already-validated line. [ChatText.validate] must have run first:
      * the scope check lives there so the consent decision and the send are one
      * step, and a caller cannot skip it by calling this directly with a string
@@ -97,6 +129,17 @@ class ChatClient(
     suspend fun send(body: String, scopes: Set<ConsentScope>): Result<ChatMessage> {
         val p = pair ?: return Result.failure(IllegalStateException("not paired"))
         if (ConsentScope.TEXT !in scopes) {
+            return Result.failure(IllegalStateException("no text consent"))
+        }
+        // Re-checked here, not only in the ViewModel and screen.
+        //
+        // The gate is a snapshot the UI read at some earlier moment, so a press
+        // landing in the same frame a parent revokes TEXT would otherwise write
+        // anyway — and because [send] adds an OPTIMISTIC row before the write
+        // resolves, the child would have watched their message appear and then
+        // vanish, with no explanation. The optimistic row is exactly what makes
+        // the stale-gate window visible instead of merely wrong.
+        if (!inboundAllowed) {
             return Result.failure(IllegalStateException("no text consent"))
         }
         val now = System.currentTimeMillis()
@@ -167,6 +210,13 @@ class ChatClient(
         registration?.remove()
         registration = null
         val p = pair ?: return
+        // Revocation can land while the listener is already attached, so this is
+        // checked here as well as in [setInboundAllowed] — otherwise a live
+        // listener keeps delivering into a thread the screen has stopped showing.
+        if (!inboundAllowed) {
+            WebRtcLog.transition("Chat receive gated off")
+            return
+        }
         // DESCENDING + limit, so the window is the NEWEST 200. This was ASCENDING,
         // which made the window the OLDEST 200 while [prune] correctly kept the
         // newest 200 — so once a thread passed 200 messages the newest ones fell

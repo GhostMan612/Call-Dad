@@ -38,6 +38,64 @@ patterns nobody had ever seen fire.
 the scan loop, and report the matched text. A future added pattern must come with
 a reason, which is the cheapest possible prompt to think about whether it fires.
 
+## The safety control that controlled nothing (vc10's kill switch)
+**Mistake.** The parental kill switch shipped complete, documented, ADR'd,
+emulator-proven at 44/44 — and enforced **nothing** on calling or the walkie
+talkie, in either direction, while continuing to download photos and messages
+after revocation. Calling and the walkie talkie are the two OLDEST features in
+the app; they predate the consent model, and `ConsentScope`'s own KDoc said so
+("PTT — ALREADY SHIPPED without a cert"). Nobody went back. Separately, the
+parent's grant sequence was read from a query that can never return anything on
+the parent's own phone, so the switch's button was inoperable on the one device
+that owns it — and `revoke()` refused every press with a message that reads like
+a network problem.
+**Root cause.** Every gate I had checked the *halves* of consent — the domain
+gate, the Firestore rules, the emulator suite, the parent-facing screen's source —
+and none checked that a *consumer* read the answer. `grep ConsentScope` across
+`app/src/main` answered the whole question in one command: the scope appeared
+once, inside the store, computing a decision nobody read. Same shape as the
+`ChatViewModel.scopes` field nobody wrote. Both were "complete features, green
+gates, unusable", and both were caught only by looking for what a finished
+feature *should have touched*.
+**Check.** `ConsentEnforcementRegressionTest` (11 tests) pins each direction of
+each feature, the listener as well as the screen, and the unknown-decision case.
+The general rule: **when a feature is finished, grep for what it should have
+touched, then read the list.** A feature with no reader of its own gate is a
+decorative feature.
+
+## The newest safety file was the least reviewable file in the repo
+**Mistake.** `ChatText.kt` — the file that decides what a six-year-old may send —
+contained a literal `0x00` and `0x1F` inside a *comment*, on the very line
+explaining why control characters matter. `CallLogStore.kt` had a literal `0x1F`
+in a comment too. A raw control byte makes git treat the file as binary, so
+`grep`, `git diff`, and human review all silently skip it. Every gate in the repo
+had passed for the entire life of both files. `git grep` reported them as
+"Binary file matches".
+**Root cause.** I wrote the escape text `\x00-\x1F` in a KDoc and it survived as
+raw bytes; nothing in the toolchain complains, and the damage is to *review*
+rather than to compilation, so the compiler is no help at all. The irony is
+exact: the affected line was the one documenting this hazard.
+**Check.** `tools/check_control_bytes.py` scans tracked text files, and
+`verify_project.py` now fails the gate on a NUL or any C0 control / DEL, reading
+the file as **bytes** rather than `errors="replace"` — the decoding that had been
+hiding it. A file that stops being greppable is a bug in the file, not a quirk
+of git.
+
+## A gate that had never been seen red, again, and worse
+**Mistake.** The `gate` tool printed GREEN from a tree where
+`compileParentDebugKotlin` was failing: it had no `rules` gate at all, and
+`r.out || r.err` discarded the Kotlin diagnostics that would have said so. Then,
+separately, I twice declared v0.1 "complete" against gates that were green and
+features that had never run.
+**Root cause.** Only the happy path gets exercised, and a gate that is *trusted*
+gets trusted harder precisely because it is trusted. A check nobody has watched
+fail is a check of unknown strength.
+**Check.** `tools/prove_gates_bite.py` injects a known defect, asserts the gate
+exits non-zero **for the expected reason**, asserts the tree is restored
+byte-for-byte, and asserts green returns. Run it after changing any gate. This is
+the operational form of `VerifyProjectSelfTest` below, and it caught a real
+control byte in the process.
+
 ## Green gates ≠ shipped (blocked commit lost real work)
 **Mistake.** The K12 (loud voice message) and K21 (lock-screen trap) fixes were
 written, gated green, and a commit message drafted. The commit was blocked by an

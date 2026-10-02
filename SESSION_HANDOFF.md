@@ -31,11 +31,22 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, the standing gate is
 green on the built tree (verify PASS · unit PASS both flavors · lint 0/0 · functions
 13/13 · **rules emulator 44/44**), **`firestore.rules` is deployed** (2026-10-01), and
-`versionCode 10` / `0.3.0` is **installed on both phones** (2026-10-01 08:19).
+Source is at `versionCode 11` / `0.3.1`. The phones are on **vc10 / 0.3.0**
+(flashed 2026-10-01 08:19) and source is one pass ahead.
 
 Nothing in §2 has been exercised on hardware. Not one call, text, photo, consent
-grant or ICE restart has run against this build. Every feature row is
-**built, deployed, installed, and untested** — the gap is now witness, not code.
+grant or ICE restart has run against any build. Every feature row is
+**built, deployed, installed, and untested** — the gap is witness, not code.
+
+**The build that was installed had a parental kill switch that enforced nothing.**
+vc10's "Turn everything off" closed Messages and Pictures while calling, the walkie
+talkie (both directions, including clips playing aloud), and photo/chat downloads
+continued unaffected; and the parent's own grant sequence was unreadable on the
+parent's phone, so the button could not act there at all. Calling and the walkie
+talkie are the two OLDEST features in the app — they predate the consent model,
+so nobody went back. Fixed in vc11 and pinned by
+`ConsentEnforcementRegressionTest`. Flash vc11 before trusting any consent
+behaviour on a device.
 
 ### The one bug worth reading this handoff for
 
@@ -74,7 +85,10 @@ certifies the tree, never the behaviour of whoever is running it.**
    confirms Moto G 2025 (parent) vc10 / 0.3.0-parent and BLU View 5 (child)
    vc10 / 0.3.0-child, one flavor per device, installed `-r` so the anonymous
    account, peer UID, pairing and the child's consent grant all survived. **No
-   re-pair needed.** Then, in this order:
+   re-pair needed.**
+3. **Flash vc11 / 0.3.1 to both phones.** REQUIRED before any consent check means
+   anything: vc10 enforces no part of the kill switch on calling or the walkie
+   talkie. Then, in this order:
    - **First-run consent — check this before anything else, because everything
      else will look broken without it.** A fresh install is INERT: Messages and
      Pictures both read "turned off right now", and the call is gated too. A
@@ -89,10 +103,46 @@ certifies the tree, never the behaviour of whoever is running it.**
    - A text message both ways, including a link-shaped one (must be refused).
    - A real photo sent, verified, rendered. No photo has ever been sent.
    - The missed-call callback card.
-   - The reconnect: pull Wi-Fi mid-call, or turn on airplane mode, and confirm the
-     call RECOVERS rather than ending. This is the first time the fix is exercised.
-3. **Adopt a release keystore** (`docs/release-signing.md`) if a release artifact
-   is ever wanted. `proguard-rules.pro` is a stub; no release build has ever run.
+- The reconnect: pull Wi-Fi mid-call, or turn on airplane mode, and confirm the
+      call RECOVERS rather than ending. This is the first time the fix is exercised.
+    - **THE KILL SWITCH, and it is the highest-value item in this file.** On the
+      parent's phone: shield icon → "Turn everything off". On the CHILD's phone,
+      confirm ALL of: the Call button refuses with "Calling is turned off right
+      now"; an incoming call does not ring; the walkie talkie reads "TURNED OFF"
+      and the button does nothing; Messages and Pictures show the "ask a grown-up"
+      notice; and **the child's phone pulls no photo chunks** — turn mobile data
+      off first so any download is visible as usage. Then "Allow everything" and
+      confirm everything comes back. No version of this app has ever demonstrably
+      enforced a kill switch, and this is the check that would prove one.
+ 4. **Adopt a release keystore** (`docs/release-signing.md`) if a release artifact
+    is ever wanted. `proguard-rules.pro` is a stub; no release build has ever run.
+
+### Note for the next agent: a green gate is not evidence, and neither is a fix
+
+Two related traps, both hit hard this session.
+
+**Green has to have been seen red.** The `gate` tool once printed GREEN from a tree
+where `compileParentDebugKotlin` was failing, because it had no rules gate at all
+and discarded the Kotlin diagnostics. `tools/prove_gates_bite.py` now injects a
+known defect, asserts the gate FAILS, and asserts it recovers — run it after
+changing any gate. If you have never watched a check go red, you have no evidence
+it can.
+
+**The newest safety file was the least reviewable file in the repo.** A literal
+`0x1F` inside a *comment* in `CallLogStore.kt`, and a `0x00` + `0x1F` in
+`ChatText.kt` — the latter in the comment explaining why control characters
+matter. A raw control byte makes git treat the file as binary, so grep, diff and
+review all silently skip it. Every gate passed for the life of both. It was found
+by writing a scanner rather than by reading, and `verify_project.py` now fails on
+it. When a file stops being greppable, that is a bug in the file.
+
+**And the general one:** three of the worst bugs found this session were features
+that were complete, documented, and green — because the tests checked each half
+and nothing checked that the halves were *connected*. `ChatViewModel.scopes` was
+never written. The kill switch read no scope for the two oldest features in the
+app. `grep` for `ConsentScope` across `app/src/main` answered that second one in
+one command; it had been sitting in a finished, reviewed, green-gated feature.
+When you finish a feature, grep for what it should have touched and check the list.
 
 ### Note for the next agent: a fix I write may not be loaded
 

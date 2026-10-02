@@ -112,26 +112,35 @@ while the tool printed green (see `LESSONS_LEARNED.md`).
 | Moto G 2025 (PARENT) | `com.calldad.parent` | 10 | 0.3.0-parent | 2026-10-01 08:19:05 |
 | BLU View 5 (CHILD) | `com.calldad.child` | 10 | 0.3.0-child | 2026-10-01 08:19:19 |
 
-**The phones are now on the current source for the first time.** They were on
-vc7/0.2.4 while source had moved to vc10 — the widest source/device gap in the
-project's history, and the reason the K12 loud-voice-message and K21
-lock-screen-trap defects were live on the child's phone throughout. Those are now
-closed in the installed build but still **unwitnessed**.
+**Source is now at `versionCode 11` / `0.3.1` and is AHEAD of both phones.**
+
+The vc7 → vc10 flash closed the widest source/device gap in the project's history,
+and with it the K12 loud-voice-message and K21 lock-screen-trap defects that had
+been live on the child's phone throughout. Both fixes are now **installed but
+unwitnessed**.
+
+That "unwitnessed" is not a formality, and the reason is recorded here rather than
+discovered later: **vc10 was found to ship a parental kill switch that enforced
+nothing on calling or the walkie talkie.** Both are the two oldest features in
+the app, both predate the consent model, and neither was ever revisited. A parent
+pressing "Turn everything off" on vc10 closed Messages and Pictures while calling,
+inbound voice clips, and photo/chat downloads carried on regardless — and the
+parent's own grant sequence was structurally unreadable, so the button could not
+act on the phone that owns it. Source is now vc11 / 0.3.1 with the enforcement
+real. Neither build has been witnessed.
 
 Installed with `-r`, so the anonymous Firebase account, the peer UID, and the
 pairing handshake all survived — no re-pair needed, and the child kept its
 consent grant from the pair room.
 
-One flavor per device; no crossed install. The Moto is a WIRELESS-adb device
-(mDNS), and its advertised host:port changes per session, so resolve it at run
-time with `adb devices -l` rather than hardcoding it.
+The Moto is a WIRELESS-adb device (mDNS), and its advertised host:port changes per
+session, so resolve it at run time with `adb devices -l` rather than hardcoding
+it.
 
 Serials are deliberately absent (RULES §1.5a), and `tools/verify_project.py` now
 fails the gate if one reappears in a tracked file. Resolve them at run time with
 `adb devices -l` or the `device-evidence` tool, which maps roles from each
 line's model field.
-
-One flavor per device; no crossed install.
 
 ### Backend state (VERIFIED live)
 
@@ -164,7 +173,18 @@ One flavor per device; no crossed install.
   vc10 contains the fixes (K12 quiet PTT channel, K21 keyguard). Whether they work
   is exactly the question the next operator session answers.
 - **The Firestore rules deployed live are the vc10 set (2026-10-01).** Chat, photos, consents, revocations and `negotiationRound` are emulator-tested (44/44) AND live. The emulator suite is the only evidence for them until a phone exercises them, so the rules are now deployed-but-unwitnessed, which is a different and better state than emulator-only — but it is not "proven".
-- **The consent kill switch has never been exercised on a device.** The rules are proven against the emulator and the gate logic is host-tested, but no human has granted a scope and watched a child lose it.
+- **The consent kill switch has never been exercised on a device, and the version
+  that was installed was a lie.** vc10 — which is what sits on both phones — ships
+  a "Turn everything off" button that enforced nothing on calling or the walkie
+  talkie, in either direction, and did not stop photo or chat downloads. The
+  parent's own grant sequence was also unreadable on the parent's phone, so the
+  button could not act at all. All of it is fixed in vc11 / 0.3.1 (source) and
+  pinned by `ConsentEnforcementRegressionTest`. Until vc11 is flashed AND a human
+  grants a scope and watches a child lose it, the honest statement is that no
+  version of this app has ever demonstrably enforced a kill switch.
+- **vc11 is not on a phone.** It is source plus a green gate. That is the same
+  position v0.1 was declared "complete" in, twice, and both declarations were
+  wrong.
 - **Photo sharing has never sent a real photo.** The transport, digest, ordering, downscale policy and rules are all proven (byte-proof on synthetic fixtures, 40/40 emulator), but the Bitmap→WEBP path, the picker, and the screen have never run against a camera image. That is the largest untested surface in the app.
 - **`app/proguard-rules.pro` is a stub** and no release build has ever run. A missing keep rule there is a runtime crash, not a smaller APK.
 - **Text chat has never survived an app restart on a device.** The prune keeps unread history, but that is a source-level claim.

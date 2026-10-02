@@ -73,10 +73,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.value = _state.value.copy(scopes = held)
             }
         }
-        viewModelScope.launch {
-            client.messages.collect { rows ->
-                _state.value = _state.value.copy(messages = rows)
+viewModelScope.launch {
+            consent.scopes.collect { held ->
+                _state.value = _state.value.copy(scopes = held)
+                // The RECEIVE half. `ChatScreen` hid the thread without a grant
+                // and `onSend` refused to write one, but the LISTENER was never
+                // gated — so a revoked child's phone kept reading the room.
+                // "Turn everything off" has to stop the device reading, not just
+                // stop the screen drawing.
+                client.setInboundAllowed(ConsentScope.TEXT in held)
             }
+        }
         }
         viewModelScope.launch {
             client.problem.collect { p ->

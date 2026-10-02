@@ -18,10 +18,10 @@
     "child": "com.calldad.child — 'Call of Daddy', pink"
   },
   "version": {
-    "source": "0.3.0",
-    "versionCode": 10,
-    "on_device": 7,
-    "on_device_note": "phones are on vc7 / 0.2.4; source is ahead and NOT installed"
+    "source": "0.3.1",
+    "versionCode": 11,
+    "on_device": 10,
+    "on_device_note": "phones are on vc10 / 0.3.0 (flashed 2026-10-01 08:19); source is ahead by one consent-enforcement pass and NOT installed. INSTALLED IS NOT WITNESSED: no SPEC_SHEET section-2 feature has been exercised on hardware."
   },
   "user": "6-year-old (kid device) <-> Dad (operator device)",
   "allowlist_v01": ["DAD"],
@@ -34,7 +34,7 @@
     { "id": "photo_share_chunked_verified", "status": "SHIPPED (source)", "blueprint": "BP-04" },
     { "id": "call_log", "status": "SHIPPED (source)", "note": "DataStore, NOT the Room store below — ADR-018" },
     { "id": "allowlist_parent_gate", "status": "SHIPPED" },
-    { "id": "consent_cert_kill_switch", "status": "SHIPPED (source)", "blueprint": "BP-05 §2", "decision": "ADR-017" }
+    { "id": "consent_cert_kill_switch", "status": "SHIPPED (source)", "blueprint": "BP-05 §2", "decision": "ADR-017", "note": "vc11 fixes a real enforcement gap: vc10 presented 'Turn everything off' while calling, the walkie talkie (both directions) and photo/chat DOWNLOADS continued unaffected, and the parent's own grant sequence was unreadable so the button could not act." }
   ],
 
   "spec_requirements_deliberately_not_met": [
