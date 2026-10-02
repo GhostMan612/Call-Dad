@@ -28,13 +28,20 @@ class of invented pass this repo keeps catching.
 | 9 | No real child data in committed screenshots | **PASS (machine)** | `KidUxAuditTest.noScreenshotOrMediaIsCommitted` — no `.png`/`.jpg`/`.jpeg`/`.webp`/`.heic` outside `res/drawable`, `build/`, `.git/`. |
 | 10 | The chat thread is not a way out | **PASS (machine)** | `ChatKidSafetyTest` (7 cases). The chat box is the widest hole the allowlist could have: a message is the one place a GROWN-UP authors text for a child. Bodies are plain `Text` — no `ClickableText`, no `autoLink`, no link preview, no `ACTION_VIEW`, no autocorrect/predictive keyboard. `ChatText` also *rejects* link-shaped text at send time, so the parent cannot arm it in the first place. Asserted against CODE, not comments. |
 | 11 | The thread cannot trap a child | **PASS (machine)** | Back arrow and send are both 96dp via a named `TOUCH_TARGET_DP` constant the test reads — a literal at the call site is exactly what gets "tidied" down to 64dp later. At most 4 `onClick` sites in the whole screen. |
-| 12 | Pictures are not a door to the device | **PASS (machine)** | `PhotoSafetyTest` (6 cases). The app requests **no** `READ_MEDIA_IMAGES`, no `READ/WRITE_EXTERNAL_STORAGE`, and **no `CAMERA`** — picking goes through the permissionless system photo picker, so a 6-year-old cannot browse the camera roll from inside this app. Nothing is written back to `MediaStore`, so a received photo cannot be read by any other app. There is no share or save affordance. An unverified photo renders a sentence, never partial bytes. |
+| 12 | Pictures are not a door to the device | **PASS (machine)** | `PhotoSafetyTest`. The app requests **no** `READ_MEDIA_IMAGES` and no `READ/WRITE_EXTERNAL_STORAGE` — picking goes through the permissionless system photo picker, so a 6-year-old cannot browse the camera roll from inside this app. **The app DOES declare `CAMERA`,** because the video call needs it (Phase 3, ADR-005); what is pinned is the narrow true property — the *photo path* uses no camera, and the camera *feature* is `required="false"` so an audio-only device can still install. An earlier version of this row claimed "no `CAMERA`" and of the test asserted the same, which was **wrong on its own terms** and only ever "passed" because the assertion threw before it ran. Nothing is written back to `MediaStore`, so a received photo cannot be read by any other app. There is no share or save affordance. An unverified photo renders a sentence, never partial bytes. |
 
 ### Known gaps this sheet is recording rather than hiding
 
 - **Nothing in this sheet has been re-witnessed on a device since 2026-09-30**, and
-  the phones are on **vc7** while the source is **vc10**. The machine rows describe
-  vc10; the device describes vc7. Treat every device-dependent row as unknown.
+  the phones are on **vc10 / 0.3.0** (flashed 2026-10-01 08:19) while the source is
+  **vc11 / 0.3.1**. The machine rows describe vc11; the device describes vc10.
+  Treat every device-dependent row as unknown.
+- **The build installed on both phones has a parental kill switch that enforces
+  nothing.** vc10 closes Messages and Pictures while calling, the walkie talkie
+  (both directions, including clips playing aloud) and photo/chat downloads carry
+  on regardless. Fixed in vc11 — in source, on no device. **No version of this app
+  has ever demonstrably enforced a kill switch**, and this sheet says nothing to
+  the contrary about that.
 - **Criterion 2 has never been measured.** No contrast ratio has ever been computed
   for either theme. Treat as unknown, not as passing.
 - **The consent screen has never been used.** Two buttons, a gate, and a

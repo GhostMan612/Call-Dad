@@ -9,8 +9,10 @@ version fingerprint resolved from source, and you state what evidence is still m
 
 ## 1. Resolve the fingerprint (read source, do not build)
 Read `app/build.gradle.kts` for `versionCode` and `versionName`. Report them, e.g.
-`versionCode 9 / versionName 0.2.6`, and the two flavor ids `0.2.6-parent` and `0.2.6-child`.
-Never quote a version from memory or from a doc — read the file every time.
+`versionCode 11 / versionName 0.3.1`, and the two flavor ids `0.3.1-parent` and `0.3.1-child`.
+Never quote a version from memory or from a doc — read the file every time. **Note the
+header comment on line 2 of that file has been wrong before; read the `versionCode =`
+assignment, not the header.**
 Note whether the build is dirty (`git status --porcelain`) — a dirty tree invalidates the
 fingerprint, because the operator will build uncommitted bytes.
 
@@ -54,5 +56,16 @@ the user as "The other device didn't respond."
 
 ## Output
 A single fenced block of commands the operator can paste, the expected fingerprint, the APK
-timestamp expectation, and a `MISSING EVIDENCE:` list. If the tree is dirty, bump
-`versionCode` before the operator builds, or the install will be indistinguishable from the last one.
+timestamp expectation, and a `MISSING EVIDENCE:` list.
+
+**Do NOT reflexively bump `versionCode` on a dirty tree.** This repo assigns one per
+*behavioural* change, deliberately, with a recorded reason for why the number must not be
+reused (`app/build.gradle.kts`, and the version rows in `blueprints/CHECKLIST.md`). A
+reflexive bump produces a number that means nothing, and it is how a version gets burned
+on a broken commit. Report the fingerprint you read, why a bump is needed, and why the new
+number must not be reused — then ask before assigning one.
+
+**And say plainly that no suite in this repo compiles the app.** `8f47512` was pushed with
+a duplicated brace and the standing gate printed GREEN on it; `assembleParentDebug` is the
+only thing that has ever caught that class. If the runbook does not include an assemble
+step, the operator is about to flash an unverified tree.

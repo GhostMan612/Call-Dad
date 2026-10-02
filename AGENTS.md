@@ -16,8 +16,8 @@ Two flavors from one codebase: `parent` (blue, "Call of Daddy (Parent)") and `ch
 Call-Dad/
 ├── SPEC_SHEET.md / SPEC_SHEET.json   # original v0.1 scope contract (see ADR-015 for what shipped)
 ├── AGENTS.md / RULES.md / SESSION_HANDOFF.md / CLAUDE.md / LESSONS_LEARNED.md
-├── blueprints/                 # CURRENT_STATE + CHECKLIST + CHECKPOINTS + ROADMAP + decisions/ADR-001..015
-├── docs/                       # setup, devices, firebase plan, kid-safe UX, donor reuse map (historical)
+├── blueprints/                 # CURRENT_STATE + CHECKLIST + CHECKPOINTS + ROADMAP + ARCHITECTURE + MASTER + FCM_WAKEUP (superseded) + blueprint-sections/BP-01..05 + decisions/ADR-001..018
+├── docs/                       # setup-android-studio, device-profiles, firebase-firestore-plan, kid-safe-ux, release-signing, sovereign-comms-reuse-map (last one historical)
 ├── app/                        # com.calldad — single Activity, Compose, hand-written ViewModel factories (no Hilt)
 │   └── src/main/java/com/calldad/
 │       ├── data/signaling/     # SignalingClient (Firestore room), SignalingModels (CallRoom ids, SDP/ICE)
@@ -25,7 +25,7 @@ Call-Dad/
 │       ├── webrtc/             # WebRTCClient (single-use per call), config, log guardrail
 │       ├── fcm/                # push receiver, ringing foreground service, token registrar
 │       ├── pairing/            # QR payload, QR generator, peer store (DataStore), ML Kit check
-│       ├── audio/ ptt/ helper/ game/
+│       ├── audio/ ptt/ helper/ game/ chat/ consent/ photos/ history/
 │       ├── navigation/         # AppNavHost (ring pull-in from any screen, parent-gated pairing)
 │       └── ui/                 # screens, components (GiantComponents, VideoRenderer, ParentGate), theme
 ├── functions/                  # Cloud Function: ring push to the callee's device token (Node 22)
@@ -55,7 +55,7 @@ This is the first rule of every session, ahead of every command below.
 
 ### Native app gates (human builds/installs in Android Studio — NEVER assemble/install here)
 
-Run these ONCE, as the closing step of a phase:
+Run these ONCE, as the closing step of a phase — and via the **`gate` tool**, which is the agent's entry point (RULES §1.4a). The raw gradle lines below are the *operator's* equivalent; an agent should not type them. **Note: no suite here compiles the app.** `assembleParentDebug` is the only check that has ever caught a non-compiling tree, and the gate printed GREEN on one.
 
 ```powershell
 # repo root. Flavored task names: the unflavored testDebugUnitTest/lintDebug do not exist.
@@ -103,7 +103,7 @@ C:\android\sdk\platform-tools\adb.exe shell getprop ro.build.version.sdk
 3. **Git explicit paths only** — never `git add .` / `-A`. Never claim build/device success. No push unless told.
 4. **Synthetic data only** — no real child names/photos/numbers/locations/device serials in code, tests, fixtures or docs. Machine-enforced: `tools/verify_project.py` fails the gate on a 14+ digit serial or an `adb-<SERIAL>-…` form in a tracked file. Fixtures need a `synthetic-only` token. Resolve real serials at run time from `adb devices -l`; never bake a mapping into a tool.
 5. **Genesis header** on every new `.kt`/`.py` file (verify_project.py enforces it).
-6. **Kid-safe + parent-gate** — one paired contact, pairing behind the grown-ups gate and a mutual handshake, no accounts/analytics/ads.
+6. **Kid-safe + parent-gate** — one paired contact, pairing behind the grown-ups gate and a mutual handshake, no accounts/analytics/ads, and a **parental kill switch** (fail-closed per-scope consent) that is **enforced from vc11 and has never been witnessed on a device**.
 
 ## Session workflow
 
@@ -111,7 +111,7 @@ C:\android\sdk\platform-tools\adb.exe shell getprop ro.build.version.sdk
 2. Work from the relevant ADR / blueprint section
 3. Smallest coherent unit + host tests with it
 4. Gates green → handoff + checklist + current-state updated → commit by explicit path → **no push unless told**
-5. Slash commands in `.opencode/commands/`: `/verify`, `/probe`, `/smoke`
+5. Slash commands in `.opencode/commands/`: `/verify`, `/probe`, `/smoke`, `/sweep`, `/flash`, `/evidence`
 
 ## Architecture notes (ADR-015 is the current shape)
 
@@ -120,3 +120,4 @@ C:\android\sdk\platform-tools\adb.exe shell getprop ro.build.version.sdk
 - **Media:** one `WebRTCClient` per call attempt; shared EglBase owned by the ViewModel; teardown order pc → tracks → factory.
 - **Wakeup:** Cloud Function `onCallRoomWritten` → data-only FCM to `users/{calleeUid}.fcmToken` → `CallForegroundService` (foreground-first, validates against the paired room, single ringer).
 - **Pairing:** grown-ups gate → both phones show + scan QR `{v, uid, nonce}` → peer stored only after `pairings/{peerUid}` names us with the same session nonce.
+- **Consent (ADR-017):** fail-closed per-scope grants (`CALL`/`PTT`/`TEXT`/`PHOTO`) live in the pair room; absence DENIES, and revocation is an append-only seq range. Checked at the point of use **and** on every feature's Firestore listener. **vc10 — the build on both phones — enforced none of it on calling or the walkie talkie; fixed in vc11 (source only, on no device). No version of this app has ever demonstrably enforced a kill switch.**

@@ -84,7 +84,7 @@
 - [x] `PhotoTransfer` chunk + zero-padded index + SHA-256 verify (`PhotoTransferTest` byte-proof on synthetic fixtures)
 - [x] `PhotoClient` send/receive; chunks first, manifest last; unverified bytes never published (`PhotoClientTest`)
 - [x] `PhotoViewModel` + `PhotoScreen`; decode gated on `verified`
-- [x] Permissionless system picker: NO `READ_MEDIA_IMAGES`, NO `CAMERA`, no MediaStore write (`PhotoSafetyTest`)
+- [x] Permissionless system picker: NO `READ_MEDIA_IMAGES`, no MediaStore write, and the **photo path** uses no camera (`PhotoSafetyTest`). NOTE: the app DOES declare `CAMERA` for the video call (ADR-005), feature `required="false"`. An earlier row here claimed "NO `CAMERA`" and a test asserted it — that assertion was **wrong on its own terms** and only ever "passed" because it threw `FileNotFoundException` before running.
 - [x] Rules stanza: immutable manifest, index==docId, per-chunk and total byte caps
 - [x] Video spike decision — **ADR-005, WebRTC (stream-webrtc-android 1.3.10)**, and the donor UDP `LiveCallSession` port was dropped in its favour. Device-proven both ways.
 - [ ] Human: a real photo is sent, verified, and rendered on the other phone
@@ -92,7 +92,7 @@
 
 ## BP-05 — Hardening (was mislabelled "Phase 5")
 - [x] Parent gate (`ParentGate.kt`) + `ConsentScreen` behind it, `remember` not `rememberSaveable`
-- [x] Consent cert + kill switch, fully enforced: append-only seq-range revocation (ADR-017)
+- [x] Consent cert + kill switch — **in source, enforced from vc11** (was NOT enforced in vc10, which is what is on both phones; never witnessed on a device): append-only seq-range revocation (ADR-017), pinned by `ConsentEnforcementRegressionTest`
 - [x] SQLCipher closed as a deferral-with-justification (ADR-003, sharpened by ADR-018)
 - [x] kid-UX audit sheet + `KidUxAuditTest` (12 criteria, machine/HUMAN split)
 - [x] Release-signing plan (`docs/release-signing.md`, `signingConfigs`, proguard stub)

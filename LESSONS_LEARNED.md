@@ -107,6 +107,14 @@ byte-for-byte, and asserts green returns. Run it after changing any gate. This i
 the operational form of `VerifyProjectSelfTest` below, and it caught a real
 control byte in the process.
 
+**The commit reached `origin/main`.** `8f47512` was pushed with a duplicated
+brace in `ChatViewModel.init`; `4a5c555` fixed it. The general form, and the one
+worth keeping: **this repo has no suite that compiles the app**, so "five gates
+green" has never meant "it builds" — a gate that is not looking at the property
+you care about is the recurring failure here, and a broken tree on `main` is what
+that costs when nobody notices. `assembleParentDebug` is the only thing that has
+ever caught this class, and it is an `ask` task.
+
 ## Green gates ≠ shipped (blocked commit lost real work)
 **Mistake.** The K12 (loud voice message) and K21 (lock-screen trap) fixes were
 written, gated green, and a commit message drafted. The commit was blocked by an

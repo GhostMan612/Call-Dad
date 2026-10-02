@@ -1,18 +1,28 @@
 # FCM Wakeup Blueprint (Contract 7 implementation target)
 
-> Status: BLUEPRINT. Nothing below is implemented — Contract 6 only
-> executes Parts 1–4 (pairing hold, NoAnswer hardening, watchdog).
+> **SUPERSEDED (ADR-013, ADR-015, 2026-09-30).** Nothing below is unimplemented —
+> the FCM wakeup is **BUILT and LIVE**: `onCallRoomWritten` (v2) and
+> `onPttClipWritten` (v2), both `us-central1` / nodejs22. Three specifics in this
+> document are now WRONG and must not be followed:
+> 1. **Wakeup is token-targeted to `users/{uid}.fcmToken`, not a shared
+>    `incoming_calls` topic.** ADR-015 replaced the topic — a topic anyone can
+>    subscribe to — with a per-device token.
+> 2. **The service validates the PAIR-SCOPED room `calls/{uidA_uidB}`**, not a
+>    static room.
+> 3. **The push is data-only.** No audio, no SDP, and no message content crosses
+>    FCM; the clip and the call document are fetched from Firestore.
+>
+> **Still never device-witnessed:** a killed-app ring, doze, and force-stop all
+> remain open (`CURRENT_STATE.md` K11). Do not read "live" as "proven".
+>
 > Package in this repo is `com.calldad` (not `com.calldad.app`).
 
-## Current state (already present, keep)
-
-- `CallDadApplication` creates `CHANNEL_INCOMING_CALL` (IMPORTANCE_HIGH),
-  signs in anonymously, subscribes both flavors to `incoming_calls`.
+## Historical design (superseded — kept for the reasoning, not the shape)
 - `MainActivity` requests POST_NOTIFICATIONS (API 33+), checks
   `canUseFullScreenIntent()` (API 34+), routes FSI action to the overlay.
-- `CallMessagingService` receives topic pushes, starts the FGS.
-- `CallForegroundService` runs `phoneCall` type, validates the static
-  room before promoting, carries `ACTION_INCOMING_CALL`.
+- `CallMessagingService` receives token pushes, starts the FGS.
+- `CallForegroundService` runs `phoneCall` type, validates the PAIR-SCOPED room
+  before promoting, carries `ACTION_INCOMING_CALL`.
 - Manifest already declares: POST_NOTIFICATIONS, USE_FULL_SCREEN_INTENT,
   FOREGROUND_SERVICE (+PHONE_CALL, +MICROPHONE), RECORD_AUDIO, WAKE_LOCK,
   CAMERA/INTERNET, ML Kit `DEPENDENCIES=barcode` metadata.

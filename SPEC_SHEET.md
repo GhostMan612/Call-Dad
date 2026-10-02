@@ -38,7 +38,7 @@ Group calls, multi-contact, cloud backup, cross-internet without rendezvous rela
 - Donor ports (adapt, don't copy-paste blind): `CallSignalingManager`, `SovereignCommsEngine`, `LiveCallSession` (:8789 UDP), `AudioFrameCipher` (AES-GCM), `SovereignImageEngine`, `RendezvousClient` + relay `main.go` (:8792/udp), `RealTimeTransportRouter` (P1 LAN → P2 SIM data), `SovereignAudioEngine` (Concentus-Opus), `WifiDirectGroupManager` (no-internet mode).
 - Data: Room (contacts, call log, messages) + SQLCipher-at-rest decision per ADR-003.
 - Toolchain pins per AGENTS.md; compileSdk 35 / target 35 / minSdk 30 pending ADR-001.
-- Gates: `testDebugUnitTest` + `lintDebug` + `verify_project.py` green; device proof only from human runs (Moto G 2025 truth).
+- Gates: `:app:testParentDebugUnitTest :app:testChildDebugUnitTest` + `:app:lintParentDebug :app:lintChildDebug` + `tools/verify_project.py` green, via the `gate` tool (the unflavored `testDebugUnitTest`/`lintDebug` task names do not exist — flavors rename every variant task). Device proof only from human runs (Moto G 2025 truth).
 
 ## 6. Firebase / Firestore (paid account, deferred)
 

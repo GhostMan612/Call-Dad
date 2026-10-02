@@ -28,11 +28,17 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 
 ### State
 
-The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, the standing gate is
-green on the built tree (verify PASS · unit PASS both flavors · lint 0/0 · functions
-13/13 · **rules emulator 44/44**), **`firestore.rules` is deployed** (2026-10-01), and
-Source is at `versionCode 11` / `0.3.1`. The phones are on **vc10 / 0.3.0**
+The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**,
+**`firestore.rules` is deployed** (2026-10-01), and Source is at
+`versionCode 11` / `0.3.1`. The phones are on **vc10 / 0.3.0**
 (flashed 2026-10-01 08:19) and source is one pass ahead.
+
+Gates, re-run `--rerun-tasks` against `4a5c555` (= origin/main): verify PASS ·
+unit **518 tests / 0 failures** both flavors · lint **0 errors** both flavors ·
+functions **13/13** · **rules emulator 44/44**.
+
+**That certifies the host gates, not a build.** No suite in this repo compiles the
+app — see below.
 
 Nothing in §2 has been exercised on hardware. Not one call, text, photo, consent
 grant or ICE restart has run against any build. Every feature row is
@@ -47,6 +53,26 @@ talkie are the two OLDEST features in the app — they predate the consent model
 so nobody went back. Fixed in vc11 and pinned by
 `ConsentEnforcementRegressionTest`. Flash vc11 before trusting any consent
 behaviour on a device.
+
+### `origin/main` shipped a tree that did not compile — and the gate said GREEN
+
+**`8f47512` is a broken commit that was pushed to `origin/main`.** A duplicated
+`viewModelScope.launch {` in `ChatViewModel.init` made the app uncompilable, and
+the full five-suite gate printed **GATES GREEN** on it. Six further tests were
+failing underneath, all invisible (see `LESSONS_LEARNED.md`). Anyone who cloned
+`8f47512` got an app that would not build.
+
+**Fixed by `4a5c555`, which is HEAD and matches `origin/main`** (behind 0 / ahead
+0), with all five suites re-run `--rerun-tasks`: verify PASS, unit 518 / 0
+failures, lint 0 errors, functions 13/13, rules emulator 44/44.
+
+The lesson is not "a gate lied once". It is that **no suite in this repo compiles
+the app**, so "five gates green" has never meant "it builds".
+`assembleParentDebug` is the only thing that has ever caught this, and it is an
+`ask` task that was refused earlier in the session — which is exactly how it
+survived a whole round trip. `tools/prove_gates_bite.py` now injects a duplicated
+brace and asserts the gate goes red **via the Kotlin compiler**, so this class
+cannot pass silently again.
 
 ### The one bug worth reading this handoff for
 

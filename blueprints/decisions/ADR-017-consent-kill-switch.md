@@ -73,10 +73,44 @@ Both cost real debugging time and are the reason the layout is what it is:
    first room-level attempt at `calls/{room}/revocations/{grantee}` was a
    *document*, and the JS SDK rejected the client call outright.
 
+## Amendment 2026-10-01 (vc11) — the shipped decision enforced nothing
+
+**Decision 1 above was WRITTEN but not IMPLEMENTED for the two oldest features.**
+
+vc10 shipped a "Turn everything off" that closed Messages and Pictures while
+**calling, the walkie talkie (both directions, including inbound clips playing
+aloud on any screen), and photo/chat downloads carried on regardless.** Calling
+and PTT predate the consent model — `ConsentScope`'s own KDoc said so ("PTT —
+ALREADY SHIPPED without a cert") — and nobody went back. Separately, the parent's
+grant sequence was read from `granteeUid == ownUid`, a query that can never
+return on the parent's own phone because the rules forbid a self-named grant, so
+`highestSeq` was permanently 0 there: `revoke()` refused every press with a
+message that reads like a network problem, and `grant()` computed seq 1 every
+time, so the second "Allow everything" was `PERMISSION_DENIED`. **The kill
+switch was inoperable on the one phone that owns it.**
+
+Every gate had checked the *halves* of consent — the domain gate, the rules, the
+44-case emulator suite, the parent screen's source text — and none checked that a
+*consumer* read the answer. `grep ConsentScope` across `app/src/main` answered it
+in one command: the scope appeared once, inside the store, computing a decision
+nobody read.
+
+Fixed in vc11/0.3.1 and pinned by `ConsentEnforcementRegressionTest` (11 tests):
+both call directions, an incoming ring refused *before* the phone rings with
+ENDED published so the caller's phone stops too, revocation ending a live call,
+the walkie talkie gated in both directions including the engine's own send path,
+the parent's sequence read from the grants it AUTHORED, and **every feature's
+Firestore listener gated, not just its screen**.
+
+**Still unwitnessed: no device has ever exercised this control.** A decision
+record is not evidence of enforcement.
+
 ## Consequences
 
 - `TEXT` and `PHOTO` grants are now meaningful, so the chat screen can be closed
-  when a parent revokes text (BP-05 §2's "revocation blocks all comms").
+  when a parent revokes text (BP-05 §2's "revocation blocks all comms"). Since
+  vc11 this is true of `CALL` and `PTT` as well — see the amendment above for why
+  it was not true until then.
 - Absence denying means **the app is inert until a parent grants something**.
   That is the intended fail-closed behaviour and it will surprise anyone who
   flashes a build and taps around: a fresh install cannot call until the parent

@@ -1,7 +1,7 @@
 {
   "_comment": [
     "HISTORICAL v0.1 CONTRACT, corrected for drift 2026-10-01.",
-    "The v0.1 FEATURE list below is still the contract and all seven now exist in",
+    "The v0.1 FEATURE list below is still the contract and all eight now exist in",
     "source. The STACK block was rewritten because it named four dependencies the",
     "build deliberately does not have (Hilt, Room, Concentus, minSdk 30) and three",
     "versions that were never adopted (Kotlin 2.1.0, CameraX 1.3.4). A machine",
@@ -27,10 +27,10 @@
   "allowlist_v01": ["DAD"],
 
   "features_v01": [
-    { "id": "voice_call", "status": "SHIPPED + DEVICE-PROVEN" },
-    { "id": "video_call", "status": "SHIPPED + DEVICE-PROVEN", "decision": "ADR-005 WebRTC" },
+    { "id": "voice_call", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "note": "NOT re-proven on vc10 or vc11. A vc7 proof is not a current-build proof." },
+    { "id": "video_call", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "decision": "ADR-005 WebRTC", "note": "NOT re-proven on vc10 or vc11." },
     { "id": "text_chat_1to1_receipts", "status": "SHIPPED (source)", "blueprint": "BP-03" },
-    { "id": "voice_memo", "status": "SHIPPED + DEVICE-PROVEN", "note": "walkie-talkie voice clips, ADR-016; NOT the Concentus Opus path below" },
+    { "id": "voice_memo", "status": "SHIPPED + DEVICE-PROVEN UNDER vc7 ONLY (2026-09-30)", "note": "walkie-talkie voice clips, ADR-016; NOT the Concentus Opus path below. NOT re-proven on vc10 or vc11." },
     { "id": "photo_share_chunked_verified", "status": "SHIPPED (source)", "blueprint": "BP-04" },
     { "id": "call_log", "status": "SHIPPED (source)", "note": "DataStore, NOT the Room store below — ADR-018" },
     { "id": "allowlist_parent_gate", "status": "SHIPPED" },
@@ -82,7 +82,7 @@
     "rooms": "calls/{uidA_uidB} — the id IS the two UIDs, so rules authorize from the path alone",
     "media": "never via Firebase; DTLS-SRTP end to end",
     "credentials": "google-services.json is gitignored and operator-placed",
-    "deployed": "the vc9-era ruleset; chat/photos/consents/revocations/negotiationRound are NOT live"
+    "deployed": "vc10 ruleset, RELEASED 2026-10-01 to calldad-508d7 — chat, photos (manifest + chunks), consents, revocations and the negotiationRound guards ARE live. Deployed-but-UNWITNESSED: no phone has run a single chat write, photo transfer, consent grant or ICE restart against them."
   },
 
   "devices": ["Moto G 2025 (parent, truth)", "BLU View 5 (child)"],

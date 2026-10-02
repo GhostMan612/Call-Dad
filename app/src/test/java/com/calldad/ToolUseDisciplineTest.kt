@@ -318,17 +318,56 @@ class ToolUseDisciplineTest {
 
     @Test
     fun readOnlyAuditorsStillHaveNoShellAccess() {
-        // Six auditors run with `bash: deny`, which is why they were never the
-        // source of the shelling. Guard it: widening one reopens the hole.
+        // Every agent RULES.md 1.6 lists as read-only runs with `bash: deny`,
+        // which is why they were never the source of the shelling. Guard it:
+        // widening one reopens the hole.
+        //
+        // `kid-ux-guardian`, `native-dev` and `comms-porter` were MISSING from
+        // this list, and the three files had no front matter at all — so they
+        // were not registered subagents and the read-only guarantee RULES.md
+        // asserted for them was unenforceable. Both are now fixed (front matter
+        // added) and both are now covered here.
         listOf(
             "call-core-auditor", "webrtc-media", "firestore-rules-auditor",
-            "fcm-wakeup-auditor", "doc-drift-auditor", "handoff-writer"
+            "fcm-wakeup-auditor", "doc-drift-auditor", "handoff-writer",
+            "kid-ux-guardian", "native-dev", "comms-porter"
         ).forEach { agent ->
             if (!exists(".opencode/agents/$agent.md")) return@forEach
             val text = read(".opencode/agents/$agent.md")
             assertTrue(
                 "$agent must keep `bash: deny`",
                 text.contains("bash: deny") || text.contains("\"bash\": \"deny\"")
+            )
+        }
+    }
+
+    /**
+     * Every file RULES.md names as an agent must actually BE one.
+     *
+     * A `.md` in `.opencode/agents/` with no front matter is not a registered
+     * subagent — the `description` is the dispatch surface and `mode: subagent`
+     * is what makes it launchable. Three files were prose without front matter,
+     * so `RULES.md` claimed a read-only guarantee for auditors that could not be
+     * invoked at all.
+     */
+    @Test
+    fun everyNamedAgentIsARegisteredSubagent() {
+        listOf(
+            "call-core-auditor", "webrtc-media", "firestore-rules-auditor",
+            "fcm-wakeup-auditor", "doc-drift-auditor", "handoff-writer",
+            "gate-runner", "kid-ux-guardian", "native-dev", "comms-porter"
+        ).forEach { agent ->
+            if (!exists(".opencode/agents/$agent.md")) return@forEach
+            val text = read(".opencode/agents/$agent.md")
+            assertTrue(
+                ".opencode/agents/$agent.md has no front matter, so it is not a " +
+                    "registered subagent and RULES.md's guarantee for it cannot be " +
+                    "enforced. It needs `mode: subagent` and a `description`.",
+                text.trimStart().startsWith("---")
+            )
+            assertTrue(
+                ".opencode/agents/$agent.md is missing `mode: subagent`",
+                text.contains("mode: subagent")
             )
         }
     }

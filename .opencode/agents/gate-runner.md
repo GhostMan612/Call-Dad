@@ -41,11 +41,17 @@ gate output once and take the summary from it. Batch; do not chain one command p
 C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py
 .\gradlew.bat :app:testParentDebugUnitTest :app:testChildDebugUnitTest --no-daemon --console=plain
 .\gradlew.bat :app:lintParentDebug :app:lintChildDebug --no-daemon --console=plain
-node --test functions/ring.test.js
+node --test functions/ring.test.js functions/clip.test.js
 ```
+Both function files, **13 tests** (6 ring + 7 clip). Running only `ring.test.js` gives 6
+and reads as a regression.
 `tools/rules-test/` against the local Firestore emulator when `firestore.rules` changed
 (`npx firebase emulators:exec --only firestore --project demo-calldad "node --test"`).
 That emulator needs Java (Android Studio's JBR works) as well as Node.
+
+**State in your verdict that this does NOT prove the app builds.** No suite above compiles
+the app; `8f47512` was pushed with a duplicated brace and all of them printed GREEN.
+`tools/prove_gates_bite.py` asserts they go red on a non-compiling tree.
 
 ## Gates this lane may NOT run
 `assemble*`, `install*`, `connected*`, `run`, `deploy`. If asked to, decline and hand the exact
