@@ -9,7 +9,7 @@ deciders: operator
 
 ## Context
 
-`SPEC_SHEET.md` §2.5 says: "Call log + message store: local Room, call history
+`SPEC_SHEET.md` §2.5 said (before its 2026-10-01 amendment, made by this very ADR): "Call log + message store: local Room, call history
 (missed/answered), message persistence. No cloud sync v0.1."
 
 The toolchain has no Room, no KSP, and no SQLCipher, and `AGENTS.md` lists all

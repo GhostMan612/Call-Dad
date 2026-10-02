@@ -1,7 +1,8 @@
 # CURRENT_STATE.md — Call-Dad verified map
 
 > Updated every session per RULES.md §4.2. Executable truth > prose.
-> Refreshed 2026-10-01 after Contract 11 and the vc10→vc11 consent-enforcement pass.
+> Refreshed 2026-10-02 after Contract 11, the vc10→vc11 consent-enforcement pass, and the
+> doc-truth pass that pinned the recorded counts to the suite.
 > Superseded history lives in git. **"Device-proven" anywhere below means proven under the
 > build named in that row** — vc5, vc6 or vc7, all superseded. No `SPEC_SHEET` §2 feature has
 > been exercised on vc10 or vc11.
@@ -34,17 +35,19 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `ui/screens/CallState.kt` | 7-state machine + `canTransition` table (host-tested) |
 | `ui/screens/CallScreen.kt` | Ring / calling / in-call (camera, mic, flip, game, hang up) / no-answer / error / permission screens |
 | `ui/components/VideoRenderer.kt` | SurfaceViewRenderer host with keyed sink attach/detach |
+| `ui/screens/HomeScreen.kt`, `ui/screens/HomeViewModel.kt` | Home's six doors (Call / Messages / Pictures / Walkie Talkie / Play Games / Ask Helper) and the **missed-call callback card**, derived live from `CallLogStore` (BP-05 §4) |
+| `ui/components/GiantComponents.kt` | The giant-button kit Home's grid and the Call screen are built from |
 | `ui/components/ParentGate.kt` | Grown-ups-only multiplication gate |
 | `audio/CallAudioManager.kt` | Process-wide single ringer (ring + vibrate) and caller ringback |
 | `fcm/CallMessagingService.kt`, `CallForegroundService.kt`, `PushTokenRegistrar.kt` | Push receive → foreground-first ring service; token → `users/{uid}` |
 | `pairing/*`, `ui/screens/Pairing*` | QR payload v2, QR bitmap, DataStore peer store, ML Kit module check, mutual handshake |
-| `game/GameWebRtcBridge.kt`, `ui/screens/GameScreen.kt`, `assets/game.html` | 3 games; solo pass-and-play or synced over the call's data channel |
+| `game/GameWebRtcBridge.kt`, `ui/screens/GameScreen.kt`, `app/src/main/assets/game.html` | 3 games; solo pass-and-play or synced over the call's data channel |
 | `ptt/*`, `ui/screens/Ptt*` | Walkie-talkie: VoiceClipPttEngine (hold-to-record clips over the pair room, ADR-016); simulated engine for host tests only |
 | `helper/KeywordBot.kt`, `ui/screens/Helper*` | Offline voice helper (whole-word keyword matching) |
 | `chat/ChatThread.kt`, `chat/ChatText.kt` | 1:1 Dad thread: monotonic receipts, idempotent ingest, the no-link rule (BP-03, SPEC_SHEET §2.3) |
 | `chat/ChatClient.kt` | The thread over `calls/{room}/chat/`; DELIVERED is stamped by the RECEIVER, never on write success |
 | `ui/screens/ChatViewModel.kt`, `ui/screens/ChatScreen.kt` | Thread UI. Plain `Text` bodies, no autoLink/intents/autocorrect, 96dp controls |
-| `history/CallLog.kt`, `history/CallLogStore.kt` | Call history + the missed-call callback card (BP-05 §4). DataStore, NOT Room — ADR-018 |
+| `history/CallLog.kt`, `history/CallLogStore.kt` | The call-history **store** and the callback card's *model* (`CallLog.callbackCard`). The card is **rendered by `HomeScreen.CallbackCard`** from `HomeViewModel` — `history/` holds no UI. DataStore, NOT Room — ADR-018 |
 | `consent/ConsentCert.kt` | Grant/revoke/expiry/scope gate. Absence DENIES. Revocation is a seq RANGE, not a flag — ADR-017 |
 | `consent/ConsentStore.kt` | Live certs from `calls/{room}/consents/` + append-only revocations; parent-side grant/revoke |
 | `photos/PhotoTransfer.kt` | Chunked, SHA-256-verified photo transport + downscale policy (BP-04) |
@@ -52,7 +55,7 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `ui/screens/PhotoViewModel.kt`, `ui/screens/PhotoScreen.kt` | Picture screen. Decode gated on `verified`; system photo picker only, no share/save |
 | `ui/screens/ConsentScreen.kt` | Parent-side grant/revoke behind `ParentGate` — the kill switch's only trigger |
 
-Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (26 classes, 260 tests per flavor / 520 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (44 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (27 classes, 269 tests per flavor / 538 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (44 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
 ## Known-issue registry
 
@@ -79,7 +82,7 @@ Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functi
 | K15 | `firebase-functions@6.1.0` is behind current; the deploy CLI warned | **CLOSED — see K16** |
 | K20 | Clip pruning and terminal-room deletion are client-triggered, so a pair that never opens the app never prunes | ACCEPTED: Firestore TTL would need a scheduled function and a billed index; the leak only accrues for a pair that stops using the app entirely. Cheaper than a nightly bill, and a dormant pair costs cents. Revisit if the app gains real usage |
 
-## Last gates (2026-10-01, this lane, re-run `--rerun-tasks` against `4a5c555`)
+## Last gates (2026-10-01, this lane, re-run `--rerun-tasks` against `313e566` — first recorded at `4a5c555`)
 
 All five gates GREEN. The **rules emulator is now wired into the `gate` tool**;
 before this it was silently omitted, so a whole security gate could go unreported
@@ -92,7 +95,7 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 `tools/prove_gates_bite.py` now asserts the gate goes red on one via the compiler.
 
 - `tools/verify_project.py`: PASS (10 dirs + 102 files, includes the control-byte ban).
-- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **260 tests per flavor / 520 across both, 0 failures**.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **269 tests per flavor / 538 across both, 0 failures**.
 - `:app:lintParentDebug :app:lintChildDebug`: PASS, **0 errors** both flavors.
 - `node --test functions/*.test.js`: PASS, **13/13** (6 ring + 7 clip).
 - **Firestore rules emulator: 44/44**, including the chat, photo, consent,

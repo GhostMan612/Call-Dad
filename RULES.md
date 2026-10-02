@@ -194,7 +194,7 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
    (Python uses `#` equivalents.)
 3. **Offline-first:** call/text/photo on LAN work with zero network. Failure modes designed before any Firebase/network feature is called complete.
 4. **Provenance travels:** sender, timestamp source, and consent scope travel with every message/photo record. Unknown > invented. Never fabricate timestamps/locations.
-5. **E2EE by pattern:** per-call ECDH + AES-256-GCM per-frame (mantle `AudioFrameCipher` idiom); null-on-fail = drop frame, never log key material.
+5. **E2EE by pattern:** per-call ECDH + AES-256-GCM per-frame (mantle `AudioFrameCipher` idiom); null-on-fail = drop frame, never log key material. **SUPERSEDED (§1.7a, ADR-005): there is no raw frame path — WebRTC's DTLS-SRTP covers the media path, and `AudioFrameCipher` is not in the build.**
 6. **Explicit ops:** call setup is `Invite→Accept/Decline→End` state machine (mantle `CallSignalingManager`); photo send is chunked + reassembled + verified (mantle `SovereignImageEngine`); manifests + undo where destructive.
 
 ---
@@ -206,7 +206,7 @@ Do not install software, modify system settings, or write outside `C:\Call-Dad` 
 | PowerShell mojibake BAN | NEVER modify source via `Get-Content/-replace/Set-Content`, `Out-File`, `Add-Content`. PS 5.1 mis-reads UTF-8 → mojibake. Editor tools only; Python with `encoding='utf-8'` if scripted; then analyze/lint + signature grep. | tagger `§3.1`, Vision `§3` |
 | PS binary pulls | NEVER pipe `adb pull` / binary output through PS pipes — write straight to file. | Atlas `§3` |
 | UI thread | Audio/call work off Main; Compose collects `StateFlow` with lifecycle; every `collect` after navigation needs lifecycle guard. No blocking calls in composables. | pathfinder port + tagger async law |
-| Storage | MediaStore / SAF + app-private files only. Temp under cache; clean up on failure too. Runtime media/camera/mic permissions via Accompanist/permissions; `createWriteRequest` on Android 11+ where needed. | tagger Storage law, Vision `§3` |
+| Storage | MediaStore / SAF + app-private files only. Temp under cache; clean up on failure too. Runtime media/camera/mic permissions via Accompanist/permissions; `createWriteRequest` on Android 11+ where needed. **SUPERSEDED: no Accompanist and no `createWriteRequest` — neither is in `libs.versions.toml`. Runtime asks are hand-written (`ui/permissions/CallPermissions.kt`, `MainActivity.kt`).** | tagger Storage law, Vision `§3` |
 | Audio | `AudioStreamingSession`/`LiveCallSession` socket template; Opus via Concentus; serialized executor for encode; jitter buffer on receive. Never log raw audio. **SUPERSEDED (§1.7a, ADR-005): WebRTC supplies DTLS-SRTP and Opus internally. `AudioStreamingSession`, `LiveCallSession`, `JitterBuffer` and Concentus are NOT in the build and are not to be added.** | mantle comms |
 | Crypto | Non-exportable Keystore keys; SQLCipher passphrase wrapped by Keystore; per-call ECDH ephemeral; `MemoryScrubber` idiom for key bytes. **SUPERSEDED: SQLCipher is a deferral-with-justification (ADR-003, re-open condition sharpened by ADR-018) and `MemoryScrubber` is not in the build. WebRTC's DTLS-SRTP covers the media path (ADR-005).** | mantle security |
 | Dep ceiling | New deps need ADR justification. No major upgrades without dedicated session. Pins in `gradle/libs.versions.toml` are load-bearing until ADR (ADR-004); every dependency goes through a catalog alias. | tagger/Atlas/Vision ceiling |

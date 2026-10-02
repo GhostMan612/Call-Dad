@@ -26,13 +26,14 @@ Call-Dad/
 │       ├── fcm/                # push receiver, ringing foreground service, token registrar
 │       ├── pairing/            # QR payload, QR generator, peer store (DataStore), ML Kit check
 │       ├── audio/ ptt/ helper/ game/ chat/ consent/ photos/ history/
-│       ├── navigation/         # AppNavHost (ring pull-in from any screen, parent-gated pairing)
+│       ├── navigation/         # AppNavigation.kt — the AppNavHost composable (ring pull-in from any screen, parent-gated pairing)
 │       └── ui/                 # screens, components (GiantComponents, VideoRenderer, ParentGate), theme
 ├── functions/                  # Cloud Function: ring push to the callee's device token (Node 22)
 ├── firestore.rules             # pair-scoped rooms, owner-only users, get-only pairings
 ├── tools/verify_project.py     # repo gate (stdlib only)
+├── tools/prove_gates_bite.py   # injects a duplicated brace, asserts the gate goes red VIA THE KOTLIN COMPILER and recovers
 ├── tools/rules-test/           # Firestore rules tests (local emulator)
-├── fixtures/ assets/           # synthetic only
+├── fixtures/ assets/           # synthetic only — never real child data (the game asset is app/src/main/assets/game.html)
 ```
 
 ## Key commands

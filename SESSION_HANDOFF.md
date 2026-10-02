@@ -33,9 +33,9 @@ The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**,
 `versionCode 11` / `0.3.1`. The phones are on **vc10 / 0.3.0**
 (flashed 2026-10-01 08:19) and source is one pass ahead.
 
-Gates, re-run `--rerun-tasks` against `4a5c555` (= origin/main): verify PASS ·
-unit **520 tests (260 per flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
-functions **13/13** · **rules emulator 44/44**.
+Gates, re-run against `313e566` (= origin/main): verify PASS ·
+unit **538 tests (269 per flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
+functions **13/13** (both files, via the fixed `gate` tool) · **rules emulator 44/44**.
 
 **That certifies the host gates, not a build.** No suite in this repo compiles the
 app — see below.
@@ -65,7 +65,8 @@ failing underneath, all invisible (see `LESSONS_LEARNED.md`). Anyone who cloned
 **Fixed by `4a5c555`** (the brace fix; documentation alignment and this file's
 own corrections followed in later commits on top of it), with all five suites re-run
 `--rerun-tasks`: verify PASS, unit 520 (260 per flavor) / 0 failures, lint 0 errors,
-functions 13/13, rules emulator 44/44.
+functions 13/13, rules emulator 44/44. **Superseded as the current count by the
+538 / 269-per-flavor row at the top of this file;** 520 was true at `4a5c555`.
 
 The lesson is not "a gate lied once". It is that **no suite in this repo compiles
 the app**, so "five gates green" has never meant "it builds".

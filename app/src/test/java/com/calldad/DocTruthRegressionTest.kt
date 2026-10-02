@@ -45,17 +45,35 @@ import java.io.File
  */
 class DocTruthRegressionTest {
 
+    /**
+     * The repo root, found by walking up until the toolchain catalog appears.
+     *
+     * This replaced a candidate list of `File(path)`, `File("app", path)`,
+     * `File("..", path)` which picked whichever existed FIRST -- and for a bare
+     * name like "README.md" that is `app/README.md`, so the test asserting the
+     * ROOT README's recorded test count was silently reading the module's. It
+     * failed for the right reason and for the wrong file, which is the worst
+     * combination: the message named README.md and the content came from
+     * app/README.md.
+     */
+    private val repoRoot: File by lazy {
+        var dir: File = File("").absoluteFile
+        while (dir.parentFile != null) {
+            if (File(dir, "gradle/libs.versions.toml").isFile) return@lazy dir
+            dir = dir.parentFile
+        }
+        error("could not locate the repo root (no gradle/libs.versions.toml above ${File("").absolutePath})")
+    }
+
     private fun read(path: String): String {
-        val file = listOf(File(path), File("app", path), File("..", path))
-            .firstOrNull { it.exists() }
-        checkNotNull(file) { "could not find " + path }
+        val file = File(repoRoot, path)
+        check(file.exists()) { "could not find " + file }
         return file.readText()
     }
 
     private fun repoFilesUnder(dir: String, suffix: String): List<File> {
-        val root = listOf(File(dir), File("app", dir), File("..", dir))
-            .firstOrNull { it.isDirectory }
-        checkNotNull(root) { "could not find directory " + dir }
+        val root = File(repoRoot, dir)
+        check(root.isDirectory) { "could not find directory " + root }
         return root.walkTopDown().filter { it.isFile && it.name.endsWith(suffix) }.toList()
     }
 
@@ -198,14 +216,81 @@ class DocTruthRegressionTest {
      */
     @Test
     fun noDocTellsTheOperatorToSkipGoogleServicesJson() {
-        repoFilesUnder("blueprints", ".md").forEach { doc ->
+        // Scanned everywhere an operator could be pointed at the file, not just
+        // blueprints: this claim has now appeared in setup-android-studio.md,
+        // BP-04 and SPEC_SHEET.md, and it was fixed in each one separately.
+        val docs = repoFilesUnder("blueprints", ".md") +
+            repoFilesUnder("docs", ".md") +
+            listOf(File(repoRoot, "SPEC_SHEET.md"))
+        docs.forEach { doc ->
             val text = doc.readText()
             assertFalse(
                 doc.path + " instructs the operator to withhold app/google-services.json. " +
-                    "ADR-002 is DECIDED and the file is required to build.",
+                    "ADR-002 is DECIDED, Firebase is the shipped signaling + wakeup path " +
+                    "(ADR-015), and the file is required to build -- a fresh clone " +
+                    "following this line produces an app that cannot compile.",
                 text.contains("no `google-services.json` until ADR-002") ||
                     text.contains("no google-services.json until ADR-002")
             )
+        }
+    }
+
+    /**
+     * `SPEC_SHEET.md` and `ARCHITECTURE.md` open with a HISTORICAL banner, which
+     * covers a plan that was *superseded*. It does not cover a plan that was
+     * *rejected* — Hilt, Room, SQLCipher and Concentus were never adopted, so a
+     * reader who trusts the banner and skims to the "Technical contract" finds
+     * a dependency list that cannot compile. `SPEC_SHEET.json` (machine truth)
+     * records each as explicitly NOT-in-the-build; the prose had not caught up.
+     */
+    @Test
+    fun noHistoricalBannerHidesARejectedStack() {
+        val catalog = read("gradle/libs.versions.toml")
+        val rejected = listOf("Hilt", "Room", "SQLCipher", "OkHttp", "Concentus", "KSP")
+        listOf(
+            "SPEC_SHEET.md",
+            "blueprints/ARCHITECTURE.md",
+            "blueprints/CALL_DAD_MASTER_BLUEPRINT.md"
+        ).forEach { path ->
+            val text = read(path)
+            assertTrue(
+                path + " should still carry its HISTORICAL banner",
+                text.contains("HISTORICAL")
+            )
+            // Split into `## ` sections. A section is allowed to name a rejected
+            // dependency as PROPOSED if that section opens by saying so; every
+            // other section must negate it on the line itself. Without the
+            // section split, the correctly-flagged "as proposed" list trips the
+            // same guard that exists to catch an unmarked claim.
+            val sections = text.split("\n## ").map { section ->
+                val lines = section.lines()
+                val body = lines.joinToString("\n")
+                // Deliberately NOT "NOT BUILT": that phrase appears INSIDE a section
+                // as a line-level correction, and honouring it at section level would
+                // exempt the whole section — which is how this guard gets defeated
+                // by its own fix.
+                val flagged = listOf("NOT WHAT SHIPPED", "AS PROPOSED", "HISTORICAL")
+                    .any { body.contains(it) }
+                lines to flagged
+            }
+            sections.forEach { (lines, flagged) ->
+                lines.forEach { line ->
+                    rejected.forEach { dep ->
+                        if (!line.contains(dep)) return@forEach
+                        val negated = listOf("no ", "not ", "absent", "deferred")
+                            .any { line.contains(it, ignoreCase = true) }
+                        val inCatalog = catalog.contains(dep)
+                        assertTrue(
+                            path + " names the rejected dependency \"$dep\" " +
+                                "(catalog has it: $inCatalog) as if it were part of " +
+                                "the shipped stack. Either negate it on the line or " +
+                                "put it under a section that opens by saying it is " +
+                                "the proposal and not what shipped. Line: $line",
+                            inCatalog || negated || flagged
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -237,6 +322,11 @@ class DocTruthRegressionTest {
      * Counts drift silently because nothing breaks when they are wrong: 518 vs
      * 520 reads as a rounding difference. Pin them, and pin the unit that is
      * stable across runs.
+     *
+     * Second half of the pin: the numbers recorded in the docs must equal the
+     * numbers the suite has. Counting the source is the easy direction and it is
+     * the direction that was already checked -- the recorded text was free to
+     * drift from it, and did (it said 520 after the suite was 536).
      */
     @Test
     fun theRecordedTestCountsMatchTheTestSource() {
@@ -251,9 +341,28 @@ class DocTruthRegressionTest {
             Regex("""^\s*@Test""", RegexOption.MULTILINE).findAll(classFile.readText()).count()
         }
         assertTrue(
-            "expected 268 @Test methods across the suite (536 across both flavors) " +
+            "expected 269 @Test methods across the suite (538 across both flavors) " +
                 "but found $testMethods -- update the recorded gate counts",
-            testMethods == 268
+            testMethods == 269
         )
+
+        // The recorded TEXT, not just the source. These are the four files that
+        // state the count as current; a stale number there is the drift the pin
+        // exists to catch, and pinning only the source direction leaves it open.
+        listOf(
+            "blueprints/CURRENT_STATE.md",
+            "blueprints/CHECKPOINTS.md",
+            "SESSION_HANDOFF.md",
+            "README.md"
+        ).forEach { path ->
+            val text = read(path)
+            assertTrue(
+                path + " records $testMethods tests per flavor / ${testMethods * 2} " +
+                    "across both flavors; it must match the suite or a reader is " +
+                    "quoting a number that was true of an older commit",
+                text.contains("${testMethods * 2}") &&
+                    (text.contains("$testMethods") || text.contains("$testMethods "))
+            )
+        }
     }
 }
