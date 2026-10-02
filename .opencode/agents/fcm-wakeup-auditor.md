@@ -16,8 +16,9 @@ Read-only auditor for the ring path. The promise is "one giant Call Dad button t
 so a missed ring is a product failure, not a bug report.
 
 ## Files
-- `app/src/main/java/com/calldad/fcm/CallMessagingService.kt` — token refresh, topic
-  subscription, data-only message handling.
+- `app/src/main/java/com/calldad/fcm/CallMessagingService.kt` — token refresh, data-only message
+  handling. **There is no topic subscription anywhere in the tree** (`subscribeToTopic` /
+  `messaging.topic` return zero matches) — push is token-targeted by decision (ADR-015 §2).
 - `app/src/main/java/com/calldad/fcm/CallForegroundService.kt` — foreground-first, validates
   against the paired room, single ringer.
 - `app/src/main/java/com/calldad/fcm/PushTokenRegistrar.kt` — token → `users/{uid}`.

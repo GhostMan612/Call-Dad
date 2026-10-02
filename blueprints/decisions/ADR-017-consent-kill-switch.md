@@ -95,7 +95,7 @@ Every gate had checked the *halves* of consent — the domain gate, the rules, t
 in one command: the scope appeared once, inside the store, computing a decision
 nobody read.
 
-Fixed in vc11/0.3.1 and pinned by `ConsentEnforcementRegressionTest` (11 tests):
+Fixed in vc11/0.3.1 and pinned by `ConsentEnforcementRegressionTest` (14 tests):
 both call directions, an incoming ring refused *before* the phone rings with
 ENDED published so the caller's phone stops too, revocation ending a live call,
 the walkie talkie gated in both directions including the engine's own send path,

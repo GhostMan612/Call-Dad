@@ -17,7 +17,12 @@ paired grown-up, so you audit them adversarially: assume the attacker is a curio
 the app installed, or a leaked/shared device.
 
 ## Files
-- `firestore.rules` — `users/{uid}`, pair-scoped `calls/{callId}`, `pairings/{uid}`, ptt clips.
+- `firestore.rules` — `users/{uid}`, pair-scoped `calls/{callId}`, `pairings/{uid}`, ptt clips,
+  **and the stanzas added after the 2026-10-01 deploy, which carry 21 of the 44 emulator cases**:
+  `chat/{messageId}`, `photos/{photoId}` + `photos/{photoId}/chunks/{index}`,
+  `consents/{granteeUid}`, `revocations/{revocationId}`, and the `negotiationRound` monotonicity
+  guards on the call document. Audit the whole file — the four stanzas named first are the four
+  that predate the deploy.
 - `tools/rules-test/rules.test.js` + `tools/rules-test/package.json` — emulator tests.
 - `functions/ring.js`, `functions/index.js`, `functions/ring.test.js` — ring push.
 - `firebase.json` — rules/functions deploy mapping.

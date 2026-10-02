@@ -38,6 +38,26 @@ patterns nobody had ever seen fire.
 the scan loop, and report the matched text. A future added pattern must come with
 a reason, which is the cheapest possible prompt to think about whether it fires.
 
+## The gate ran 6 of its 13 tests, and every document agreed that it ran 13
+**Mistake.** `RULES.md`, `gate-runner.md` and the audit trail all recorded the
+functions gate as **13 tests (6 ring + 7 clip)**, and warned in bold that running
+`ring.test.js` alone "gives 6 and reads as a regression". The `gate` tool — the
+sanctioned entry point every document tells an agent to use — ran exactly
+`node --test functions/ring.test.js`. **The tool did the thing three documents
+warned against, and printed `functions: PASS`.** `AGENTS.md`'s cold-start ramp
+also carried the 6-test command, so a fresh session copying the ramp reproduced
+the tool's own mistake and had two documents agreeing on it.
+**Root cause.** The warning was written as prose and never as an executable
+assertion, so it had no reader. There was also no test that compared *the command
+in the docs* to *the command in the tool* — a doc can be right and the tool wrong
+and nothing notices, which is the same shape as the vc10 kill switch: every part
+existed, no part checked another.
+**Check.** `DocTruthRegressionTest` pins the ramp's command and asserts no
+`firebase*deploy*` allow exists in `opencode.json`; and the tool itself now runs
+both files. The general rule: **when a document names a command, something must
+execute that command's expectation.** A rule expressed only as prose is a rule
+that decays silently, and it decays toward the shorter, cheaper command.
+
 ## The safety control that controlled nothing (vc10's kill switch)
 **Mistake.** The parental kill switch shipped complete, documented, ADR'd,
 emulator-proven at 44/44 — and enforced **nothing** on calling or the walkie
@@ -57,7 +77,7 @@ once, inside the store, computing a decision nobody read. Same shape as the
 `ChatViewModel.scopes` field nobody wrote. Both were "complete features, green
 gates, unusable", and both were caught only by looking for what a finished
 feature *should have touched*.
-**Check.** `ConsentEnforcementRegressionTest` (11 tests) pins each direction of
+**Check.** `ConsentEnforcementRegressionTest` (14 tests) pins each direction of
 each feature, the listener as well as the screen, and the unknown-decision case.
 The general rule: **when a feature is finished, grep for what it should have
 touched, then read the list.** A feature with no reader of its own gate is a

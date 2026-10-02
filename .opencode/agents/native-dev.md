@@ -1,5 +1,5 @@
 ---
-description: Owns the app/ native Kotlin tree — Compose Navigation, ViewModels, consent wiring, and the flavored unit/lint gates. Use for any change under app/src. Note that no gate here compiles the app.
+description: Reviews the app/ native Kotlin tree for conformance — Compose Navigation, ViewModels, consent wiring, and the flavored unit/lint gates. It is READ-ONLY (edit and bash denied), so dispatch it to review or diagnose, never to implement. Note that no gate here compiles the app.
 mode: subagent
 temperature: 0
 permission:

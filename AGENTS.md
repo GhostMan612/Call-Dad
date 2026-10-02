@@ -67,7 +67,7 @@ Run these ONCE, as the closing step of a phase — and via the **`gate` tool**, 
 
 ```powershell
 C:\venv-hub\venv\Scripts\python.exe tools\verify_project.py
-node --test functions/ring.test.js
+node --test functions/ring.test.js functions/clip.test.js   # 13 tests: 6 ring + 7 clip; ring.test.js alone gives 6 and reads as a regression
 cd tools\rules-test; npm install; npx firebase emulators:exec --only firestore --project demo-calldad "node --test"
 ```
 
@@ -79,6 +79,9 @@ are **SKIPPED, not failed** — say so; never carry a previous run's count forwa
 ```powershell
 firebase deploy --only firestore:rules,functions
 ```
+
+`opencode.json` denies every `firebase*deploy*` for this lane. There is no exception and
+there is no narrow allow — if you find one, it is a bug, not a permission.
 
 ### Read-only device checks (allowed, no installs)
 

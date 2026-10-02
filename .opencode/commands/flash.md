@@ -51,8 +51,11 @@ source `versionCode`. Only then collect logs.
 ```
 firebase deploy --only firestore:rules,functions
 ```
-Call out that until this lands, pairing writes to `pairings/{uid}` can be denied and surface to
-the user as "The other device didn't respond."
+These are already live: `firestore.rules` was released 2026-09-30 and re-released 2026-10-01 to
+`calldad-508d7`, and `onCallRoomWritten` / `onPttClipWritten` are deployed v2. Re-running the
+deploy is only needed after an edit to `firestore.rules` or `functions/`. If a pairing write is
+denied in the field, the deployed ruleset is older than this tree — check the deploy date, do
+not assume the `pairings` stanza is missing.
 
 ## Output
 A single fenced block of commands the operator can paste, the expected fingerprint, the APK

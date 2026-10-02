@@ -61,7 +61,7 @@
     "camera": "CameraX 1.4.2 (video call only; no camera is used for photos)",
     "signaling": "Firebase Firestore 34.19.0, pair-scoped rooms calls/{uidA_uidB}",
     "wakeup": "Firebase Cloud Messaging + a foreground service, token-targeted (ADR-016)",
-    "pairing": "unbundled ML Kit barcode 18.3.1 + ZXing 3.5.3 fallback (ADR-009 exception, K9)",
+    "pairing": "unbundled ML Kit barcode 18.3.1 + ZXing 3.5.3 fallback — the one named exception to RULES §1.7 (recorded in RULES §1.7a and CURRENT_STATE K9; no ADR exists for it: ADR-009 is the Phase-7 data-channel decision and does not mention ML Kit)",
     "local_storage": "DataStore 1.1.1 + an in-memory peer store — NO Room, NO SQLCipher, NO KSP, NO OkHttp",
     "compat": "compileSdk 35 / targetSdk 35 / minSdk 26 (ADR-001-B)"
   },
@@ -79,7 +79,7 @@
 
   "firebase": {
     "role": "call signaling, consent certs, chat, photos, and a data-only ring/clip push",
-    "rooms": "calls/{uidA_uidB} — the id IS the two UIDs, so rules authorize from the path alone",
+    "rooms": "calls/{uidA_uidB} — the id IS the two UIDs, so rules authorize from the path alone. Fields: status, seq, callerUid, calleeUid, offer, answer, callerCandidates, calleeCandidates, renegotiating, negotiationRound, updatedAt. One level below the room: ptt/, chat/, photos/{photoId} + photos/{photoId}/chunks/{index}, consents/{granteeUid}, revocations/{revocationId}. Also users/{uid}.fcmToken (owner-only) and pairings/{uid} (get by id only, no list)",
     "media": "never via Firebase; DTLS-SRTP end to end",
     "credentials": "google-services.json is gitignored and operator-placed",
     "deployed": "vc10 ruleset, RELEASED 2026-10-01 to calldad-508d7 — chat, photos (manifest + chunks), consents, revocations and the negotiationRound guards ARE live. Deployed-but-UNWITNESSED: no phone has run a single chat write, photo transfer, consent grant or ICE restart against them."

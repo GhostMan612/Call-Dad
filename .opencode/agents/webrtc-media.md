@@ -28,8 +28,10 @@ stream-webrtc and Android docs rather than guessing API shapes; treat anything n
 - `app/src/main/java/com/calldad/game/GameWebRtcBridge.kt` + `assets/game.html` — negotiated
   data channel.
 - `app/src/main/java/com/calldad/audio/CallAudioManager.kt` — ringer + ringback, process-wide.
-- `app/src/main/java/com/calldad/ptt/` — walkie-talkie; note it degrades to a simulated engine
-  when the private module is absent. Say so, never imply real PTT audio.
+- `app/src/main/java/com/calldad/ptt/` — walkie-talkie. `PttViewModel` wires **`VoiceClipPttEngine`**
+  (real AAC clips over the pair room, ADR-016); `SimulatedPttEngine` is host-test-only and is
+  never referenced from `app/src/main`. There is no private module and no runtime fallback — if
+  you find a simulated engine in a `main` path, that IS the finding.
 
 ## Invariants
 - **Teardown order is pc → tracks → factory.** Disposing the factory under an attached sink was

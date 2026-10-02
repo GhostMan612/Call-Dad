@@ -1,5 +1,11 @@
 # BP-03 — Chat + voice memo + remote rendezvous (Phase 3)
 
+> **HISTORICAL (2026-09-24):** the rendezvous/relay plan below was retired by
+> `blueprints/decisions/ADR-015-pair-rooms.md` — there is no relay, no `main.go`, no
+> reflexive-addr path, and no hole-punch. Signaling is pair-scoped Firestore and voice memos are
+> AAC clips in the pair room (ADR-016). Current shape: `AGENTS.md` "Architecture notes",
+> `blueprints/CURRENT_STATE.md`, ADR-015 and ADR-016.
+
 Goal: 1:1 Dad thread with receipts + Opus memos; remote reachability via rendezvous.
 
 ## Port

@@ -1,5 +1,5 @@
 ---
-description: Audits the Call-Dad call core — CallViewModel, CallState, SignalingClient, navigation, teardown, timers, heartbeat, takeover. Use when reviewing or changing signaling, call lifecycle, or hangup/crash behavior.
+description: Audits the Call-Dad call core — CallViewModel, CallState, SignalingClient, navigation, teardown, timers, renegotiation. Use when reviewing or changing signaling, call lifecycle, or hangup/crash behavior. Heartbeat and takeover are deliberately absent (ADR-015) and must NOT be reported as findings.
 mode: subagent
 temperature: 0.1
 permission:
@@ -23,7 +23,10 @@ findings with `file:line` evidence.
 
 ## What to audit
 - `app/src/main/java/com/calldad/ui/screens/CallViewModel.kt` — call state ownership, attempt
-  tokens, generations, teardown, timers, heartbeat, takeover guards.
+  tokens, generations, teardown, timers, renegotiation (ICE-restart) guards.
+  **Heartbeat and stale-takeover are DELIBERATELY ABSENT (ADR-015:18, "no busy/takeover logic any
+  more"); no heartbeat writer exists anywhere in `app/src`. Do not report their absence as a bug,
+  and do not propose adding them without an ADR.**
 - `app/src/main/java/com/calldad/ui/screens/CallState.kt` — 7 states, `canTransition` table.
 - `app/src/main/java/com/calldad/data/signaling/SignalingClient.kt` + `SignalingModels.kt` —
   pair-scoped room ids, monotonic `seq`, monotonic SDP, ICE ordering, pending-write guards.

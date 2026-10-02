@@ -2,8 +2,9 @@
 
 > Updated every session per RULES.md §4.2. Executable truth > prose.
 > Refreshed 2026-10-01 after Contract 11 and the vc10→vc11 consent-enforcement pass.
-> Superseded history lives in git. **"Device-proven" anywhere below means proven
-> under vc7** — no `SPEC_SHEET` §2 feature has been exercised on any current build.
+> Superseded history lives in git. **"Device-proven" anywhere below means proven under the
+> build named in that row** — vc5, vc6 or vc7, all superseded. No `SPEC_SHEET` §2 feature has
+> been exercised on vc10 or vc11.
 
 ## Toolchain (source of truth: `gradle/libs.versions.toml`, ADR-004)
 
@@ -18,11 +19,14 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 
 | Path | Role |
 |------|------|
-| `MainActivity.kt` | Single activity (singleTop). Routes ring-notification taps, tracks foreground, one-time full-screen-intent ask |
+| `MainActivity.kt` | Single activity (singleTop). Routes ring-notification taps, tracks foreground, one-time full-screen-intent ask, and the API 27+-guarded runtime opt-out of `showWhenLocked`/`turnScreenOn` |
+| `ui/permissions/CallPermissions.kt` | Camera/mic permission state as a first-class UI state, not a crash |
+| `ui/theme/{Theme,Color,Type}.kt`, `res/xml/backup_rules.xml`, `res/xml/data_extraction_rules.xml` | Flavor-aware theme (blue parent / pink child); backup and device-transfer exclusions |
 | `CallDadApplication.kt` | Firebase init, anonymous auth with retry, silent `incoming_call_v2` channel, token registration |
 | `navigation/AppNavigation.kt`, `Routes.kt` | Graph; pulls to the ring screen from any route; game ↔ call; grown-ups gate before pairing |
 | `data/session/FamilySession.kt` | Auth UID + paired peer → `FamilyPair(ownUid, peerUid, roomId)` |
-| `data/signaling/SignalingClient.kt` | Room ops: publishOffer (seq+1), publishAnswer(seq), finishCall(seq), ICE trickle, observe |
+| `data/signaling/SignalingClient.kt` | Room ops: publishOffer (seq+1), publishAnswer(seq), finishCall(seq), ICE trickle, observe, publishRenegotiation{,Answer} |
+| `data/signaling/SignalingClient.kt:332` `CallDocument` | The pair-room document itself: ids, seq, SDP, ICE, `renegotiating`, **`negotiationRound`** (line 350), `updatedAtMs`. It was moved here from a deleted `CallDocumentTest`'s model, and it is where the Contract-11 reconnect fix lives — the rules enforce `negotiationRound` monotonicity, so this field is a security-relevant invariant, not a convenience |
 | `data/signaling/SignalingModels.kt` | SdpType, SessionDescription, IceCandidate, `CallRoom` (ids, ring freshness, no-answer window) |
 | `webrtc/WebRTCClient.kt` | Single-use media stack per attempt; buffered remote ICE; safe dispose order; audio mode save/restore |
 | `webrtc/WebRtcConfig.kt`, `WebRtcLog.kt`, `ConnectionState.kt` | ICE servers (STUN + optional TURN), log guardrail, health enum |
@@ -48,7 +52,7 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `ui/screens/PhotoViewModel.kt`, `ui/screens/PhotoScreen.kt` | Picture screen. Decode gated on `verified`; system photo picker only, no share/save |
 | `ui/screens/ConsentScreen.kt` | Parent-side grant/revoke behind `ParentGate` — the kill switch's only trigger |
 
-Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (25 classes, 518 tests across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (44 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (26 classes, 260 tests per flavor / 520 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (44 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
 ## Known-issue registry
 
@@ -88,7 +92,7 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 `tools/prove_gates_bite.py` now asserts the gate goes red on one via the compiler.
 
 - `tools/verify_project.py`: PASS (10 dirs + 102 files, includes the control-byte ban).
-- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **518 tests / 0 failures**, both flavors.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **260 tests per flavor / 520 across both, 0 failures**.
 - `:app:lintParentDebug :app:lintChildDebug`: PASS, **0 errors** both flavors.
 - `node --test functions/*.test.js`: PASS, **13/13** (6 ring + 7 clip).
 - **Firestore rules emulator: 44/44**, including the chat, photo, consent,
@@ -97,7 +101,7 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
   emulator refuses to start without a JVM, which is how the suite went missing
   in the first place.
 
-### Two things that will surprise an operator
+### Three things that will surprise an operator
 
 1. **A fresh install is inert until a parent grants — CHECK THIS FIRST.**
    Absence of a consent cert DENIES (ADR-017), so on first launch the Messages
@@ -112,6 +116,13 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 2. **The rules are live but unwitnessed.** Deployed 2026-10-01 and 44/44 on the
    emulator, but no phone has executed a single chat write, a photo transfer, a
    consent grant, or an ICE restart against them.
+3. **The build on both phones is vc10, and vc10 lies about the kill switch.** Both
+   devices run 10 / 0.3.0 (table below) while source is vc11. vc10 does not enforce
+   the consent gate on calling or the walkie talkie in either direction and does not
+   stop chat/photo downloads, so a parent on vc10 is told the app is switched off
+   while it is not. **Any consent check against these phones proves nothing about the
+   current source** — flash vc11 first, then treat the result as the first real
+   evidence this contract has produced.
 
 ### Device evidence (VERIFIED, `dumpsys` fingerprint)
 

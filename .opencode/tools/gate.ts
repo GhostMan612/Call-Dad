@@ -114,7 +114,13 @@ export default tool({
     }
 
     if (want.has("functions")) {
-      const r = run(["node", "--test", "functions/ring.test.js"], cwd, 300_000)
+      // BOTH files. Running only ring.test.js is 6 of 13 tests, and a 6-test
+      // result reads as a 7-test regression rather than as a partial run.
+      const r = run(
+        ["node", "--test", "functions/ring.test.js", "functions/clip.test.js"],
+        cwd,
+        300_000,
+      )
       if (r.code === 0) results.push(`functions: PASS\n${tail(r.out, 12)}`)
       else {
         failed++
@@ -122,7 +128,7 @@ export default tool({
         if (/not recognized|ENOENT/i.test(combined)) {
           skipped++
           results.push(
-            "functions: SKIPPED (node not on PATH in this shell) — operator must run `node --test functions/ring.test.js`",
+            "functions: SKIPPED (node not on PATH in this shell) — operator must run `node --test functions/ring.test.js functions/clip.test.js` (13 tests: 6 ring + 7 clip)",
           )
         } else {
           results.push(`functions: FAIL (exit ${r.code})\n${tail(combined, 40)}`)

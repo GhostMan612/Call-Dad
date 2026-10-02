@@ -50,7 +50,7 @@ Handoff files (`SESSION_HANDOFF.md`, `blueprints/CURRENT_STATE.md`) must stay Ge
 
 - **Source** `vc11 / 0.3.1`. **Both phones** are on `vc10 / 0.3.0` (flashed 2026-10-01) — source is one pass ahead and **not installed**.
 - **Backend is live.** `firestore.rules` released 2026-10-01 (chat, photos, consents, revocations, `negotiationRound`), plus `onCallRoomWritten` and `onPttClipWritten`.
-- Host gates green against `4a5c555`: verify PASS · unit **518 / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **44/44**.
+- Host gates green against `4a5c555`: verify PASS · unit **520 (260 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **44/44**.
 - **Two things that gate does not tell you:**
   1. **No `SPEC_SHEET` §2 feature has ever been exercised on hardware.** Not one call, text, photo, consent grant or ICE restart on any current build. The only proven E2E call is from vc7.
   2. **No version of this app has ever demonstrably enforced a parental kill switch.** vc10 — which is what is on both phones — presents "Turn everything off" while calling, the walkie talkie and photo/chat downloads continue unaffected. Fixed in vc11, in source only.

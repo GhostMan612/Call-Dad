@@ -34,7 +34,7 @@ The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**,
 (flashed 2026-10-01 08:19) and source is one pass ahead.
 
 Gates, re-run `--rerun-tasks` against `4a5c555` (= origin/main): verify PASS ·
-unit **518 tests / 0 failures** both flavors · lint **0 errors** both flavors ·
+unit **520 tests (260 per flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
 functions **13/13** · **rules emulator 44/44**.
 
 **That certifies the host gates, not a build.** No suite in this repo compiles the
@@ -62,9 +62,10 @@ the full five-suite gate printed **GATES GREEN** on it. Six further tests were
 failing underneath, all invisible (see `LESSONS_LEARNED.md`). Anyone who cloned
 `8f47512` got an app that would not build.
 
-**Fixed by `4a5c555`, which is HEAD and matches `origin/main`** (behind 0 / ahead
-0), with all five suites re-run `--rerun-tasks`: verify PASS, unit 518 / 0
-failures, lint 0 errors, functions 13/13, rules emulator 44/44.
+**Fixed by `4a5c555`** (the brace fix; documentation alignment and this file's
+own corrections followed in later commits on top of it), with all five suites re-run
+`--rerun-tasks`: verify PASS, unit 520 (260 per flavor) / 0 failures, lint 0 errors,
+functions 13/13, rules emulator 44/44.
 
 The lesson is not "a gate lied once". It is that **no suite in this repo compiles
 the app**, so "five gates green" has never meant "it builds".
@@ -266,11 +267,13 @@ changed before concluding the change was wrong.**
 - **Removed the `| Select-Object -Last 5` idiom** from `AGENTS.md` and `CHECKPOINTS.md`.
   That idiom is how the habit was taught: it tells an agent to reach for the shell to
   inspect output. Operator runbooks in `/flash` keep their PowerShell — a human runs those.
-- **`ToolUseDisciplineTest`** (10 tests) pins both layers: the deny list, the presence and
+- **`ToolUseDisciplineTest`** (14 tests) pins both layers: the deny list, the presence and
   position of the law, the absence of the pipe idiom, the skill/gate-runner statements,
-  and that the six read-only auditors still hold `bash: deny`. A rule that is only
+  and that the nine read-only auditors still hold `bash: deny`, and that every agent
+  named in the docs is actually registered with `mode: subagent` (three of them were
+  not, so they could not be invoked at all). A rule that is only
   written down is a rule that will drift; this makes it fail loudly instead.
-- **Confirmed not the cause:** the six read-only auditors already had `bash: deny`, so
+- **Confirmed not the cause:** the read-only auditors already had `bash: deny`, so
   subagent fan-out was never the leak. `gate-runner` was the only fleet agent with shell
   access and is now constrained.
 
