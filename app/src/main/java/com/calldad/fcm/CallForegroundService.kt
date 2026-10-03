@@ -76,8 +76,24 @@ class CallForegroundService : Service() {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
-                buildIncomingCallNotification(),
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                // THE SILENT CHANNEL, ALWAYS. The FGS-start deadline is strict and
+                // startForeground must run before any network read, so consent
+                // CANNOT be checked first -- and the incoming-call channel is
+                // IMPORTANCE_HIGH, which means a notification posted here can
+                // sound and buzz. That was a kill-switch hole even with the gate
+                // in place: a revoked child's phone lit up and vibrated before
+                // `validateAndWatch` ever got to say no.
+                //
+                // So the promotion uses a channel that cannot make noise. If
+                // consent allows, `startRinging()` below reposts the same id on
+                // the high-importance channel and the phone behaves normally. If
+                // it denies, the child sees nothing at all. No ring, no buzz, no
+                // screen — which is what "calling is turned off" has to mean.
+                buildIncomingCallNotification(
+                    silent = true,
+                    callId = intent?.getStringExtra(EXTRA_CALL_ID).orEmpty(),
+                    seq = intent?.getIntExtra(EXTRA_SEQ, -1) ?: -1
+                ),                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL else 0
             )
         }.isSuccess
@@ -220,11 +236,34 @@ class CallForegroundService : Service() {
             return
         }
 
+        // Consent allowed AND the room is confirmed live. NOW the notification
+        // becomes a real incoming-call notification, on the high-importance
+        // channel, with the full-screen intent — because up to this point the
+        // child has seen nothing audible. Same notification id, so this is an
+        // update rather than a second notification.
+        promoteNotification(callId, seq)
         CallAudioManager.startRinging(applicationContext, CallAudioManager.OWNER_SERVICE)
 
         delay(RING_TIMEOUT_MS)
         WebRtcLog.transition("FGS ring timed out")
         shutDown()
+    }
+
+    /**
+     * Re-posts [NOTIFICATION_ID] on the loud call channel. Only reached after
+     * consent and liveness have both passed.
+     */
+    private fun promoteNotification(callId: String, seq: Int) {
+        runCatching {
+            getSystemService(android.app.NotificationManager::class.java)?.notify(
+                NOTIFICATION_ID,
+                buildIncomingCallNotification(
+                    silent = false,
+                    callId = callId,
+                    seq = seq
+                )
+            )
+        }
     }
 
     /**
@@ -268,9 +307,23 @@ class CallForegroundService : Service() {
         super.onDestroy()
     }
 
-    private fun buildIncomingCallNotification(): Notification {
+    /**
+     * @param silent true for the mandatory FGS promotion, which MUST NOT make a
+     *   sound: consent has not been checked yet at that point, and the call
+     *   channel is IMPORTANCE_HIGH. Carries no title, no full-screen intent and
+     *   no category, so a revoked child's phone stays dark and silent until
+     *   `promoteNotification` says otherwise. false is the real thing, posted
+     *   only after consent AND a server-confirmed live room.
+     */
+    private fun buildIncomingCallNotification(
+        silent: Boolean,
+        callId: String,
+        seq: Int
+    ): Notification {
         val fullScreenIntent = Intent(this, MainActivity::class.java).apply {
             action = ACTION_INCOMING_CALL
+            putExtra(EXTRA_CALL_ID, callId)
+            putExtra(EXTRA_SEQ, seq)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val fullScreenPi = PendingIntent.getActivity(
@@ -286,6 +339,18 @@ class CallForegroundService : Service() {
         // is still the ringer either way.
         val keyguard = getSystemService(KeyguardManager::class.java)
         val takeOverScreen = keyguard?.isKeyguardLocked != true
+
+        if (silent) {
+            return NotificationCompat.Builder(this, CallDadApplication.CHANNEL_RING_PENDING_CONSENT)
+                .setSmallIcon(R.drawable.ic_call)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setOngoing(true)
+                .setSilent(true)
+                .setContentTitle("")
+                .setContentText("")
+                .build()
+        }
 
         return NotificationCompat.Builder(this, CallDadApplication.CHANNEL_INCOMING_CALL)
             .setSmallIcon(R.drawable.ic_call)

@@ -341,9 +341,9 @@ class DocTruthRegressionTest {
             Regex("""^\s*@Test""", RegexOption.MULTILINE).findAll(classFile.readText()).count()
         }
         assertTrue(
-            "expected 278 @Test methods across the suite (556 across both flavors) " +
+            "expected 283 @Test methods across the suite (566 across both flavors) " +
                 "but found $testMethods -- update the recorded gate counts",
-            testMethods == 278
+            testMethods == 283
         )
 
         // The recorded TEXT, not just the source. These are the four files that

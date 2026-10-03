@@ -460,8 +460,18 @@ class ConsentStore(
      * @param roomId the pair room the push named.
      * @param ownUid this device.
      * @param peerUid the paired device.
+     * @param scope the permission being exercised. Defaults to CALL, which is
+     *   what a ring needs, but the parameter exists because the notification
+     *   paths ask about different features (a PTT nudge asks about PTT) and a
+     *   single hardcoded scope there would be a kill switch that gates the wrong
+     *   door.
      */
-    suspend fun decisionNow(roomId: String, ownUid: String, peerUid: String): ConsentDecision =
+    suspend fun decisionNow(
+        roomId: String,
+        ownUid: String,
+        peerUid: String,
+        scope: ConsentScope = ConsentScope.CALL
+    ): ConsentDecision =
         withTimeoutOrNull(CONSENT_PROBE_TIMEOUT_MS) {
             val room = firestore.collection("calls").document(roomId)
             val grants = room.collection("consents")
@@ -488,7 +498,7 @@ class ConsentStore(
             val certs = grants.documents.mapNotNull { it.toGrant() } +
                 revocations.documents.mapNotNull { it.toRevocation() }
             ConsentGate.forAction(
-                certs, ownUid, peerUid, ConsentScope.CALL, System.currentTimeMillis()
+                certs, ownUid, peerUid, scope, System.currentTimeMillis()
             )
         } ?: run {
             // Timed out. Still denied.

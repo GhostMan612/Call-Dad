@@ -52,7 +52,13 @@ class QuietNotificationTest {
         codeOnly(src.substringAfter(signature).substringBefore("\n    }"))
 
     private val messageChannelBody = body(app, "private fun createMessageChannel()")
-    private val clipHandlerBody = body(service, "private fun handleClipWaiting(")
+    // Sliced on the BUILDER, not on handleClipWaiting. That handler became a thin
+    // consent gate that delegates the notification to a separate function, so a
+    // slice of the handler now sees the gate and no builder at all — the same
+    // "substringBefore returned the wrong region" trap this suite has already been
+    // bitten by once. The property under test (which channel, which priority) lives
+    // in the builder, so that is what is asserted.
+    private val clipHandlerBody = body(service, "private fun postClipWaitingNotification(")
 
     // ---- the message channel must exist and must be quiet ----
 
@@ -102,16 +108,22 @@ class QuietNotificationTest {
     @Test
     fun theClipNotificationUsesTheQuietChannelNotTheRingChannel() {
         assertTrue(
-            "the clip notification must be built on CHANNEL_PTT_MESSAGE. Handler body: " +
+            "the clip notification must be built on CHANNEL_PTT_MESSAGE. Builder body: " +
                 clipHandlerBody,
             clipHandlerBody.contains("CHANNEL_PTT_MESSAGE")
         )
         assertFalse(
             "the clip notification must NOT be built on the ring channel -- from Android 8 " +
                 "the channel importance wins and the per-notification priority is ignored, " +
-                "which is exactly how a voice message rang at full volume. Handler body: " +
+                "which is exactly how a voice message rang at full volume. Builder body: " +
                 clipHandlerBody,
             clipHandlerBody.contains("CHANNEL_INCOMING_CALL")
+        )
+        // And the pending-consent ring channel must never carry a voice message
+        // either. It is silent by design, but it is still a RING channel.
+        assertFalse(
+            "a clip notification must not be built on the pending-consent ring channel",
+            clipHandlerBody.contains("CHANNEL_RING_PENDING_CONSENT")
         )
     }
 
@@ -120,13 +132,34 @@ class QuietNotificationTest {
         // Belt and braces: if the channel is ever refactored away, the priority
         // should still say "quiet".
         assertTrue(
-            "the clip notification must request PRIORITY_LOW. Handler body: " + clipHandlerBody,
+            "the clip notification must request PRIORITY_LOW. Builder body: " + clipHandlerBody,
             clipHandlerBody.contains("PRIORITY_LOW")
         )
         assertFalse(
-            "the clip notification must never request HIGH or MAX priority. Handler body: " +
+            "the clip notification must never request HIGH or MAX priority. Builder body: " +
                 clipHandlerBody,
             clipHandlerBody.contains("PRIORITY_HIGH") || clipHandlerBody.contains("PRIORITY_MAX")
+        )
+    }
+
+    /**
+     * The PTT nudge is now consent-GATED, and the gate must not have been paid for
+     * with the K12 quiet-channel property. Splitting the handler into "ask, then
+     * post" is exactly the refactor that could quietly move the builder onto the
+     * wrong channel, so both halves are asserted.
+     */
+    @Test
+    fun theClipNudgeIsConsentGatedAndStillQuiet() {
+        val handler = body(service, "private fun handleClipWaiting(")
+        assertTrue(
+            "the PTT nudge must be consent-gated on ConsentScope.PTT. An unsolicited " +
+                "'A message is waiting' on a phone whose parent closed the walkie " +
+                "talkie contradicts the control even though nothing leaks. Body: " + handler,
+            handler.contains("ConsentScope.PTT")
+        )
+        assertTrue(
+            "the gate must be fail-closed: no consent, no notification",
+            handler.contains("PTT nudge suppressed: consent denied")
         )
     }
 

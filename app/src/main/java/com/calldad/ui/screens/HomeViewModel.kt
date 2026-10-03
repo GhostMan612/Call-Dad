@@ -46,7 +46,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val log = CallLogStore(application)
 
-    private val _destinations = MutableStateFlow(HomeDestination.entries.toList())
+    /**
+     * The doors this device can actually open.
+     *
+     * `HELPER` is withheld below API 31 because `HelperViewModel` refuses to use
+     * anything but the ON-DEVICE speech recognizer — the network recognizer sends
+     * a child's voice to the OEM, and RULES §1.7a has no signed exception for it.
+     * `isOnDeviceRecognitionAvailable` is API 31+, and `minSdk` is 26, so on
+     * Android 8 through 11 the Helper is not "probably unavailable", it is
+     * *structurally* unavailable: every press would land on "Voice isn't
+     * available on this device."
+     *
+     * A tile that cannot succeed is a kid-trap. This project's own doctrine says
+     * a button that explains beats one that does nothing, and a door that leads
+     * nowhere is worse than no door — so on those devices the door is simply not
+     * there, rather than being shown and then refusing. (Verified on a real API 30
+     * tablet, which is how the boundary was found rather than assumed.)
+     */
+    private val _destinations = MutableStateFlow(
+        HomeDestination.entries.filter { destination ->
+            destination != HomeDestination.HELPER ||
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+        }
+    )
     val destinations: StateFlow<List<HomeDestination>> = _destinations.asStateFlow()
 
     private val _callback = MutableStateFlow<CallRecord?>(null)

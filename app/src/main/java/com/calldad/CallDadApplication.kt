@@ -26,6 +26,7 @@ class CallDadApplication : Application() {
         FirebaseApp.initializeApp(this)
         createIncomingCallChannel()
         createMessageChannel()
+        createPendingRingChannel()
         PushTokenRegistrar.leaveLegacyTopic()
         signInAnonymously()
     }
@@ -102,9 +103,45 @@ class CallDadApplication : Application() {
         nm.createNotificationChannel(channel)
     }
 
+    /**
+     * The channel the foreground service is promoted on BEFORE consent is known.
+     *
+     * The FGS-start deadline is strict — `startForeground` must run before any
+     * network read, so the kill switch cannot be consulted first. Posting on the
+     * IMPORTANCE_HIGH call channel at that moment meant a revoked child's phone
+     * lit up and vibrated for a call their grown-up had switched off, regardless of
+     * the gate that ran a few hundred milliseconds later.
+     *
+     * IMPORTANCE_MIN, no sound, no vibration, and nothing visible on the lock
+     * screen. If consent allows, the same notification id is reposted on the call
+     * channel and behaves normally; if it denies, the child never sees or hears
+     * anything at all.
+     *
+     * Its own id, and that matters: the platform ignores importance and sound
+     * changes to an EXISTING channel, so trying to reuse the call channel at a low
+     * priority would silently keep it high-importance and defeat this entirely.
+     */
+    private fun createPendingRingChannel() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_RING_PENDING_CONSENT,
+                "Ringing (checking permission)",
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
+            }
+        )
+    }
+
     companion object {
         const val CHANNEL_INCOMING_CALL = "incoming_call_v2"
         const val CHANNEL_PTT_MESSAGE = "ptt_message_v1"
+        const val CHANNEL_RING_PENDING_CONSENT = "ring_pending_consent_v1"
         private const val LEGACY_CHANNEL_INCOMING_CALL = "incoming_call"
     }
 }

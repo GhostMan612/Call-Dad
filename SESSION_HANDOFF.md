@@ -37,10 +37,11 @@ killed phone after the grown-up switched calling off, which is the whole defect
 vc12 exists to fix. `firestore.rules` is deployed **but the deployed ruleset is
 the 2026-10-01 one and is now behind the tree** — see "BLOCKING" below.
 
-Gates, re-run against the audit tree: verify PASS · unit **556 tests (278 per
+Gates, re-run against the audit tree: verify PASS · unit **566 tests (283 per
 flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
 functions **13/13** (both files) · **rules emulator 49/49** · `prove_gates_bite`
-green→red→green · **0 Kotlin warnings**.
+green → red → green (it proves a non-compiling tree fails the gate, and that the
+file is restored byte-for-byte) · **0 Kotlin warnings**.
 
 **BLOCKING, OPERATOR: `firebase deploy --only firestore:rules,functions`.** The
 live ruleset cannot prove a query, so both consent listeners are denied — which

@@ -55,7 +55,7 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `ui/screens/PhotoViewModel.kt`, `ui/screens/PhotoScreen.kt` | Picture screen. Decode gated on `verified`; system photo picker only, no share/save |
 | `ui/screens/ConsentScreen.kt` | Parent-side grant/revoke behind `ParentGate` — the kill switch's only trigger |
 
-Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (27 classes, 278 tests per flavor / 556 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (49 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (27 classes, 283 tests per flavor / 566 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (49 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
 ## Known-issue registry
 
@@ -95,7 +95,7 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 `tools/prove_gates_bite.py` now asserts the gate goes red on one via the compiler.
 
 - `tools/verify_project.py`: PASS (10 dirs + 102 files, includes the control-byte ban).
-- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **278 tests per flavor / 556 across both, 0 failures**.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **283 tests per flavor / 566 across both, 0 failures**.
 - `:app:lintParentDebug :app:lintChildDebug`: PASS, **0 errors** both flavors.
 - `node --test functions/*.test.js`: PASS, **13/13** (6 ring + 7 clip).
 - **Firestore rules emulator: 44/44**, including the chat, photo, consent,
@@ -154,18 +154,30 @@ than merely green.
 |---|---|---|---|---|---|
 | Moto G 2025 (PARENT) | `com.calldad.parent` | **11** | **0.3.1-parent** | 2026-10-02 10:18:11 | 36 |
 | BLU View 5 (CHILD) | `com.calldad.child` | **11** | **0.3.1-child** | 2026-10-02 10:17:56 | 34 |
+| Q8K tablet (target, unpaired) | neither | NOT INSTALLED | — | — | **30** |
 
-**Source and both phones are now the same build: vc11 / 0.3.1.** The gap this
-table exists to measure is closed for the first time since vc7. One flavor per
-device, no crossed install (each device reports the other flavor as NOT
-INSTALLED, verified before and after).
+**SOURCE IS vc12 / 0.3.2 AND THE PHONES ARE STILL ON vc11 / 0.3.1.** They were
+the same build for one commit (`c440ad4`) and then deliberately diverged: vc11 is
+the build that rings a child's killed phone after the grown-up switched calling
+off, and that posts its FGS notification on the loud channel before consent can
+be checked. **Do not treat the table as stale — the gap is the point.**
+
+The Q8K is **SDK 30**, which makes it the first device in the fleet below API 31.
+That is not trivia: it is why the Ask Helper tile is withheld on it. The Helper is
+on-device-only (the network recognizer uploads a child's voice), and
+`isOnDeviceRecognitionAvailable` is API 31+, so on Android 11 the feature is
+*structurally* unavailable rather than merely unconfigured. Found by connecting
+real hardware, not by reasoning about the boundary.
+
+One flavor per device, no crossed install (each phone reports the other flavor as
+NOT INSTALLED, verified before and after).
 
 **What the install proves: that the tree compiles, packages, and installs with
 its data intact. What it does not prove: anything about behaviour.** Installed
 `-r`, so the anonymous Firebase account, the paired peer UID
 (`peer_store.preferences_pb`, still dated 2026-09-30) and the child's existing
 consent grant all survived — **no re-pair needed.** Still zero human-witnessed
-feature behaviour on vc11; the kill switch remains unwitnessed.
+feature behaviour on any build after vc7; the kill switch remains unwitnessed.
 
 The vc7 → vc10 flash closed the widest source/device gap in the project's history,
 and with it the K12 loud-voice-message and K21 lock-screen-trap defects that had

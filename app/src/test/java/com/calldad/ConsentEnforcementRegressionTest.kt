@@ -481,6 +481,146 @@ class ConsentEnforcementRegressionTest {
     }
 
     /**
+     * THE NOTIFICATION IS A HOLE TOO, AND IT IS WORSE THAN THE RING.
+     *
+     * `startForeground` MUST run before any network read (Android's FGS-start
+     * deadline is strict), so consent cannot be consulted first — and the
+     * promotion was posting on `CHANNEL_INCOMING_CALL`, which is
+     * `IMPORTANCE_HIGH`. So a revoked child's phone lit up and vibrated for a
+     * call their grown-up had switched off, regardless of the gate that ran a few
+     * hundred milliseconds later. Gating `startRinging` is not enough when the
+     * notification itself is the alarm.
+     *
+     * Fix: promote on a separate silent channel, then repost the SAME
+     * notification id on the loud channel only after consent AND a
+     * server-confirmed live room. A separate channel id is required, not a
+     * nicety — the platform ignores importance and sound changes to an EXISTING
+     * channel, so reusing the call channel at a low priority would have silently
+     * kept it high-importance and defeated the whole gate.
+     */
+    @Test
+    fun theForegroundPromotionIsSilentBecauseConsentCannotBeCheckedFirst() {
+        val svc = fgs("CallForegroundService.kt")
+        assertTrue(
+            "the FGS promotion must post a SILENT notification. The platform " +
+                "deadline forbids checking consent first, so the only way a revoked " +
+                "child's phone stays dark and quiet is if the promotion itself makes " +
+                "no sound.",
+            svc.contains("silent = true")
+        )
+        assertTrue(
+            "and the silent variant must use the pending-consent channel, not the " +
+                "IMPORTANCE_HIGH call channel",
+            svc.contains("CHANNEL_RING_PENDING_CONSENT")
+        )
+        val promote = svc.substringAfter("private fun promoteNotification(")
+            .substringBefore("private suspend fun finishDeniedRing")
+        assertTrue(
+            "the loud repost must reuse the SAME notification id, so it replaces " +
+                "the silent one instead of stacking a second notification the child " +
+                "has to dismiss twice",
+            promote.contains("NOTIFICATION_ID")
+        )
+        assertTrue(
+            "and it must explicitly ask for the LOUD variant, not default to it",
+            promote.contains("silent = false")
+        )
+        val promoteAt = svc.indexOf("promoteNotification(callId, seq)")
+        val ringAt = svc.indexOf("CallAudioManager.startRinging")
+        assertTrue(
+            "the loud repost must come after consent AND after the live-room " +
+                "confirmation, and before the ring starts",
+            promoteAt > 0 && ringAt > 0 && promoteAt < ringAt
+        )
+    }
+
+    /**
+     * The FGS fallback path had no gate at all, and it is the weakest place to
+     * have one: `handleRing` catches a failed `startForegroundService()` and
+     * posted a heads-up unconditionally — but neither the in-app gate nor the
+     * service's gate runs on that path, because the service never started.
+     */
+    @Test
+    fun theNotificationFallbackIsConsentGatedToo() {
+        val recv = fgs("CallMessagingService.kt")
+        assertTrue(
+            "handleRing's failure paths must go through a CONSENT-GATED fallback. " +
+                "An incoming-call notification posted on a phone whose parent " +
+                "switched calling off is the exact failure the kill switch exists " +
+                "to prevent, and it bypassed both existing gates.",
+            recv.contains("gatedFallback(callId, seq)")
+        )
+        assertTrue(
+            "and the gate must read CALL, fail closed",
+            recv.contains("hasConsent(ctx, callId, ConsentScope.CALL)")
+        )
+        assertTrue(
+            "the raw poster must not be reachable from the push path without that " +
+                "gate — handleRing must never call it directly",
+            !recv.substringAfter("private fun handleRing")
+                .substringBefore("private suspend fun hasConsent")
+                .contains("postIncomingCallFallback(ctx, callId, seq)\n")
+        )
+    }
+
+    /**
+     * A PTT nudge was posted unconditionally, so a child whose parent had closed
+     * the walkie talkie still got an unsolicited "A message is waiting". Nothing
+     * leaked — the channel is IMPORTANCE_LOW, VISIBILITY_PRIVATE and carries no
+     * content — which is exactly why it went unnoticed: it looks harmless and it
+     * still contradicts the control.
+     */
+    @Test
+    fun theVoiceMessageNudgeIsGatedOnThePttScope() {
+        val recv = fgs("CallMessagingService.kt")
+        val handler = recv.substringAfter("private fun handleClipWaiting")
+            .substringBefore("private fun postClipWaitingNotification")
+        assertTrue(
+            "the PTT nudge must ask about ConsentScope.PTT, not CALL. Gating a " +
+                "voice message on the calling permission would let a nudge through " +
+                "for a child whose parent had switched voice messages off.",
+            handler.contains("ConsentScope.PTT")
+        )
+        assertTrue(
+            "and it must be fail-closed: no consent, no notification",
+            handler.contains("PTT nudge suppressed: consent denied")
+        )
+    }
+
+    /**
+     * A tile that cannot succeed is a kid-trap. Ask Helper is on-device-only now
+     * (the network recognizer uploads a child's voice to the OEM), and
+     * `isOnDeviceRecognitionAvailable` is API 31+ while `minSdk` is 26 — so on
+     * Android 8 through 11 the Helper is structurally unavailable, not merely
+     * unconfigured. Shown there, every press would land on "Voice isn't
+     * available on this device."
+     *
+     * Found by connecting a real API 30 tablet rather than reasoning about the
+     * boundary, which is the only reason this number is known at all.
+     */
+    @Test
+    fun theHelperTileIsWithheldWhereTheHelperCannotWork() {
+        val home = screenFile("HomeViewModel.kt")
+        assertTrue(
+            "Home must FILTER the HELPER destination, not show it unconditionally. " +
+                "On API < 31 it leads nowhere, and a dead door is worse than no " +
+                "door for a six-year-old.",
+            home.contains("HomeDestination.entries.filter") &&
+                home.contains("destination != HomeDestination.HELPER")
+        )
+        assertTrue(
+            "and the condition must be the API level the on-device recognizer " +
+                "actually needs (S = 31), not an arbitrary cut-off",
+            home.contains("VERSION_CODES.S")
+        )
+        assertTrue(
+            "the helper itself must still refuse below that level, so a deep link " +
+                "or a stale destination cannot reach a network recognizer",
+            screenFile("HelperViewModel.kt").contains("VERSION_CODES.S")
+        )
+    }
+
+    /**
      * The microphone permission must be asked FOR on the press, not on entry.
      * `LaunchedEffect(Unit)` fired the RECORD_AUDIO dialog the moment a child
      * opened the tile — before touching anything — which is an OS-owned dialog

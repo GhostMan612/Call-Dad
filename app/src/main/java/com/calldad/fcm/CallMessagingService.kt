@@ -17,9 +17,18 @@ import androidx.core.app.NotificationCompat
 import com.calldad.CallDadApplication
 import com.calldad.MainActivity
 import com.calldad.R
+import com.calldad.consent.ConsentScope
+import com.calldad.consent.ConsentStore
+import com.calldad.pairing.SecurePeerStore
 import com.calldad.webrtc.WebRtcLog
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class CallMessagingService : FirebaseMessagingService() {
 
@@ -59,14 +68,61 @@ class CallMessagingService : FirebaseMessagingService() {
             CallForegroundService.startIncomingCall(applicationContext, callId, seq)
         } catch (t: SecurityException) {
             WebRtcLog.transition("Foreground service start denied by platform")
-            postHeadsUpFallback(callId, seq)
+            gatedFallback(callId, seq)
         } catch (t: IllegalStateException) {
             WebRtcLog.transition("Foreground service start not allowed right now")
-            postHeadsUpFallback(callId, seq)
+            gatedFallback(callId, seq)
         } catch (t: Throwable) {
             WebRtcLog.transition("Foreground service start failed")
-            postHeadsUpFallback(callId, seq)
+            gatedFallback(callId, seq)
         }
+    }
+
+    /**
+     * The fallback notification, but only if a parent has NOT switched calling off.
+     *
+     * This path used to post the notification unconditionally, which meant the kill
+     * switch had a hole exactly where it is weakest: the FGS could fail to start
+     * (a downgraded push, a background restriction) and the child's phone would
+     * then light up and buzz — on the high-importance call channel — for a call
+     * their grown-up had turned off. The in-app gate and the service's own gate are
+     * both irrelevant here, because neither of them runs.
+     *
+     * So the fallback asks first, and asks FAIL-CLOSED via
+     * [ConsentStore.decisionNow]: an error, a timeout or a cached read denies.
+     * Consequence to accept deliberately: a revoked child sees nothing at all and
+     * the parent's call rings out. That is the correct direction to fail. The
+     * inverse — a visible incoming call the parent believes is switched off — is
+     * the failure this whole feature exists to prevent.
+     */
+    private fun gatedFallback(callId: String, seq: Int) {
+        val ctx = applicationContext
+        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            val allowed = hasConsent(ctx, callId, ConsentScope.CALL)
+            if (allowed) postIncomingCallFallback(ctx, callId, seq)
+            else WebRtcLog.transition("Ring fallback suppressed: consent denied")
+        }
+    }
+
+    /**
+     * One-shot consent for a caller with no ViewModel.
+     *
+     * Shares [ConsentStore.decisionNow] with the foreground service so the two
+     * paths cannot drift apart — a ring and a ring-fallback that disagree about
+     * the same kill switch would reintroduce the hole this closes.
+     */
+    private suspend fun hasConsent(
+        context: Context,
+        callId: String,
+        scope: ConsentScope
+    ): Boolean {
+        val ownUid = FirebaseAuth.getInstance().currentUser?.uid ?: return false
+        val peerUid = SecurePeerStore(context).observePeerUid().first { it != null }
+            ?: return false
+        // decisionNow already fails CLOSED on its own timeout, so no second
+        // timeout is layered on top — one place decides what "could not check"
+        // means, for every caller.
+        return ConsentStore().decisionNow(callId, ownUid, peerUid, scope).isGranted
     }
 
     /**
@@ -74,6 +130,14 @@ class CallMessagingService : FirebaseMessagingService() {
      * foreground service, and without putting the message itself on the lock
      * screen. Deliberately quiet: this is a "dad left you something", not a
      * call, and it must not wake the house at 2am.
+     *
+     * CONSENT-GATED. This used to post unconditionally, so a child whose parent
+     * had switched the walkie talkie off still got an unsolicited "A message is
+     * waiting" heads-up — an unwanted signal that something was said to them when
+     * the parent had deliberately closed that door. Nothing leaked (the channel is
+     * IMPORTANCE_LOW, VISIBILITY_PRIVATE and carries no content), which is exactly
+     * why it went unnoticed: it looks harmless and it still contradicts the
+     * control. Fail-closed, same as every other gate.
      */
     private fun handleClipWaiting(message: RemoteMessage) {
         val callId = message.data["callId"].orEmpty()
@@ -83,26 +147,37 @@ class CallMessagingService : FirebaseMessagingService() {
             WebRtcLog.transition("PTT push skipped: app on screen, listener will play")
             return
         }
+        val ctx = applicationContext
+        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            if (!hasConsent(ctx, callId, ConsentScope.PTT)) {
+                WebRtcLog.transition("PTT nudge suppressed: consent denied")
+                return@launch
+            }
+            postClipWaitingNotification(ctx)
+        }
+    }
+
+    private fun postClipWaitingNotification(context: Context) {
         runCatching {
-            val intent = Intent(this, MainActivity::class.java).apply {
+            val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             val pi = PendingIntent.getActivity(
-                this,
+                context,
                 REQUEST_CODE_CLIP,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val nm = getSystemService(NotificationManager::class.java) ?: return
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
             ) {
                 return
             }
             nm.notify(
                 NOTIFICATION_ID_CLIP_WAITING,
-                NotificationCompat.Builder(this, CallDadApplication.CHANNEL_PTT_MESSAGE)
+                NotificationCompat.Builder(context, CallDadApplication.CHANNEL_PTT_MESSAGE)
                     .setSmallIcon(R.drawable.ic_mic)
                     .setContentTitle("A message is waiting")
                     .setContentText("Tap to hear it")
