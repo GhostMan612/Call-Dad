@@ -25,8 +25,8 @@ See `AGENTS.md` for ramp, commands, env pins.
 C:\Call-Dad\
 ├── AGENTS.md / RULES.md / SESSION_HANDOFF.md / CLAUDE.md
 ├── SPEC_SHEET.md / SPEC_SHEET.json   # v0.1 scope contract
-├── blueprints/                       # MASTER (frozen v0.1) + ROADMAP + CURRENT_STATE + CHECKLIST + CHECKPOINTS + ARCHITECTURE + blueprint-sections/BP-*.md + decisions/ADR-*.md
-├── docs/                             # setup-android-studio, device-profiles, firebase-firestore-plan, kid-safe-ux, sovereign-comms-reuse-map
+├── blueprints/                       # MASTER (frozen v0.1) + ROADMAP + CURRENT_STATE + CHECKLIST + CHECKPOINTS + ARCHITECTURE + blueprint-sections/BP-*.md + decisions/ADR-*.md + FCM_WAKEUP + GEMINI_HANDOFF (both superseded)
+├── docs/                             # setup-android-studio, device-profiles, firebase-firestore-plan, kid-safe-ux, release-signing, sovereign-comms-reuse-map
 ├── app/                              # native Kotlin app (com.calldad), parent/child flavors
 ├── functions/                        # Cloud Function: ring push (Node 22)
 ├── firestore.rules                   # pair-scoped rooms; tests in tools/rules-test/
@@ -51,7 +51,7 @@ Handoff files (`SESSION_HANDOFF.md`, `blueprints/CURRENT_STATE.md`) must stay Ge
 
 - **Source and both phones are the same build: `vc11 / 0.3.1`.** Flashed 2026-10-02 (child 10:17:56, parent 10:18:11), one flavor per device, installed `-r` so pairing and the consent grant survived. **No re-pair needed.**
 - **Backend is live.** `firestore.rules` released 2026-10-01 (chat, photos, consents, revocations, `negotiationRound`), plus `onCallRoomWritten` and `onPttClipWritten`.
-- Host gates green: verify PASS · unit **538 (269 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **44/44**.
+- Host gates green: verify PASS · unit **556 (278 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **49/49**.
 - **The build gate passed too, for the first time in this project's history:** `clean assembleParentDebug assembleChildDebug` BUILD SUCCESSFUL, 77 tasks, **77 executed, 0 from cache** (`--no-build-cache`, so the Kotlin compiler genuinely ran). `8f47512` was pushed to `origin/main` with a duplicated brace and the host gate printed GREEN on it; `e0cb047` is the first commit proven to compile by the compiler rather than merely green.
 - **Two things none of that tells you:**
   1. **No `SPEC_SHEET` §2 feature has ever been exercised on hardware.** Not one call, text, photo, consent grant or ICE restart on vc11. The only proven E2E call is from vc7. An install is not a witness.

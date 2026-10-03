@@ -80,7 +80,26 @@ fun HelperScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // Runtime RECORD_AUDIO permission. Required by SpeechRecognizer.
+    // The consent gate starts with the view model, which is activity-scoped, so
+    // a revocation is observed from every screen rather than only this one.
+    // `this` is the LaunchedEffect's own CoroutineScope, cancelled with the
+    // composition — the consent listener lives exactly as long as this screen.
+    LaunchedEffect(viewModel) {
+        // `context` is a Context, not necessarily the Application; consent only
+        // needs a Context for DataStore/Firebase.
+        viewModel.start(context, this@LaunchedEffect)
+    }
+
+    // The microphone permission is asked FOR ON ENTRY, before the child has touched
+    // anything. It used to fire in `LaunchedEffect(Unit)`, so a six-year-old who
+    // opened the tile was immediately presented with an OS permission dialog
+    // whose only button is "Allow" — a rubber-stamp prompt standing in for a
+    // deliberate act. It is now requested when the child actually presses the
+    // mic, which is the moment the permission means anything.
+    //
+    // The consent gate (ConsentScope.VOICE) is separate and stricter, and is
+    // enforced in the ViewModel: the parent's kill switch can close this
+    // feature entirely, and a granted OS permission cannot override it.
     var permissionGranted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -90,12 +109,11 @@ fun HelperScreen(
     }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted -> permissionGranted = granted }
-
-    LaunchedEffect(Unit) {
-        if (!permissionGranted) {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
+    ) { granted ->
+        permissionGranted = granted
+        // The press that asked is the press that wanted: start now rather than
+        // making a six-year-old discover the second tap.
+        if (granted) viewModel.onTapToSpeak()
     }
 
     // Re-check on every return (a grown-up may have allowed it in Settings),
@@ -153,10 +171,22 @@ fun HelperScreen(
 
             Spacer(Modifier.weight(1f))
 
+            // The button is ALWAYS enabled now. It used to be `enabled = permissionGranted`,
+            // which made it a dead control for a child who had not yet granted the
+            // mic — the screen offered nothing to press and nothing to read. The
+            // press is what asks for the permission (see the launcher callback),
+            // so the affordance stays live and the OS dialog arrives at the moment
+            // it is meaningful.
             TapToSpeakButton(
                 status = state.status,
-                enabled = permissionGranted,
-                onClick = viewModel::onTapToSpeak
+                enabled = true,
+                onClick = {
+                    if (permissionGranted) {
+                        viewModel.onTapToSpeak()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
             )
 
             Spacer(Modifier.height(40.dp))

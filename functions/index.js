@@ -67,22 +67,42 @@ async function pushToCallee(calleeUid, type, extra) {
 
   // A voice message is a notification, not an alarm: normal priority, so it
   // never becomes a wakeup the phone must grant.
+  //
+  // THE TTL IS PER-TYPE, and it was not. Both messages got `30 * 1000`, so a
+  // RING was discarded after 30 seconds: a parent pressing Call Dad while the
+  // child's phone sat in a 31-second dead zone got nothing at all, and the call
+  // rang out to "No answer yet" — indistinguishable from the kid ignoring it. A
+  // ring is an alarm-grade event; it gets an hour to land. A PTT nudge keeps 30s
+  // because the clip sits in Firestore indefinitely and a late heads-up would
+  // be noise about a message that is no longer new.
   const priority = type === "ptt_clip" ? "normal" : "high";
+  const ttl = type === "ptt_clip" ? 30 * 1000 : 3600 * 1000;
+  // collapse_key makes a retry replace the pending message for the same call
+  // rather than stacking a second notification on the child's screen.
+  const collapseKey = type === "incoming_call" ? extra.callId : undefined;
   try {
     await getMessaging().send({
       token,
       data: { type, ...extra },
-      android: { priority, ttl: 30 * 1000 },
+      android: { priority, ttl, ...(collapseKey ? { collapseKey } : {}) },
     });
     logger.info("Push sent: " + type);
   } catch (err) {
     const code = err?.errorInfo?.code || err?.code;
     if (code === "messaging/registration-token-not-registered" ||
         code === "messaging/invalid-registration-token") {
+      // The ONLY failure that is genuinely permanent. Deleting the token is
+      // correct here and only here.
       await userRef.update({ fcmToken: FieldValue.delete() });
       logger.info("Stale device token removed");
     } else {
-      logger.error("Push failed", code);
+      // Everything else — a quota blip, a transient 5xx, a partial outage — is
+      // RETRIED by re-throwing. This used to be swallowed, so the trigger's
+      // promise resolved, Firestore considered the event handled, and a ring was
+      // lost permanently with no dead-letter and no retry. A missed ring is a
+      // child whose parent tried to call them and nothing happened.
+      logger.error("Push failed, retrying", code);
+      throw err;
     }
   }
 }

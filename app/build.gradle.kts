@@ -66,8 +66,30 @@ android {
         // inbound voice clips out loud, and keeps downloading photos. A parent on
         // 10 believes the app is switched off when it is not — which is the worst
         // failure this app has, because it is a safety control that lies.
-        versionCode = 11
-        versionName = "0.3.1"
+        // versionCode 12: THE WAKEUP-PATH KILL SWITCH. 11 fixed consent inside
+        // the app and left the one consumer that runs when the app is NOT running
+        // with no gate at all: CallForegroundService validated the pairing and
+        // then rang at full volume. A parent's check with the child's app open
+        // passes; with the app force-stopped the phone rings anyway, for the full
+        // 45s. That is vc10's defect one layer deeper, and 11's green suite could
+        // not see it because the assertions never opened that file.
+        //
+        // 12 also covers what that pass found next door: the walkie talkie was
+        // gated on CALL so ConsentScope.PTT was read by nothing; BACK on Home
+        // finished the activity (a launcher escape on the most-reached screen);
+        // the Helper microphone had no scope at all and fell back to the NETWORK
+        // recognizer, uploading a child's speech off-device; the ICE-restart round
+        // never reset between calls, so call #2's first restart was permanently
+        // PERMISSION_DENIED; and a teardown during the offer publish could leave a
+        // room RINGING with nobody on it.
+        //
+        // MUST NOT reuse 11, and the reason is behavioural: 11 rings on a killed
+        // phone whose grown-up switched calling off. A parent on 11 believes the
+        // switch works. Same rule as 9->10 and 10->11 -- a safety control that lies
+        // is the worst failure this app has, and the fingerprint is the only thing
+        // that lets a dumpsys tell the two apart.
+        versionCode = 12
+        versionName = "0.3.2"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

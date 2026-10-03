@@ -31,7 +31,24 @@ enum class ConsentScope {
     /** Photo sharing (BP-04). Not shipped. */
     PHOTO,
     /** Push-to-talk voice clips. ALREADY SHIPPED without a cert. */
-    PTT
+    PTT,
+
+    /**
+     * The Ask Helper microphone (STT).
+     *
+     * IT WAS MISSING, and that was a hole in the kill switch rather than an
+     * oversight. Every other feature that touches the microphone or the network
+     * has a scope, so "Turn everything off" closed calling, chat, photos and the
+     * walkie talkie — and left a live mic in a six-year-old's hand on a tile that
+     * is unconditionally on the Home grid, with no screen disclosing that speech
+     * recognition was involved at all. A control that says "nothing is allowed"
+     * while one microphone is still open is not a control.
+     *
+     * `firestore.rules` pins `scopes.hasOnly([...])`, so this value had to be
+     * added there too or a grant carrying it would be refused. The emulator suite
+     * covers that round trip.
+     */
+    VOICE
 }
 
 /**

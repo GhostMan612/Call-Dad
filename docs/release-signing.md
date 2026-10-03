@@ -59,12 +59,7 @@ around. `C:\android\` is a tool home already outside the project.
 
 ## Open, recorded honestly
 
-- **ProGuard rules are a stub.** `app/proguard-rules.pro` needs real entries before a
-  minified release is trustworthy — chiefly keep rules for the Stream WebRTC JNI
-  (`org.webrtc.**`), the FCM receiver, and the Firestore/lifecycle reflectively-used
-  classes. Shipping a minified release without them is a runtime crash, not a smaller
-  APK, so treat this as **not release-ready** until a release build is actually run
-  and smoke-tested.
+- **ProGuard rules are written but never exercised.** `app/proguard-rules.pro` keeps exactly what R8 cannot see — `org.webrtc.**` (the Stream WebRTC JNI), Firebase/GMS, the three `fcm/` services, the WebView JS bridge, ML Kit — and keeps line-number tables so a release crash trace is readable. All three of the categories an earlier version of this document called "still to write" are already in the file. **What is actually missing is a run**: no `assembleRelease` has ever executed, so nothing has proved those rules are *sufficient* rather than merely present. Treat it as unverified, not unwritten — and shipping a minified release without a real build-and-smoke-test is a runtime crash, not a smaller APK.
 - **No Play upload key separation.** A real release process wants a separate upload key
   so the app signing key can be rotated for enrolled devices. That is beyond v0.1.
 - **`assembleRelease` has never been run.** No release artifact exists, and this lane

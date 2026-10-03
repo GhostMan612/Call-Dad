@@ -201,6 +201,11 @@ class WebRTCClient(
 
         runCatching { videoTrack?.dispose() }; videoTrack = null
         runCatching { audioTrack?.dispose() }; audioTrack = null
+        // Released after the PeerConnection and BEFORE the factory, matching the
+        // AppRTC teardown order: the receiver's track is a child of the peer
+        // connection, and the factory owns the EGL/native machinery both of them
+        // were created from.
+        runCatching { remoteVideoTrack?.dispose() }; remoteVideoTrack = null
         runCatching { videoSource?.dispose() }; videoSource = null
         runCatching { audioSource?.dispose() }; audioSource = null
         runCatching { videoCapturer?.dispose() }; videoCapturer = null
@@ -283,6 +288,28 @@ class WebRTCClient(
     }
 
     // -------- media controls --------
+
+    /**
+     * The app went to the background: stop SENDING and release the camera.
+     *
+     * [setCameraEnabled] alone is not enough. Upstream `MediaStreamTrack.setEnabled`
+     * reaches `nativeSetEnabled` and stops transmission; nothing on that path
+     * touches the capturer, so the Camera2 session and the capture thread's GL
+     * context stayed open. Both calls are idempotent, so the flag, the mute and
+     * a concurrent [dispose] cannot produce a double-stop.
+     */
+    fun onUiHidden() {
+        setCameraEnabled(false)
+        stopCapture()
+    }
+
+    /** Back on screen: resume capture and restore sending if the kid had it on. */
+    fun onUiVisible(cameraWanted: Boolean) {
+        if (cameraWanted) {
+            startCapture()
+            setCameraEnabled(true)
+        }
+    }
 
     fun setCameraEnabled(enabled: Boolean) {
         videoTrack?.setEnabled(enabled)
@@ -513,9 +540,32 @@ class WebRTCClient(
 
     private var remoteTrackDelivered = false
 
+    /**
+     * The REMOTE video track, held so it can be released.
+     *
+     * `dispose()` used to free only the LOCAL tracks. The remote one was cached in
+     * `remoteTrackDelivered` and handed to the UI, and nothing ever disposed it —
+     * so one `VideoTrackInterface` and one `RtpReceiverInterface` native reference
+     * leaked per call. Upstream `RtpReceiver.dispose()` is the only thing that
+     * releases its cached track, and `PeerConnection.dispose()` cannot reach it:
+     * that walks `senders`/`receivers`/`transceivers`, and those lists are
+     * populated only by `getReceivers()`/`getTransceivers()`/`addTransceiver`,
+     * none of which this app calls (see the KDoc on `start()`). The C++
+     * PeerConnection is freed while the Java wrappers' refs survive, and a child
+     * who makes ten calls in one process accumulates ten orphans.
+     *
+     * Safe in BOTH UI teardown orders. Upstream `VideoTrack.dispose()` drains and
+     * clears its sink map before nulling the native track, so a `removeSink` that
+     * arrives afterwards — Compose disposing its `AndroidView` one frame after
+     * `pc.dispose()` — becomes a map miss with no JNI call and no throw. That is
+     * strictly safer than the previous behaviour, not riskier.
+     */
+    private var remoteVideoTrack: VideoTrack? = null
+
     private fun handleRemoteTrack(track: VideoTrack) {
         if (remoteTrackDelivered || disposed) return
         remoteTrackDelivered = true
+        remoteVideoTrack = track
         scope.launch { if (!disposed) onRemoteVideoTrack(track) }
     }
 

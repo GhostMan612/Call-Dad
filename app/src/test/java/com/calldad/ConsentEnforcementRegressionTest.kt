@@ -54,6 +54,9 @@ class ConsentEnforcementRegressionTest {
     private fun pttVm() = read("ui/screens/PttViewModel.kt")
     private fun consentStore() = read("consent/ConsentStore.kt")
     private fun consentScreen() = read("ui/screens/ConsentScreen.kt")
+    private fun fgs(file: String) = read("fcm/$file")
+    private fun screenFile(file: String) = read("ui/screens/$file")
+    private fun navFile(file: String) = read("navigation/$file")
 
     /**
      * Calling MUST consult the CALL grant. It did not: `ConsentScope.CALL`
@@ -222,17 +225,278 @@ class ConsentEnforcementRegressionTest {
         assertTrue(
             "it must react to revocation, not check once at open: a parent hitting the " +
                 "kill switch mid-clip must not leave the recording uploading",
-            vm.contains("consent.decision.collect")
+            vm.contains("consent.decisionFor(ConsentScope.PTT).collect")
         )
         val press = vm.substringAfter("fun onPress()").substringBefore("fun onRelease()")
         assertTrue(
             "onPress() must refuse without the PTT grant",
-            press.contains("pttAllowed") || press.contains("callAllowed")
+            press.contains("pttAllowed")
         )
         assertTrue(
             "the refusal needs a kid-safe message, not silence. A button that does " +
                 "nothing looks broken; a button that explains asks for a grown-up.",
             press.contains("walkie talkie is turned off")
+        )
+    }
+
+    /**
+     * PTT must read the PTT scope, not CALL. It read `decision` — the single
+     * headline value, which answers for CALL — so `ConsentScope.PTT` was read by
+     * NOTHING in the entire app while the KDoc claimed "the PTT grant, observed
+     * live". A CALL-only grant is a legal document under the rules, so this was
+     * not theoretical: it would break silently the day anyone exposed a per-scope
+     * control, and the old assertion below (`pttAllowed || callAllowed`)
+     * ACTIVELY PERMITTED the mixup by accepting `callAllowed`.
+     */
+    @Test
+    fun pttReadsThePttScopeAndNotCall() {
+        val vm = pttVm()
+        assertTrue(
+            "PttViewModel must read ConsentScope.PTT specifically. Collecting the " +
+                "headline `decision` gates the walkie talkie on CALL, which makes a " +
+                "per-scope consent model decorative for this feature.",
+            vm.contains("decisionFor(ConsentScope.PTT)")
+        )
+        assertTrue(
+            "and it must NOT collect the CALL-derived headline for its own gate",
+            !vm.contains("consent.decision.collect")
+        )
+        val store = consentStore()
+        assertTrue(
+            "ConsentStore must expose a per-scope decision. Without it every feature " +
+                "is forced to read the CALL value, which is how PTT ended up on the " +
+                "wrong scope.",
+            store.contains("fun decisionFor(scope: ConsentScope)")
+        )
+    }
+
+    /**
+     * THE KILL SWITCH MUST COVER THE WAKEUP PATH.
+     *
+     * This is the defect that made vc10 a lie, one layer over, and it was NOT in
+     * this suite: `everyFeatureGatesItsListenerNotJustItsScreen` enumerates chat,
+     * photo and PTT and never opens `CallForegroundService.kt`. That file is the
+     * one consumer that runs when the app is NOT running — it validated the
+     * PAIRING and then rang at full volume, while `CallViewModel`'s three correct
+     * gates all sat inside a ViewModel that a killed process never constructs.
+     *
+     * A green foreground test proves nothing here: the operator's kill-switch check
+     * would pass with the app open and the phone would still ring for 45 seconds
+     * with the app killed. The assertion below is structural because no host test
+     * can run an Android service — but it fails today, which is the point.
+     */
+    @Test
+    fun theRingingServiceItselfReadsConsentBeforeItRings() {
+        val svc = fgs("CallForegroundService.kt")
+        assertTrue(
+            "CallForegroundService must consult consent at all. It is the ONLY consent " +
+                "consumer that runs when the app is not running; without a gate here " +
+                "'turn everything off' closes calling in the foreground and not on a " +
+                "phone in a pocket.",
+            svc.contains("ConsentStore") || svc.contains("decisionNow")
+        )
+        // The gate must sit BETWEEN the pairing check and the ring. Ordering is the
+        // whole fix: a gate after startRinging stops a phone that has already rung.
+        val gateAt = svc.indexOf("decisionNow(")
+        val ringAt = svc.indexOf("CallAudioManager.startRinging")
+        assertTrue(
+            "CallForegroundService.kt must actually CALL decisionNow",
+            gateAt >= 0
+        )
+        assertTrue(
+            "CallForegroundService.kt must reach startRinging for this assertion to " +
+                "mean anything",
+            ringAt >= 0
+        )
+        assertTrue(
+            "the consent gate must come BEFORE startRinging. A gate after it is a " +
+                "comment, not a control: the child has already been woken at full " +
+                "volume on a phone whose grown-up switched calling off.",
+            gateAt < ringAt
+        )
+        assertTrue(
+            "the service must deny on an unproven decision, never 'could not check -> " +
+                "ring'. A kill switch that fails open is not one.",
+            svc.contains("isGranted")
+        )
+    }
+
+    /**
+     * The service must not ring for a room it cannot confirm is still live.
+     * A push is only a CLAIM: it can arrive seconds after the call ended, and it
+     * can be delivered over a network that cannot reach Firestore at all (captive
+     * portal), in which case the only snapshot available is cached — and a cached
+     * snapshot is not evidence a call is happening.
+     */
+    @Test
+    fun theServiceConfirmsLivenessFromTheServerBeforeRinging() {
+        val svc = fgs("CallForegroundService.kt")
+        assertTrue(
+            "the liveness listener must be attached BEFORE startRinging, not after",
+            svc.indexOf("addSnapshotListener") < svc.indexOf("CallAudioManager.startRinging")
+        )
+        assertTrue(
+            "a cached snapshot must not be accepted as confirmation",
+            svc.contains("isFromCache == false")
+        )
+        assertTrue(
+            "and the service must have a bounded wait, failing closed to silence",
+            svc.contains("LIVE_CONFIRM_MS")
+        )
+    }
+
+    /**
+     * A rejected foreground promote must not be total silence. The heads-up
+     * fallback used to wrap `startForegroundService()`, which does NOT throw for a
+     * promote that fails later inside the service — so that path produced no ring,
+     * no notification and no trace, which is precisely the permanent no-op the
+     * fallback's own comment claims to have fixed.
+     */
+    @Test
+    fun aRejectedForegroundPromoteStillProducesAVisibleNotification() {
+        val svc = fgs("CallForegroundService.kt")
+        assertTrue(
+            "the !promoted branch must post something the child can see",
+            svc.substringAfter("if (!promoted)").substringBefore("START_NOT_STICKY")
+                .contains("postIncomingCallFallback")
+        )
+        val recv = fgs("CallMessagingService.kt")
+        assertTrue(
+            "the fallback must be reachable from the service, so it cannot be private",
+            recv.contains("fun postIncomingCallFallback")
+        )
+    }
+
+    /**
+     * A listener must not outlive the ring it belonged to. `registration` was read
+     * and written from two coroutines with no synchronisation: if job B finished
+     * its identity waits before job A, A's late assignment orphaned B's
+     * registration for the life of the process. A `ListenerRegistration` is not
+     * owned by the coroutine that created it, so cancelling the job never removed
+     * it.
+     */
+    @Test
+    fun aSupersededRingReleasesItsListener() {
+        val svc = fgs("CallForegroundService.kt")
+        val start = svc.substringBefore("private suspend fun validateAndWatch")
+        assertTrue(
+            "the previous listener must be removed in onStartCommand, on the main " +
+                "thread, BEFORE a new coroutine can race the assignment",
+            start.contains("registration?.remove()")
+        )
+    }
+
+    /**
+     * BACK MUST NOT LEAVE THE APP. `BackHandler(enabled = previousBackStackEntry !=
+     * null)` disabled itself at exactly the wrong moment: Home is the resting
+     * state and its back stack holds one entry, so `previousBackStackEntry` is null,
+     * the handler stood down, and the press fell through to the platform — which
+     * finishes the activity. Every other destination was trapped and the most
+     * reached screen was the hole. The old audit asserted only that the STRING
+     * "BackHandler" exists somewhere in the tree, which cannot see this argument.
+     */
+    @Test
+    fun backIsConsumedAtHomeSoTheKidCannotReachTheLauncher() {
+        val nav = navFile("AppNavigation.kt")
+        val handler = nav.substringAfter("BackHandler(").substringBefore("}")
+        assertTrue(
+            "the app-wide BackHandler must be UNCONDITIONALLY enabled. Gating it on " +
+                "previousBackStackEntry disables it precisely at Home, which is where " +
+                "back would otherwise finish the activity and drop a six-year-old " +
+                "into the launcher.",
+            handler.contains("enabled = true")
+        )
+        assertTrue(
+            "and it must pop only when there is something to pop, so back at Home is " +
+                "a deliberate no-op rather than a fall-through",
+            nav.contains("if (navController.previousBackStackEntry != null)")
+        )
+        assertTrue(
+            "no BackHandler in the tree may be gated on the back stack for the same " +
+                "reason",
+            !Regex("""BackHandler\(\s*enabled\s*=\s*navController\.previousBackStackEntry""")
+                .containsMatchIn(nav)
+        )
+    }
+
+    /**
+     * The Helper's microphone is inside the consent model now. It was the one
+     * feature with no `ConsentStore` at all and no scope for the mic, on a tile
+     * that is unconditionally on the child's Home grid — so a parent who pressed
+     * "Turn everything off" got a screen promising nothing is allowed and, one tile
+     * over, a working microphone.
+     */
+    @Test
+    fun theHelpersMicrophoneIsGated() {
+        val vm = screenFile("HelperViewModel.kt")
+        assertTrue(
+            "HelperViewModel must hold a ConsentStore — the mic was the only " +
+                "microphone in the app outside the consent model",
+            vm.contains("ConsentStore()")
+        )
+        assertTrue(
+            "and it must read ConsentScope.VOICE, which had to be added to the " +
+                "enum for exactly this",
+            vm.contains("ConsentScope.VOICE")
+        )
+        val press = vm.substringAfter("fun onTapToSpeak()").substringBefore("val r = ensureRecognizer()")
+        assertTrue(
+            "the mic press must refuse when the grant is absent",
+            press.contains("voiceAllowed")
+        )
+    }
+
+    /**
+     * Speech must not leave the device. The Helper preferred an on-device engine
+     * and otherwise fell back to `createSpeechRecognizer` — the NETWORK
+     * recognizer — so on a budget phone without an on-device model a child's
+     * speech was captured and transmitted to the OEM's speech service. Nothing in
+     * consent/ could reach it, no screen disclosed it, and RULES §1.7a records an
+     * operator-signed exception for ML Kit and nothing for this.
+     *
+     * `EXTRA_PREFER_OFFLINE` was not the guarantee it looked like: it is
+     * explicitly ignored by many OEMs from API 33. The engine choice is the
+     * guarantee, so there must be no network recognizer in the file at all.
+     */
+    @Test
+    fun theHelperNeverFallsBackToTheNetworkRecognizer() {
+        val vm = screenFile("HelperViewModel.kt")
+        assertTrue(
+            "the Helper must require an ON-DEVICE recognizer and refuse otherwise. " +
+                "The network recognizer uploads a child's speech off-device, which " +
+                "no consent scope can reach and no screen discloses. Matched as a " +
+                "CALL, not a bare substring: `createOnDeviceSpeechRecognizer` contains " +
+                "the same letters and is the one we want.",
+            !vm.contains("SpeechRecognizer.createSpeechRecognizer(")
+        )
+        assertTrue(
+            "and it must check availability before creating anything",
+            vm.contains("isOnDeviceRecognitionAvailable")
+        )
+        assertTrue(
+            "a device with no on-device recognizer gets an honest refusal, not a " +
+                "silent fallback to the network",
+            vm.contains("Voice isn't available on this device.")
+        )
+    }
+
+    /**
+     * The microphone permission must be asked FOR on the press, not on entry.
+     * `LaunchedEffect(Unit)` fired the RECORD_AUDIO dialog the moment a child
+     * opened the tile — before touching anything — which is an OS-owned dialog
+     * whose only button is "Allow", standing in for a deliberate act.
+     */
+    @Test
+    fun theMicPermissionIsRequestedOnThePressNotOnEntry() {
+        val screen = screenFile("HelperScreen.kt")
+        assertTrue(
+            "entering the Helper must not immediately request RECORD_AUDIO",
+            !Regex("""LaunchedEffect\(Unit\)\s*\{[^}]*permissionLauncher\.launch""")
+                .containsMatchIn(screen)
+        )
+        assertTrue(
+            "the request must hang off the mic button instead",
+            screen.contains("permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)")
         )
     }
 

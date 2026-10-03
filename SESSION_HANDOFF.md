@@ -28,27 +28,30 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 
 ### State
 
-The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**,
-**`firestore.rules` is deployed** (2026-10-01), and Source is at
-`versionCode 11` / `0.3.1`. **Both phones are now on vc11 / 0.3.1** (flashed
-2026-10-02 10:17:56 child / 10:18:11 parent) — source and device are the same
-build for the first time since vc7.
+The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, and Source
+is at **`versionCode 12` / `0.3.2`** — the wakeup-path kill switch, 2026-10-02.
+**Both phones are still on vc11 / 0.3.1** (flashed 2026-10-02 10:17:56 child /
+10:18:11 parent), and **they must stay there until the operator builds vc12.**
+vc11 and vc12 are not interchangeable: vc11 rings at full volume on a child's
+killed phone after the grown-up switched calling off, which is the whole defect
+vc12 exists to fix. `firestore.rules` is deployed **but the deployed ruleset is
+the 2026-10-01 one and is now behind the tree** — see "BLOCKING" below.
 
-Gates, re-run against `313e566` (= origin/main): verify PASS ·
-unit **538 tests (269 per flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
-functions **13/13** (both files, via the fixed `gate` tool) · **rules emulator 44/44**.
+Gates, re-run against the audit tree: verify PASS · unit **556 tests (278 per
+flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
+functions **13/13** (both files) · **rules emulator 49/49** · `prove_gates_bite`
+green→red→green · **0 Kotlin warnings**.
 
-**And now the build gate too, for the first time:** `clean
-assembleParentDebug assembleChildDebug` BUILD SUCCESSFUL, **77 tasks, 77
-executed, 0 from cache** (`--no-build-cache`, so the Kotlin compiler genuinely
-ran — the first attempt had 34 `FROM-CACHE` including `compileParentDebugKotlin`
-and was discarded as evidence). Both APKs report `versionCode 11`. Installed `-r`
-to the correct flavor on each device; pairing and the anonymous account
-survived. Operator authorised this across RULES §1.5 in-session.
+**BLOCKING, OPERATOR: `firebase deploy --only firestore:rules,functions`.** The
+live ruleset cannot prove a query, so both consent listeners are denied — which
+means **the app is inert on both phones right now, on both vc11 and vc12, until
+this deploys.** If nothing works and the shield icon leads nowhere, that is the
+cause, not a bad install.
 
-**What that proves: the tree compiles, packages and installs. It proves nothing
-about behaviour.** Zero vc11 features have been exercised by a human, and the
-parental kill switch is still unwitnessed — which is the whole point of the next
+**What the gates prove: the host suites and the compiler. They prove nothing
+about behaviour.** Zero features have been exercised by a human on any build
+after vc7, and the parental kill switch is still unwitnessed — which is the whole point of the next
+section.
 section.
 
 Nothing in §2 has been exercised on hardware. Not one call, text, photo, consent

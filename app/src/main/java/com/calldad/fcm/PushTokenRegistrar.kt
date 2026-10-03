@@ -21,6 +21,28 @@ import com.google.firebase.messaging.FirebaseMessaging
  */
 object PushTokenRegistrar {
 
+    /**
+     * A token that arrived before auth did, held until it can be written.
+     *
+     * `save()` used to be a bare `return` when `currentUser` was null. That is
+     * not a neutral no-op: the token is then never written, so the Cloud Function
+     * finds no `fcmToken` and skips the push with a log line the app can never
+     * see. Recovery depended on the child happening to launch the app again.
+     *
+     * The sequence that lost rings was: a token rotation arrives while Firebase
+     * auth is still restoring; the write is dropped; the OLD token is deleted
+     * server-side as stale on the next ring; and from then on EVERY ring is
+     * skipped with no registered device. A phone not opened for days stops being
+     * callable, silently.
+     *
+     * So the token is remembered in memory and flushed as soon as auth resolves.
+     * In-memory rather than DataStore on purpose: a token is not worth a disk
+     * write and a migration, and the gap it covers is the process lifetime. If
+     * the process dies first, the next `refresh()` at launch re-fetches anyway.
+     */
+    @Volatile
+    private var pending: String? = null
+
     @Suppress("DEPRECATION")
     fun refresh() {
         FirebaseMessaging.getInstance().token
@@ -29,7 +51,36 @@ object PushTokenRegistrar {
     }
 
     fun save(token: String) {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid == null) {
+            // Logged distinctly from a Firestore failure, because the two need
+            // opposite responses: this one is "not yet", that one is "denied".
+            pending = token
+            WebRtcLog.transition("FCM token held: auth not ready")
+            // A single self-removing listener. It has to detach itself once auth
+            // resolves, so the reference is held in a `lateinit var` rather than
+            // a `val`: a val cannot name itself inside its own initializer.
+            lateinit var authListener: FirebaseAuth.AuthStateListener
+            authListener = FirebaseAuth.AuthStateListener { auth ->
+                val ready = auth.currentUser?.uid
+                if (ready != null) {
+                    val held = pending
+                    pending = null
+                    // `removeAuthStateListener` takes the LISTENER, not the auth
+                    // object, and only when the listener actually fired — a
+                    // leaked auth listener on a process that outlives many rings
+                    // is a wakeup cost for nothing.
+                    FirebaseAuth.getInstance().removeAuthStateListener(authListener)
+                    if (held != null) write(ready, held)
+                }
+            }
+            FirebaseAuth.getInstance().addAuthStateListener(authListener)
+            return
+        }
+        write(uid, token)
+    }
+
+    private fun write(uid: String, token: String) {
         FirebaseFirestore.getInstance().collection("users").document(uid)
             .set(
                 mapOf("fcmToken" to token, "updatedAt" to FieldValue.serverTimestamp()),

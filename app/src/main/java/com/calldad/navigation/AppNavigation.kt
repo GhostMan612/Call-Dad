@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -76,8 +80,26 @@ fun AppNavHost(
     // which is the one escape this app exists to prevent. Screens that need
     // their own back behaviour (Call, Game) install their own BackHandler
     // inside their composable, which takes precedence over this one.
-    BackHandler(enabled = navController.previousBackStackEntry != null) {
-        navController.popBackStack(Routes.HOME, inclusive = false)
+    //
+    // ENABLED UNCONDITIONALLY. This was `enabled = previousBackStackEntry != null`,
+    // and that predicate disabled the handler at exactly the wrong moment: Home
+    // is the app's resting state, its back stack holds one entry, so
+    // previousBackStackEntry is null, the handler stood down, and the press fell
+    // through to the platform — which finishes the activity. Every other
+    // destination was correctly trapped and Home, the screen a six-year-old
+    // spends essentially all their time on and where back is the only gesture
+    // that does anything at all, was the single hole. It passed green because
+    // the audit asserted only that the STRING "BackHandler" exists somewhere in
+    // the tree, which cannot see this argument.
+    //
+    // Consuming the press and then popping only when there is something to pop
+    // means the activity can never be finished by back, so the app has no route
+    // out of itself. There is nothing to unwind at Home, so this is a no-op there
+    // by design rather than an accident.
+    BackHandler(enabled = true) {
+        if (navController.previousBackStackEntry != null) {
+            navController.popBackStack(Routes.HOME, inclusive = false)
+        }
     }
 
     // The "Dad is talking" banner must be the OUTERMOST composable, above the
@@ -92,6 +114,26 @@ fun AppNavHost(
     val pttState by pttViewModel.state.collectAsStateWithLifecycle()
     val callLive = callState.isLive
     LaunchedEffect(callLive) { pttViewModel.onCallStateChanged(callLive) }
+
+    // The call's background/foreground behaviour, registered HERE so it outlives
+    // every destination. It lived in CallScreen and was removed by that screen's
+    // own onDispose, so tapping "Game" during a call destroyed the only hook that
+    // released the camera: press Home from the Game screen and the capturer stayed
+    // live for the rest of the call, with the phone face down and the camera
+    // indicator on. AppNavigation is composed app-wide and the ViewModel is
+    // activity-scoped, so this is correct for every screen.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> callViewModel.onUiHidden()
+                Lifecycle.Event.ON_START -> callViewModel.onUiVisible()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
@@ -169,10 +211,14 @@ fun AppNavHost(
             ChatScreen(onBackHome = navController::returnHome)
         }
         composable(Routes.PAIRING) {
-            // `rememberSaveable`, not `remember`: process death while on the
-            // pairing destination used to restore the child straight INTO
-            // PairingScreen with the grown-ups gate already passed. The gate
-            // must never survive a process death.
+            // `remember`, NOT `rememberSaveable`. This used to be the other way
+            // round, and the comment above this block described the historical bug
+            // ("process death while on the pairing destination used to restore the
+            // child straight INTO PairingScreen with the grown-ups gate already
+            // passed") and then named `rememberSaveable` as the prescription — so a
+            // future reader "fixing" the advice would have reinstated exactly the
+            // hole the comment was warning about. The gate flag must NOT survive a
+            // process death; only `remember` guarantees that.
             var unlocked by remember { mutableStateOf(false) }
             if (unlocked) {
                 PairingScreen(onPaired = { navController.returnHome() })

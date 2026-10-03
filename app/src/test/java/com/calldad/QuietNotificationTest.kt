@@ -136,10 +136,24 @@ class QuietNotificationTest {
     fun theRingPathIsStillOnTheHighImportanceChannel() {
         // The fix must not have quieted the actual ring. A call that does not
         // ring is a worse failure than a message that rings.
-        val ring = body(service, "private fun postHeadsUpFallback(")
+        //
+        // Sliced on the COMPANION's implementation, not on the private wrapper.
+        // The builder moved there so `CallForegroundService` can reuse it when
+        // its own `startForeground` is rejected — a path that previously produced
+        // total silence. Slicing the wrapper instead would assert against a
+        // one-line delegation and pass or fail for reasons unrelated to the
+        // channel, which is the "substringBefore returned the whole file" trap
+        // this suite has already been bitten by.
+        val ring = body(service, "fun postIncomingCallFallback(")
         assertTrue(
             "the incoming-call fallback must stay on CHANNEL_INCOMING_CALL. Body: " + ring,
             ring.contains("CHANNEL_INCOMING_CALL")
+        )
+        assertTrue(
+            "and the private wrapper must actually delegate to it, rather than " +
+                "posting something of its own: " + ring,
+            body(service, "private fun postHeadsUpFallback(")
+                .contains("postIncomingCallFallback(this, callId, seq)")
         )
     }
 

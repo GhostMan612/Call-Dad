@@ -36,7 +36,7 @@ Group calls, multi-contact, cloud backup, cross-internet without rendezvous rela
 - Allowlist-only; Direct route only; no open broadcast/discovery.
 - No accounts, analytics, ads, third-party phoning-home SDKs.
 - Chat/voice/photo stay on-device; any future hub sync redacts them by default.
-- Consent cert: Dad-grants-Kid `[call,text,photo]` + expiry; revocation = kill switch.
+- Consent grants: Dad-grants-Kid over **five** scopes — `CALL` / `PTT` / `TEXT` / `PHOTO` / `VOICE` — plus expiry; absence DENIES; revocation is an append-only seq range and is the kill switch. (This line originally read `[call,text,photo]`, which is what the spec asked for; `PTT` was added before v0.1 shipped and `VOICE` on 2026-10-02, because the walkie talkie and the Helper microphone were the two features outside the consent model — a control that says "nothing is allowed" while a microphone is still open is not a control. See ADR-017.)
 - Synthetic fixtures only; no real child data in repo.
 
 ## 5. Technical contract

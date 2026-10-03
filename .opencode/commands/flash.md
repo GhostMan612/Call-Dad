@@ -9,7 +9,7 @@ version fingerprint resolved from source, and you state what evidence is still m
 
 ## 1. Resolve the fingerprint (read source, do not build)
 Read `app/build.gradle.kts` for `versionCode` and `versionName`. Report them, e.g.
-`versionCode 11 / versionName 0.3.1`, and the two flavor ids `0.3.1-parent` and `0.3.1-child`.
+`versionCode 12 / versionName 0.3.2`, and the two flavor ids `0.3.2-parent` and `0.3.2-child`.
 Never quote a version from memory or from a doc — read the file every time. **Note the
 header comment on line 2 of that file has been wrong before; read the `versionCode =`
 assignment, not the header.**

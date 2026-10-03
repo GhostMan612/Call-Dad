@@ -37,7 +37,7 @@ Kid-safe native Android app. Kid device: one giant **Call Dad** button + photo b
 
 ## 5. Security / consent
 
-- Allowlist-only, pair-scoped rooms only. **SUPERSEDED: the signed consent cert with an `expires` field is not what shipped** — ADR-017 replaced it with fail-closed per-scope grants (`CALL`/`PTT`/`TEXT`/`PHOTO`) in the pair room, where absence DENIES and revocation is an append-only seq range.
+- Allowlist-only, pair-scoped rooms only. **SUPERSEDED: the signed consent cert with an `expires` field is not what shipped** — ADR-017 replaced it with fail-closed per-scope grants (`CALL`/`PTT`/`TEXT`/`PHOTO`/`VOICE`) in the pair room, where absence DENIES and revocation is an append-only seq range.
 - Keys: **no SQLCipher passphrase, no `MemoryScrubber` — neither is in the build.** WebRTC's DTLS-SRTP covers the media path (ADR-005); Keystore non-exportable keys are used for the signing key. Parent approval for contact-add is the `ParentGate` grown-ups gate, not a `DualKeyGate`.
 - Redaction: chat/PTT/photo/telemetry never leave device to any hub/cloud without explicit parent opt-in.
 

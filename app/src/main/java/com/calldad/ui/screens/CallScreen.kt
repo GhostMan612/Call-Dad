@@ -66,10 +66,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calldad.ui.components.VideoRenderer
@@ -143,18 +141,18 @@ fun CallScreen(
 
     // Lock-screen polish: the camera pauses while the call is not on
     // screen and comes back only if the kid left it on.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_STOP -> viewModel.onUiHidden()
-                Lifecycle.Event.ON_START -> viewModel.onUiVisible()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    //
+    // THE OBSERVER LIVES IN AppNavigation, NOT HERE, and that is deliberate.
+    // It used to be registered in this composable and removed in its own
+    // onDispose — so tapping "Game" navigated away, CallScreen left composition,
+    // and the hook ceased to exist while the call stayed up. Child: connect a
+    // call, tap Game, press Home, and nothing muted the camera or released it,
+    // because the only thing watching for that had already been torn down.
+    //
+    // AppNavigation is composed app-wide and already drives
+    // `pttViewModel.onCallStateChanged` from a live call, so the call's
+    // background/foreground behaviour belongs there too, and it now survives every
+    // destination including Game.
 
     // Any return to Idle after real activity follows home so neither side
     // strands on a dead screen. Initial Idle never triggers.

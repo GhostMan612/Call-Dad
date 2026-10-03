@@ -7,6 +7,7 @@
 package com.calldad.ui.screens
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognitionListener
@@ -22,12 +23,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.calldad.consent.ConsentScope
+import com.calldad.consent.ConsentStore
 import com.calldad.helper.KeywordBot
 import com.calldad.webrtc.WebRtcLog
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
 
@@ -67,31 +72,81 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
     // ---- STT ----
     private var recognizer: SpeechRecognizer? = null
     private var usingOnDevice = false
-    private var onDeviceUnavailable = false
-    private var lastIntent: Intent? = null
 
     /**
-     * Builds the recognizer, preferring the on-device engine when available.
-     * On API 31+ with a device that supports it, this runs fully offline.
-     * Otherwise it falls back to the network recognizer with
-     * EXTRA_PREFER_OFFLINE set — which is best-effort, not guaranteed.
+     * The consent gate for the microphone (ADR-017, [ConsentScope.VOICE]).
+     *
+     * The Helper is the one feature that was entirely outside the consent model:
+     * no `ConsentStore` anywhere in this file, no scope for the mic, and the tile
+     * unconditionally on the child's Home grid. So a parent who pressed "Turn
+     * everything off" got a screen that told the child nothing is allowed and,
+     * one tile over, a working microphone.
+     *
+     * Absence DENIES, exactly as everywhere else: a fresh install has no
+     * `ConsentScope.VOICE` and the Helper says so instead of listening.
      */
-    private fun ensureRecognizer(): SpeechRecognizer? {
+    private val consent = ConsentStore()
+
+    private var voiceAllowed = false
+
+    fun start(context: Context, scope: CoroutineScope) {
+        consent.start(context, scope)
+        scope.launch {
+            consent.decisionFor(ConsentScope.VOICE).collect { d ->
+                val allowed = d?.isGranted == true
+                voiceAllowed = allowed
+                if (!allowed) {
+                    // Same rule as every other feature: revocation tears down
+                    // what is in flight rather than waiting for the next tap.
+                    try { recognizer?.cancel() } catch (_: Throwable) {}
+                    try { tts?.stop() } catch (_: Throwable) {}
+                    _state.update {
+                        it.copy(status = HelperStatus.IDLE, error = null)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+ * Builds the recognizer, ON-DEVICE ONLY, and refuses rather than falling back.
+ *
+ * This used to prefer the on-device engine and otherwise fall back to
+ * `createSpeechRecognizer`, which is the NETWORK recognizer: on a budget phone
+ * without an on-device model — a realistic case on both devices in the fleet —
+ * a six-year-old's speech was captured and transmitted to the OEM's speech
+ * service. Nothing in `consent/` could reach it, no screen said so, and RULES
+ * §1.7a records an operator-signed exception for ML Kit (a barcode model fetch)
+ * but nothing at all for this. A silent mic upload is exactly the class of thing
+ * that sheet exists to prevent.
+ *
+ * `EXTRA_PREFER_OFFLINE` was not the guarantee it looked like either: it is
+ * explicitly ignored by many OEMs from API 33, so the flag below is a hint and
+ * the engine choice is the guarantee. There is no network recognizer here at all.
+ * A device without on-device recognition gets an honest message instead of a
+ * working feature that phones home.
+ */
+private fun ensureRecognizer(): SpeechRecognizer? {
         recognizer?.let { return it }
         val ctx = appContext
-        val r = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
-            && !onDeviceUnavailable
-            && SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) {
-            WebRtcLog.transition("STT: using on-device recognizer")
-            usingOnDevice = true
-            SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
-        } else {
-            usingOnDevice = false
-            WebRtcLog.transition("STT: using default recognizer")
-            SpeechRecognizer.createSpeechRecognizer(ctx)
+        // `isOnDeviceRecognitionAvailable` is API 31+ and minSdk is 26 (ADR-004),
+        // so on API 26-30 there is no on-device engine to ask about and therefore
+        // nothing we are willing to use. Refusing is the honest answer; the guard
+        // is a version check rather than a @RequiresApi because the alternative
+        // would be reaching for the network recognizer we are refusing to use.
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            WebRtcLog.transition("STT: on-device recognizer needs API 31; refusing mic")
+            return null
         }
+        if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx)) {
+            WebRtcLog.transition("STT: no on-device recognizer; refusing mic")
+            return null
+        }
+        val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx)
         r.setRecognitionListener(recognitionListener)
         recognizer = r
+        usingOnDevice = true
+        WebRtcLog.transition("STT: using on-device recognizer")
         return r
     }
 
@@ -102,6 +157,16 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
         val current = _state.value.status
         if (current == HelperStatus.LISTENING ||
             current == HelperStatus.SPEAKING) return
+
+        // The kill switch, at the point of use. Checked on the synchronous path
+        // because a press can land in the same frame a revocation arrives.
+        if (!voiceAllowed) {
+            _state.update { it.copy(
+                status = HelperStatus.ERROR,
+                error = "Ask Helper is turned off right now."
+            ) }
+            return
+        }
 
         val r = ensureRecognizer() ?: run {
             _state.update { it.copy(
@@ -116,18 +181,15 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            // Best-effort hint. Ignored by many OEMs on API 33+. The
-            // on-device recognizer path above is the real guarantee.
-            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            }
+            // The recognizer is on-device (see [ensureRecognizer]); this is a hint
+            // in the same direction, and is a hint only.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
         _state.update { it.copy(
             status = HelperStatus.LISTENING,
             error = null,
             lastHeard = null
         ) }
-        lastIntent = intent
         try {
             r.startListening(intent)
         } catch (t: Throwable) {
@@ -180,24 +242,6 @@ class HelperViewModel(application: Application) : AndroidViewModel(application) 
 
         override fun onError(error: Int) {
             WebRtcLog.transition("STT error code: $error")
-            val languageMissing =
-                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
-                    (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
-            val retryIntent = lastIntent
-            if (usingOnDevice && languageMissing && retryIntent != null) {
-                WebRtcLog.transition("STT: on-device language missing, using default")
-                onDeviceUnavailable = true
-                try { recognizer?.destroy() } catch (_: Throwable) {}
-                recognizer = null
-                val fallback = ensureRecognizer()
-                if (fallback != null) {
-                    try {
-                        fallback.startListening(retryIntent)
-                        return
-                    } catch (_: Throwable) {}
-                }
-            }
             _state.update { it.copy(
                 status = HelperStatus.ERROR,
                 error = "I didn't hear you. Tap and try again."

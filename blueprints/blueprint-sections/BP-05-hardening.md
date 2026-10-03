@@ -10,7 +10,7 @@
 Goal: v0.1 shippable to kid device.
 
 1. Parent gate (adapt `DualKeyGate`): contact-add/settings require parent auth (biometric/PIN on Dad device or setup flow); kid flow provably cannot add/escalate (unit + manual audit).
-2. Consent cert (`consent.py` model): Dad-grants-Kid `[call,text,photo]` + expiry; revocation blocks all comms + shows kind UI. Unit: expired/revoked → blocked.
+2. Consent cert (`consent.py` model): Dad-grants-Kid over **five** scopes — `CALL` / `PTT` / `TEXT` / `PHOTO` / `VOICE` — plus expiry; absence denies; revocation blocks all comms + shows kind UI. Unit: expired/revoked → blocked. (Originally `[call,text,photo]`; `PTT` and `VOICE` were added later because those two features were outside the consent model.)
 3. At-rest crypto per ADR-003: SQLCipher (passphrase wrapped by Keystore) or deferred with justification. → **DEFERRED with justification (ADR-003).** Not in the build; see ADR-018.
 4. Kid-UX audit (docs/kid-safe-ux.md sheet): ≥96dp primary target, contrast, one-action/screens, no-escape (no browser/store/settings), loud ring + auto-reconnect, missed-call callback card.
 5. Release plan: operator provisions `call-dad` keystore later; document signing + versioning; no secrets in repo.

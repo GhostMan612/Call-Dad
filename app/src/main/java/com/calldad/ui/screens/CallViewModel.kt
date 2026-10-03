@@ -32,6 +32,7 @@ import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
@@ -277,6 +279,28 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         val canStart = s is CallState.Idle || s is CallState.NoAnswer ||
             s is CallState.Declined || s is CallState.Ended || s is CallState.Error
         if (!canStart || publishingOffer || answering) return
+        // An INCOMING ring that this device has not yet observed as `Ringing`
+        // must not be replaced by "calling…". The ownership fence in
+        // startRingback is correct, but it was reading a precondition that
+        // teardownMedia() had already destroyed three lines earlier:
+        // teardownMedia -> CallAudioManager.stop() -> ringOwner = null, so the
+        // fence never matched, AND the real incoming ring was cut dead while the
+        // notification still read "Incoming call / Tap to answer".
+        //
+        // The window is real and it is the catch-up case, not steady state: a
+        // locked phone suppresses the full-screen intent so nothing navigates, the
+        // room listener's own first snapshot can be slow, and on API 34+ a
+        // high-priority push may not be granted a full-screen intent at all. The
+        // child opens the app from the launcher (no INCOMING_CALL action, so no
+        // pull-in), sees the giant button, and taps it — while the service is
+        // still ringing.
+        //
+        // So refuse BEFORE tearing anything down. An incoming ring that does
+        // reach the state machine makes `canStart` false on its own.
+        if (CallForegroundService.isRunning) {
+            WebRtcLog.transition("Call suppressed: incoming ring in progress")
+            return
+        }
         val p = pair ?: run {
             _state.value = CallState.Error(
                 CallErrorKind.NOT_PAIRED,
@@ -295,11 +319,38 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         autoDismissJob?.cancel()
         teardownMedia()
         beginGeneration(asCaller = true)
+        // The placeholder state names this attempt, but its seq is deliberately
+        // the seq from BEFORE this generation (0 on a first-ever call). It is
+        // replaced with the real one at :320, after the publish resolves.
+        //
+        // THAT MEANS `onCleared` CANNOT TRUST IT. It used to, and the sequence
+        // went like this: the kid taps Call Dad; the publish transaction is in
+        // flight; the parent swipes the app out of Recents, which cancels
+        // viewModelScope and then calls onCleared; the teardown write is stamped
+        // with a seq that does not exist yet, so finishCall's generation check
+        // declines to write; and because `kotlinx.coroutines.tasks.await()`
+        // resumes with a CancellationException WITHOUT cancelling the Task, the
+        // queued transaction still commits. Net result: a room left RINGING with
+        // nobody to answer it, and the child's phone ringing at full volume for
+        // the full 45s no-answer timeout, with no error on either device.
+        //
+        // The fix is that the compensating write — "cancel the ring we just
+        // started" — must not be skipped by cancellation, so it lives in a
+        // `finally` under NonCancellable. It knows the real seq, because it is
+        // declared INSIDE the publish. See below.
         _state.value = CallState.Ringing(currentSeq, false, peerDisplayName(), p.roomId)
-        CallAudioManager.startRingback()
+        // Honoured, not discarded. The fence exists so an incoming ring keeps the
+        // audio; if it refuses, this device is not the owner of an incoming ring
+        // and must not make noise at all rather than starting a tone over the top
+        // of one.
+        if (!CallAudioManager.startRingback()) {
+            WebRtcLog.transition("Call abandoned: ringback refused, audio owned elsewhere")
+            return
+        }
         val myAttempt = attempt
 
         viewModelScope.launch {
+            var publishedSeq: Int? = null
             try {
                 val client = newClient()
                 val offer = withTimeout(SETUP_TIMEOUT_MS) { client.createOffer() }
@@ -307,6 +358,9 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 val seq = withTimeout(SETUP_TIMEOUT_MS) {
                     signaling.publishOffer(p.roomId, offer.sdp, p.ownUid, p.peerUid).getOrThrow()
                 }
+                // Recorded the moment it is known, so the `finally` below can
+                // always name the generation it created.
+                publishedSeq = seq
                 WebRtcLog.transition("OFFER published")
                 val stillCalling = _state.value.let { it is CallState.Ringing && !it.isIncoming }
                 if (!stillCalling || rtc !== client || attempt != myAttempt) {
@@ -326,6 +380,21 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
                 if (attempt == myAttempt) fail(t)
             } finally {
                 publishingOffer = false
+                // The one write that owns the ring must survive scope
+                // cancellation. `withContext(NonCancellable)` because
+                // `viewModelScope` is already cancelled by the time onCleared's
+                // sibling runs, and a cancelled coroutine cannot suspend — so
+                // without this the compensating write is precisely the code that
+                // gets skipped when it is most needed.
+                val seq = publishedSeq
+                val abandoned = _state.value.let {
+                    !(it is CallState.Ringing && !it.isIncoming)
+                } || attempt != myAttempt
+                if (seq != null && abandoned && localSdpPublished.not()) {
+                    withContext(NonCancellable) {
+                        runCatching { signaling.finishCall(p.roomId, seq, "ENDED") }
+                    }
+                }
                 // Docs held back while publishing (our own echo, an answer
                 // that beat the transaction result, or the peer's ring in
                 // glare / after a failed publish) are replayed now.
@@ -478,12 +547,18 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Screen locked / app backgrounded: camera pauses, call continues. */
     fun onUiHidden() {
-        rtc?.setCameraEnabled(false)
+        // Releases the CAMERA, not just the outgoing frames. `setEnabled(false)`
+        // only stops sending — upstream it reaches `nativeSetEnabled` and never
+        // touches the capturer — so the Camera2 session and the SurfaceTextureHelper
+        // capture thread stayed live for the whole call with the app in the
+        // background: the camera indicator on, the battery draining, for a
+        // six-year-old who put the phone face down.
+        rtc?.onUiHidden()
     }
 
     /** Back in front: camera returns only if the kid had it on. */
     fun onUiVisible() {
-        rtc?.setCameraEnabled(_isCameraOn.value)
+        rtc?.onUiVisible(_isCameraOn.value)
     }
 
     fun sendGameData(json: String): Boolean = rtc?.sendGameData(json) ?: false
@@ -492,8 +567,20 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value
         pair?.let { p ->
             if (s is CallState.Connected ||
-                (s is CallState.Ringing && !s.isIncoming)) {
-                signaling.finishCallDetached(p.roomId, currentSeq, "ENDED")
+                (s is CallState.Ringing && !s.isIncoming)
+            ) {
+                // Only when this device knows the generation it created.
+                // `currentSeq` still holds the PREVIOUS generation's value while
+                // an offer is still publishing, and stamping a teardown with it
+                // means finishCall's generation check declines to write — which
+                // is safe but useless, because the publish transaction is already
+                // queued and WILL commit. The publish path's own `finally` owns
+                // that write (under NonCancellable) precisely because it is the
+                // only place the real seq exists. `localSdpPublished` is the
+                // signal: it is set only once a seq is genuinely known.
+                if (localSdpPublished) {
+                    signaling.finishCallDetached(p.roomId, currentSeq, "ENDED")
+                }
             }
         }
         teardownMedia()

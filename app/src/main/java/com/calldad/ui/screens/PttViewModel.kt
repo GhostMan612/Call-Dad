@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.calldad.consent.ConsentDecision
+import com.calldad.consent.ConsentScope
 import com.calldad.consent.ConsentStore
 import com.calldad.ptt.PttAudioManager
 import com.calldad.ptt.PttAudioState
@@ -78,6 +79,12 @@ class PttViewModel(application: Application) : AndroidViewModel(application) {
  * messages and photos while the child could still talk to their grown-up
  * indefinitely. `firestore.rules` cannot close this: the PTT room is written by
  * pair membership, so an unenforced client is the only enforcement there is.
+ *
+ * It then collected `decision`, the SINGLE headline value — which answers for
+ * ConsentScope.CALL. So this screen was gated on CALL and `ConsentScope.PTT` was
+ * read by nothing in the whole app, while the KDoc above claimed the PTT grant.
+ * A CALL-only grant is a legal document, so this would have broken silently the
+ * moment anyone added a per-scope control. It reads PTT now.
  */
 private val consent = ConsentStore()
 
@@ -85,7 +92,7 @@ init {
         consent.start(application, viewModelScope)
         watchEngine()
         viewModelScope.launch {
-            consent.decision.collect { d -> onConsentChanged(d) }
+            consent.decisionFor(ConsentScope.PTT).collect { d -> onConsentChanged(d) }
         }
     }
 

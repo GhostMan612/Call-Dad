@@ -105,6 +105,45 @@ Firestore listener gated, not just its screen**.
 **Still unwitnessed: no device has ever exercised this control.** A decision
 record is not evidence of enforcement.
 
+## Amendment 2026-10-02 (vc12) — the gate was still one consumer short
+
+The vc11 amendment fixed every consumer **inside the app**. A six-auditor sweep
+on 2026-10-02 found that was not the same as fixing every consumer:
+
+1. **`CallForegroundService` had no consent gate at all.** It is the only
+   consent consumer that runs when the process is dead, and it validated the
+   PAIRING and then rang at full volume. So a parent's check with the child's app
+   open passed and a check with the app force-stopped failed — a kill switch that
+   depends on the child happening to have the app foreground. This is vc10's
+   defect one layer deeper. Now gated by a one-shot, fail-closed
+   `ConsentStore.decisionNow` **before** `startRinging`, publishing `ENDED` so
+   the caller is not left ringing out to nobody. The structural test asserts the
+   ORDER, because a gate after `startRinging` is a comment.
+2. **`ConsentScope.PTT` was read by nothing.** The walkie talkie collected
+   `decision` — a single headline that answers for `CALL`. A CALL-only grant is a
+   legal document, so the mixup was latent, not theoretical. Added
+   `ConsentStore.decisionFor(scope)`.
+3. **The Helper microphone had no scope, and streamed off-device.** No
+   `ConsentStore` in the file, no mic scope, tile unconditionally on the child's
+   Home grid — and it fell back to the **network** recognizer, so on a budget
+   device with no on-device model a child's speech went to the OEM's speech
+   service. Added `ConsentScope.VOICE`, and the recognizer is now on-device-only
+   with an honest refusal. `EXTRA_PREFER_OFFLINE` was never the guarantee it
+   looked like: it is ignored by many OEMs from API 33.
+
+**The rule these produced:** *a gate on a screen is not a gate.* The consumer
+that runs when the app is not running is the one that has to hold it, and a
+per-scope model is decorative until each feature reads **its own** scope.
+
+**Known gap, not fixable here.** A member can write a cert naming the PEER. It
+cannot be closed in the rules: the room id is two symmetric UIDs and nothing in
+Firestore says which is the grown-up, so denying it denies the legitimate
+direction too. It makes `isGrantor` true on the child's own phone, which
+short-circuits `recompute()` and would make the kill switch a no-op there.
+Closing it needs a **trust root** — an asymmetric role decided at pairing, or a
+signed credential. The emulator asserts the insecure behaviour in a
+banner-marked test so the day it is fixed, that failure is the signal.
+
 ## Consequences
 
 - `TEXT` and `PHOTO` grants are now meaningful, so the chat screen can be closed

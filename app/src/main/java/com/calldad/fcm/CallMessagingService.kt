@@ -9,6 +9,7 @@ package com.calldad.fcm
 import android.Manifest
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -121,40 +122,8 @@ class CallMessagingService : FirebaseMessagingService() {
      * ourselves. Ringing is lost in this path, but the kid gets a visible,
      * tappable "Dad is calling" instead of silence.
      */
-    private fun postHeadsUpFallback(callId: String, seq: Int) {
-        runCatching {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                action = ACTION_RING_NOTIFICATION
-                putExtra(EXTRA_CALL_ID, callId)
-                putExtra(EXTRA_SEQ, seq)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-            val pi = PendingIntent.getActivity(
-                this,
-                REQUEST_CODE_FALLBACK,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val nm = getSystemService(NotificationManager::class.java) ?: return
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-                PackageManager.PERMISSION_GRANTED
-            ) {
-                return
-            }
-            nm.notify(
-                NOTIFICATION_ID_FALLBACK,
-                NotificationCompat.Builder(this, CallDadApplication.CHANNEL_INCOMING_CALL)
-                    .setSmallIcon(R.drawable.ic_call)
-                    .setContentTitle("Incoming call")
-                    .setContentText("Tap to see who's calling")
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setCategory(NotificationCompat.CATEGORY_CALL)
-                    .setAutoCancel(true)
-                    .setContentIntent(pi)
-                    .build()
-            )
-        }
+private fun postHeadsUpFallback(callId: String, seq: Int) {
+        postIncomingCallFallback(this, callId, seq)
     }
 
     @Deprecated("FCM registration tokens stay until the FID-based Admin SDK migration.")
@@ -163,13 +132,74 @@ class CallMessagingService : FirebaseMessagingService() {
         PushTokenRegistrar.save(token)
     }
 
-    private companion object {
-        const val ACTION_RING_NOTIFICATION = "com.calldad.RING_NOTIFICATION"
-        const val EXTRA_CALL_ID = "callId"
-        const val EXTRA_SEQ = "seq"
-        const val NOTIFICATION_ID_FALLBACK = 1002
-        const val REQUEST_CODE_FALLBACK = 2002
-        const val NOTIFICATION_ID_CLIP_WAITING = 1003
-        const val REQUEST_CODE_CLIP = 2003
+    companion object {
+        /**
+         * A notification-payload-free data message cannot show its own
+         * notification, so when the FOREGROUND SERVICE path is unavailable we post
+         * a heads-up ourselves. Ringing is lost in this path, but the kid gets a
+         * visible, tappable "Incoming call" instead of silence.
+         *
+         * STATIC AND SHARED, because there are two distinct failures that need it
+         * and only one of them used to have a fallback:
+         *
+         *  - `startForegroundService()` throwing (a high-priority FCM downgraded
+         *    to normal cannot start an FGS). Handled in [handleRing].
+         *  - `ServiceCompat.startForeground()` being REJECTED once the service is
+         *    already running. That throw happens inside the service, so
+         *    `handleRing` has already returned and its catch blocks never see it.
+         *    Before this was shared, that path was TOTAL SILENCE — no ring, no
+         *    notification, no trace — which is the exact permanent no-op
+         *    [handleRing]'s comment claims to have fixed.
+         *
+         * This notification does NOT bypass the kill switch: it is only posted
+         * when the service could not start, and the service's own consent gate
+         * runs before it rings. A visible "Incoming call" on a phone whose parent
+         * pulled the switch is still wrong, so the fallback is a degraded outcome
+         * for a promote failure, not a substitute for the gate — and the gate runs
+         * first in the normal path.
+         */
+        fun postIncomingCallFallback(context: Context, callId: String, seq: Int) {
+            runCatching {
+                val intent = Intent(context, MainActivity::class.java).apply {
+                    action = ACTION_RING_NOTIFICATION
+                    putExtra(EXTRA_CALL_ID, callId)
+                    putExtra(EXTRA_SEQ, seq)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                val pi = PendingIntent.getActivity(
+                    context,
+                    REQUEST_CODE_FALLBACK,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                val nm = context.getSystemService(NotificationManager::class.java) ?: return
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+                nm.notify(
+                    NOTIFICATION_ID_FALLBACK,
+                    NotificationCompat.Builder(context, CallDadApplication.CHANNEL_INCOMING_CALL)
+                        .setSmallIcon(R.drawable.ic_call)
+                        .setContentTitle("Incoming call")
+                        .setContentText("Tap to see who's calling")
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setCategory(NotificationCompat.CATEGORY_CALL)
+                        .setAutoCancel(true)
+                        .setContentIntent(pi)
+                        .build()
+                )
+            }
+        }
+
+        private const val ACTION_RING_NOTIFICATION = "com.calldad.RING_NOTIFICATION"
+        private const val EXTRA_CALL_ID = "callId"
+        private const val EXTRA_SEQ = "seq"
+        private const val NOTIFICATION_ID_FALLBACK = 1002
+        private const val REQUEST_CODE_FALLBACK = 2002
+        private const val NOTIFICATION_ID_CLIP_WAITING = 1003
+        private const val REQUEST_CODE_CLIP = 2003
     }
 }

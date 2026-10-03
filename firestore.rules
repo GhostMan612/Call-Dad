@@ -64,12 +64,26 @@ service cloud.firestore {
                     && statusValid(request.resource.data)
                     && request.resource.data.seq is int
                     && request.resource.data.seq >= resource.data.seq
+                    // ...and it RESETS when seq moves, because a new generation is
+                    // a new call. This distinction is load-bearing and was
+                    // missing: the monotonic check ran on EVERY update, while
+                    // publishOffer uses a non-merging set() that does NOT delete
+                    // unmentioned fields, so `negotiationRound` SURVIVED into
+                    // the next call. beginGeneration meanwhile resets the client's
+                    // counter to 1 on every attempt. So call #2's first restart
+                    // published round 1 against a room still carrying round 2 ->
+                    // PERMISSION_DENIED, and because the client only advances its
+                    // counter on a CONFIRMED publish it retried round 1 forever.
+                    // The user saw a silently dropped call, never an error, and no
+                    // client deletes the room doc so the stale round never
+                    // cleared. Monotonic within a call; free to restart per call.
                     && (!request.resource.data.keys().hasAny(['negotiationRound'])
                           || (request.resource.data.negotiationRound is int
                               && request.resource.data.negotiationRound >= 0
-                              && (!resource.data.keys().hasAny(['negotiationRound'])
-                                  || request.resource.data.negotiationRound
-                                     >= resource.data.negotiationRound)))
+                              && (request.resource.data.seq > resource.data.seq
+                                  || (!resource.data.keys().hasAny(['negotiationRound'])
+                                      || request.resource.data.negotiationRound
+                                         >= resource.data.negotiationRound))))
                     && (request.resource.data.seq == resource.data.seq
                           ? (request.resource.data.callerUid == resource.data.callerUid
                              && request.resource.data.calleeUid == resource.data.calleeUid)
@@ -153,6 +167,13 @@ service cloud.firestore {
       // verified digest; chunks hang off it. Byte size is capped here so a
       // corrupted or hostile writer cannot fill a family's storage, and the
       // 9MB Firestore document limit is respected by construction.
+      //
+      // THE SEND ORDER IS CHUNKS FIRST, MANIFEST LAST, and it must stay that
+      // way: written the other way round, a receiver could read a manifest,
+      // fetch chunks that do not exist yet, and treat the photo as corrupt.
+      // The chunk rules below therefore CANNOT require the manifest to exist --
+      // doing so would forbid the legitimate send. See the CHUNK COUNT note
+      // inside /chunks for what actually bounds the write instead.
       match /photos/{photoId} {
         function photoMetaFields() {
           return request.resource.data.keys().hasOnly(
@@ -186,6 +207,20 @@ service cloud.firestore {
                 && request.resource.data.bytes.size() <= 256000
                 && request.resource.data.index is int
                 && request.resource.data.index == int(index)
+                && request.resource.data.index >= 0
+                // CHUNK COUNT, bounded here rather than against the manifest,
+                // because the manifest does not exist yet on a legitimate send.
+                // Without a ceiling on the INDEX there is no bound on HOW MANY
+                // chunks a writer may create: each was individually legal, so
+                // 10,000 of them is ~2.5GB under a photo id whose manifest will
+                // declare at most 800KB, and PhotoClient fetches the collection
+                // UNBOUNDED into a map before validating any of it. 32 is the
+                // manifest's own ceiling and PhotoTransfer.MAX_CHUNKS, so this
+                // admits every real chunk and refuses the amplifier. (The digest
+                // check still rejected such a transfer, so nothing could be made
+                // to look verified -- this is a storage and billing hole, not an
+                // integrity one.)
+                && request.resource.data.index < 32
                 && request.resource.data.keys().hasOnly(
                      ['from', 'bytes', 'index', 'createdAt']);
           }
@@ -231,11 +266,35 @@ service cloud.firestore {
               && data.grantSeq >= 1
               && data.scopes is list
               && data.scopes.size() > 0
-              && data.scopes.size() <= 4
-              && data.scopes.hasOnly(['CALL', 'TEXT', 'PHOTO', 'PTT'])
+              && data.scopes.size() <= 5
+              // VOICE was added for the Ask Helper microphone. It has to be listed
+              // here or a grant carrying it is refused outright, which would make
+              // the scope decorative in exactly the way it was before it existed.
+              && data.scopes.hasOnly(['CALL', 'TEXT', 'PHOTO', 'PTT', 'VOICE'])
               && data.granteeUid == granteeUid;
         }
-        allow read: if isMember() && granteeUid in members();
+        // Read is MEMBER-LEVEL, not grantee-level. It was
+        // `isMember() && granteeUid in members()`, which reads as "only the two
+        // named parties" and passed its getDoc test -- but Firestore must prove
+        // a QUERY is safe for every document the query could return, and
+        // `granteeUid` here is a PATH wildcard, not a field. A whereEqualTo on a
+        // field does not narrow a path wildcard, so the engine still weighed
+        // `consents/EVETEST0001` (where "EVE" in members() is false) and denied.
+        //
+        // The app never getDocs. It runs two FILTERED queries (ConsentStore:
+        // granteeUid == ownUid, and grantorUid == ownUid for the grown-up role
+        // probe). Both failed closed to empty, so _scopes = empty and _decision
+        // = Denied -- on BOTH phones, after a real grant, with no error
+        // anywhere. That looks exactly like "correctly denied", which is how a
+        // whole app goes inert without a single log line.
+        //
+        // isMember() is the entire boundary: the room id IS the two sorted UIDs,
+        // so membership in the room is already established by the path. A member
+        // may therefore read the pair's certs -- which is what both listeners
+        // need -- while an outsider, and any authenticated stranger, is still
+        // refused. The write rules below remain the load-bearing part: a cert
+        // can only ever be created or replaced by the grantee's PEER.
+        allow read: if isMember();
 
         // The current grant. A parent may CREATE it and REPLACE it (a renewal,
         // or a deliberate re-grant after a revoke), and the sequence must go

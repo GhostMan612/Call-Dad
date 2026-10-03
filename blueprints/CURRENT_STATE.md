@@ -55,7 +55,7 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `ui/screens/PhotoViewModel.kt`, `ui/screens/PhotoScreen.kt` | Picture screen. Decode gated on `verified`; system photo picker only, no share/save |
 | `ui/screens/ConsentScreen.kt` | Parent-side grant/revoke behind `ParentGate` — the kill switch's only trigger |
 
-Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (27 classes, 269 tests per flavor / 538 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (44 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (27 classes, 278 tests per flavor / 556 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (49 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
 ## Known-issue registry
 
@@ -95,7 +95,7 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 `tools/prove_gates_bite.py` now asserts the gate goes red on one via the compiler.
 
 - `tools/verify_project.py`: PASS (10 dirs + 102 files, includes the control-byte ban).
-- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **269 tests per flavor / 538 across both, 0 failures**.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **278 tests per flavor / 556 across both, 0 failures**.
 - `:app:lintParentDebug :app:lintChildDebug`: PASS, **0 errors** both flavors.
 - `node --test functions/*.test.js`: PASS, **13/13** (6 ring + 7 clip).
 - **Firestore rules emulator: 44/44**, including the chat, photo, consent,
@@ -116,6 +116,9 @@ the tree compiles, and this repo has been burned by exactly that class.
 
 `output-metadata.json` confirms `com.calldad.parent` / `versionCode 11` /
 `0.3.1-parent` and `com.calldad.child` / `versionCode 11` / `0.3.1-child`.
+**That was the vc11 build.** The tree has since moved to **vc12 / 0.3.2** (the
+wakeup-path kill switch, 2026-10-02) and this evidence does **not** cover it —
+see §3 for why vc11 and vc12 are not interchangeable.
 
 **This retires the standing caveat.** Every row above from `8f47512` forward said
 the gates certify the host and not the build; as of this commit, `e0cb047` is
@@ -195,7 +198,12 @@ line's model field.
 
 ### Backend state (VERIFIED live)
 
-- `firestore.rules` released to `calldad-508d7` — **2026-10-01, the vc10 ruleset.** Compiled cleanly and released. This stanzas-in: `chat`, `photos` (manifest + chunks), `consents`, `revocations`, and the `negotiationRound` guards on the call document. Until this deploy, every one of those was denied on a real device, so the app's text thread, photo sharing, consent flow and auto-reconnect could not have worked on hardware even with a correct build.
+- `firestore.rules` released to `calldad-508d7` — **2026-10-01.** Compiled cleanly and released. This stanzas-in: `chat`, `photos` (manifest + chunks), `consents`, `revocations`, and the `negotiationRound` guards on the call document. Until this deploy, every one of those was denied on a real device, so the app's text thread, photo sharing, consent flow and auto-reconnect could not have worked on hardware even with a correct build.
+  - **THE LIVE RULESET IS NOW BEHIND THE TREE (2026-10-02).** `git log -- firestore.rules` shows the file was last committed at `d16fabd`, i.e. it was byte-identical to the 2026-10-01 release and has NOT since been redeployed — but today's audit pass changed it in three load-bearing ways, and the emulator proves each change against the old behaviour. **The operator must run `firebase deploy --only firestore:rules` or the running app keeps the old rules**, and each gap stays live in the field:
+    1. **Consent read was member-level-broken.** `allow read: if isMember() && granteeUid in members()` cannot be proven for a query, so both of the app's filtered consent listeners were denied → the whole app inert (fail-closed) after a real grant, on BOTH phones. Now `allow read: if isMember()`.
+    2. **Chunk count was unbounded.** Per-chunk 256KB with no ceiling on the INDEX meant an unbounded number of chunks (~2.5GB under an 800KB manifest). Now `index >= 0 && index < 32`.
+    3. **`negotiationRound` never reset per call.** Monotonic-on-every-update plus a non-merging `set()` meant call #1's round survived into call #2, so call #2's first ICE restart was permanently `PERMISSION_DENIED`. Now monotonic within a generation, free to reset when `seq` advances.
+  - **NOT fixed, by design:** a member can still write a cert naming the PEER (a "cross-grant"). It cannot be closed in the rules — the room id is two symmetric UIDs and nothing in Firestore says which is the grown-up, so denying it would deny the legitimate direction too. It needs a trust root (ADR-017). Pinned loudly as a KNOWN GAP in the emulator suite rather than hidden; see that test's banner.
 - `onCallRoomWritten` live: v2, `us-central1`, nodejs22, 256MB.
 - `onPttClipWritten` live: v2, same region/runtime.
 - `databases/(default)` exists, STANDARD edition.
@@ -240,6 +248,6 @@ line's model field.
   and installation are now proven; behaviour is not, and an install that succeeds
   is the *weakest* possible evidence that a feature works.
 - **Photo sharing has never sent a real photo.** The transport, digest, ordering, downscale policy and rules are all proven (byte-proof on synthetic fixtures, 44/44 emulator), but the Bitmap→WEBP path, the picker, and the screen have never run against a camera image. That is the largest untested surface in the app.
-- **`app/proguard-rules.pro` is a stub** and no release build has ever run. A missing keep rule there is a runtime crash, not a smaller APK.
+- **`app/proguard-rules.pro` is written but UNTESTED** — 74 real keep rules (`org.webrtc.**`, Firebase/GMS, the three `fcm/` services, the WebView JS bridge, ML Kit) plus line-number tables for readable release traces — and no release build has ever run, so nothing has proved them. A missing keep rule there is a runtime crash, not a smaller APK, which is exactly why it must not be assumed correct.
 - **Text chat has never survived an app restart on a device.** The prune keeps unread history, but that is a source-level claim.
 - K12's screen-off PTT push, K21 (keyguard), and K17's tightened pairing read remain unproven on any build.

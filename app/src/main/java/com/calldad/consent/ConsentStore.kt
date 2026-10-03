@@ -18,8 +18,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
@@ -395,6 +397,105 @@ class ConsentStore(
     /** The revocations in force, for the same screen. */
     fun observedRevocations(): List<ConsentCert> = revocations
 
+    /**
+     * The live decision for ONE scope, derived the same way [scopes] is — from
+     * the same certs, through the same [ConsentGate], with the same fail-closed
+     * treatment of a failed read.
+     *
+     * WHY THIS EXISTS. `decision` is a single headline value and it answers for
+     * `ConsentScope.CALL`, because CALL is the coarsest scope and so the honest
+     * representative of "can this child talk to their grown-up at all". That is
+     * right for the call screen and WRONG for every other feature: the walkie
+     * talkie collected `decision` and so was gated on CALL, which meant
+     * `ConsentScope.PTT` was read by nothing in the entire app. A CALL-only grant
+     * is a legal document under the rules (`scopes.size() > 0`), so the mixup was
+     * not merely theoretical — it would break silently the day anyone exposed a
+     * per-scope control, and the test suite actively permitted it by asserting
+     * `press.contains("pttAllowed") || press.contains("callAllowed")`.
+     *
+     * Reading the scope a feature actually needs is the whole point of a
+     * per-scope consent model. Callers MUST pass the scope they are about to use.
+     */
+    fun decisionFor(scope: ConsentScope): Flow<ConsentDecision> =
+        _scopes.map { held ->
+            if (isGrantor) {
+                // The grown-up's own device, same reasoning as [recompute]: the
+                // rules make it impossible for them to hold a cert naming
+                // themselves, so gating on possession would lock the parent out
+                // of the app they are configuring.
+                ConsentDecision.Granted
+            } else {
+                val all = grants + revocations
+                ConsentGate.forAction(
+                    all, ownUid ?: return@map ConsentDecision.Denied(ConsentDenial.NO_CERT),
+                    peerUid ?: return@map ConsentDecision.Denied(ConsentDenial.NO_CERT),
+                    scope, System.currentTimeMillis()
+                )
+            }
+        }
+
+    /**
+     * A ONE-SHOT, fail-closed consent answer, for a caller that has no ViewModel
+     * and must not ring before it has asked.
+     *
+     * WHY THIS EXISTS. Every in-app gate reads [scopes]/[decision] from a live
+     * listener held by a ViewModel. `CallForegroundService` is not a ViewModel and
+     * runs precisely when the app was NOT running, so it had no gate at all: it
+     * validated the PAIRING and then rang at full volume. The kill switch was
+     * therefore enforced on the foreground path and not on the wakeup path — the
+     * one path that runs when the phone is in a pocket. A parent who pulled the
+     * switch would still hear their child's phone ringing, and the child's
+     * screen would light up in a dark room.
+     *
+     * The reads here are one-shot rather than listener-backed on purpose: a ring
+     * is a single moment, and a live listener in a service that may outlive the
+     * call is a leak with a wakeup cost.
+     *
+     * FAIL CLOSED, ALWAYS. Any error, any empty read, any timeout is DENIED. The
+     * asymmetry is the whole design: a false DENY means a parent's call does not
+     * ring and they try again, while a false ALLOW means a safety control the
+     * grown-up believes is on is not. There is no read error here that should
+     * produce a ring.
+     *
+     * @param roomId the pair room the push named.
+     * @param ownUid this device.
+     * @param peerUid the paired device.
+     */
+    suspend fun decisionNow(roomId: String, ownUid: String, peerUid: String): ConsentDecision =
+        withTimeoutOrNull(CONSENT_PROBE_TIMEOUT_MS) {
+            val room = firestore.collection("calls").document(roomId)
+            val grants = room.collection("consents")
+                .whereEqualTo("granteeUid", ownUid).get().await()
+            val revocations = room.collection("revocations")
+                .whereEqualTo("granteeUid", ownUid).get().await()
+            val authored = room.collection("consents")
+                .whereEqualTo("grantorUid", ownUid).get().await()
+            // Cached snapshots are not evidence. A kill switch evaluated against a
+            // snapshot from before the parent pressed the button is precisely the
+            // bug this call site exists to close, and Firestore will happily
+            // serve one when the network is slow.
+            if (grants.metadata.isFromCache || revocations.metadata.isFromCache ||
+                authored.metadata.isFromCache
+            ) {
+                WebRtcLog.transition("Consent probe served from cache; denying")
+                return@withTimeoutOrNull ConsentDecision.Denied(ConsentDenial.NO_CERT)
+            }
+            // The grown-up's own device is not gated by holding a grant, because
+            // the rules make it impossible for them to hold one naming themselves.
+            // On the CALLEE side of a ring that cannot happen (a ring is always
+            // for the child), so this branch is deliberately absent here: a
+            // callee is only ever the grantee.
+            val certs = grants.documents.mapNotNull { it.toGrant() } +
+                revocations.documents.mapNotNull { it.toRevocation() }
+            ConsentGate.forAction(
+                certs, ownUid, peerUid, ConsentScope.CALL, System.currentTimeMillis()
+            )
+        } ?: run {
+            // Timed out. Still denied.
+            WebRtcLog.transition("Consent probe timed out; denying")
+            ConsentDecision.Denied(ConsentDenial.NO_CERT)
+        }
+
     private fun com.google.firebase.firestore.DocumentSnapshot.toGrant(): ConsentCert? {
         if (metadata.hasPendingWrites()) return null
         val grantee = getString("granteeUid") ?: return null
@@ -444,5 +545,17 @@ class ConsentStore(
          * someone else's hands stops working on its own.
          */
         val DEFAULT_VALIDITY_MS: Long = TimeUnit.DAYS.toMillis(30)
+
+        /**
+         * How long [decisionNow] may spend before it gives up and DENIES.
+         *
+         * Generous, because the failure mode is asymmetric: too short and a
+         * parent's call does not ring on a cold process with a slow first
+         * Firestore round-trip, and they think Dad is ignoring them. Too long and
+         * the child's phone sits silent after a ring it should have made. This is
+         * already a foreground service on a push, so a few seconds costs nothing
+         * the user is waiting on.
+         */
+        const val CONSENT_PROBE_TIMEOUT_MS: Long = 8_000L
     }
 }

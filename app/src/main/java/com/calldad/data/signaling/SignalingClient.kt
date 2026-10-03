@@ -51,6 +51,14 @@ class SignalingClient(
                 "answer" to null,
                 "callerCandidates" to emptyList<Map<String, Any>>(),
                 "calleeCandidates" to emptyList<Map<String, Any>>(),
+                // A NON-MERGING set() does not delete unmentioned fields, so
+                // without this the previous call's negotiationRound rode along
+                // into this generation. The rules make the round monotonic within
+                // one call and resettable per call, so this is the only thing that
+                // makes a stale round from call #1 harmless to call #2's first ICE
+                // restart -- which was denied, and then retried, forever.
+                "negotiationRound" to 0,
+                "renegotiating" to false,
                 "updatedAt" to FieldValue.serverTimestamp()
             ))
             nextSeq

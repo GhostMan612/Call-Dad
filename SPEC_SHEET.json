@@ -1,8 +1,11 @@
 {
   "_comment": [
-    "HISTORICAL v0.1 CONTRACT, corrected for drift 2026-10-01.",
-    "The v0.1 FEATURE list below is still the contract and all eight now exist in",
-    "source. The STACK block was rewritten because it named four dependencies the",
+    "HISTORICAL v0.1 CONTRACT, corrected for drift 2026-10-01 and 2026-10-02.",
+    "The v0.1 FEATURE list below is still the contract and all seven rows in it",
+    "now exist in source. (It was written 'all eight'; there are seven rows here",
+    "and six numbered features in SPEC_SHEET.md, and a reader reconciling the two",
+    "landed on a third number. The count is seven. Do not renumber the rows.)",
+    "The STACK block was rewritten because it named four dependencies the",
     "build deliberately does not have (Hilt, Room, Concentus, minSdk 30) and three",
     "versions that were never adopted (Kotlin 2.1.0, CameraX 1.3.4). A machine",
     "reader trusting the old values would look for code that cannot exist; this file",
@@ -18,10 +21,10 @@
     "child": "com.calldad.child — 'Call of Daddy', pink"
   },
   "version": {
-    "source": "0.3.1",
-    "versionCode": 11,
-    "on_device": 10,
-    "on_device_note": "BOTH PHONES ARE ON vc11 / 0.3.1 as of 2026-10-02 (child 10:17:56, parent 10:18:11), installed -r so pairing and the consent grant survived. Source and device are the same build for the first time since vc7. INSTALLED IS NOT WITNESSED: no SPEC_SHEET section-2 feature has been exercised on hardware on any build after vc7, and no version of this app has ever demonstrably enforced a kill switch."
+    "source": "0.3.2",
+    "versionCode": 12,
+    "on_device": 11,
+    "on_device_note": "SOURCE is vc12 / 0.3.2 (the wakeup-path kill switch, 2026-10-02) and BOTH PHONES ARE STILL ON vc11 / 0.3.1 (child 10:17:56, parent 10:18:11, installed -r so pairing and the consent grant survived). They must stay on 11 until the operator builds vc12: 11 rings at full volume on a child's KILLED phone after the grown-up switched calling off, which is the defect vc12 fixes. on_device is deliberately NOT equal to source. INSTALLED IS NOT WITNESSED: no SPEC_SHEET section-2 feature has been exercised on hardware on any build after vc7, and no version of this app has ever demonstrably enforced a kill switch. The deployed firestore.rules is the 2026-10-01 set and is BEHIND the tree: its consent read cannot be proven for a query, so the app is inert on both phones until the operator deploys."
   },
   "user": "6-year-old (kid device) <-> Dad (operator device)",
   "allowlist_v01": ["DAD"],

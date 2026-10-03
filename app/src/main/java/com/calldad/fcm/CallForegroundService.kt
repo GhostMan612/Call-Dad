@@ -21,12 +21,15 @@ import com.calldad.CallDadApplication
 import com.calldad.MainActivity
 import com.calldad.R
 import com.calldad.audio.CallAudioManager
+import com.calldad.consent.ConsentStore
 import com.calldad.data.signaling.CallRoom
 import com.calldad.pairing.SecurePeerStore
 import com.calldad.webrtc.WebRtcLog
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,18 +38,25 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service of type `phoneCall`, started by [CallMessagingService]
  * when a push arrives while the app is not on screen.
  *
- * ORDER MATTERS: startForeground() runs FIRST, synchronously in
- * onStartCommand (the FGS-start deadline is strict and a network read
- * before it crashed the app). Only then is the ring validated against the
- * PAIRED room (allowlist: a push for any other room is dropped). The
- * service then watches the room and removes itself the moment the ring
- * stops being live: answered, declined, cancelled, or 60s timeout.
+ * ORDER MATTERS, and this was the defect. startForeground() runs FIRST,
+ * synchronously in onStartCommand (the FGS-start deadline is strict and a
+ * network read before it crashed the app). Validation of the PAIRED room
+ * follows, so a push for any other room is dropped. **Then the kill switch is
+ * consulted**, then the room is confirmed live FROM THE SERVER, and only then
+ * does anything make a sound.
+ *
+ * That order is the point: this service is the one consent consumer that runs
+ * when the app is NOT running, so a gate placed after `startRinging` — or
+ * omitted, which is what it was — is a parental control that does not control
+ * anything on the path a phone actually takes when it is in a pocket. See
+ * [validateAndWatch].
  */
 class CallForegroundService : Service() {
 
@@ -72,7 +82,22 @@ class CallForegroundService : Service() {
             )
         }.isSuccess
         if (!promoted) {
-            WebRtcLog.transition("FGS startForeground rejected")
+            // A rejected promote was TOTAL SILENCE: the ring notification could
+            // not be posted by definition, and the heads-up fallback in
+            // CallMessagingService only wraps `startForegroundService()`, which
+            // does NOT throw for a later promote failure. So a child pressing
+            // Call Dad would get nothing at all -- no ring, no notification, no
+            // trace -- and the parent would conclude the phone was broken.
+            //
+            // Post the fallback here instead, so the child's phone at least shows
+            // an incoming call that can be tapped. It cannot ring loudly (that
+            // needs a foreground service), but visible beats silent.
+            val callId = intent?.getStringExtra(EXTRA_CALL_ID).orEmpty()
+            val seq = intent?.getIntExtra(EXTRA_SEQ, -1) ?: -1
+            WebRtcLog.transition("FGS startForeground rejected; posting fallback")
+            runCatching {
+                CallMessagingService.postIncomingCallFallback(applicationContext, callId, seq)
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -80,7 +105,16 @@ class CallForegroundService : Service() {
 
         val callId = intent?.getStringExtra(EXTRA_CALL_ID).orEmpty()
         val seq = intent?.getIntExtra(EXTRA_SEQ, -1) ?: -1
+        // Retire the previous ring's resources HERE, on the main thread, before a
+        // new coroutine can race the assignment. Doing it inside the coroutine was
+        // a leak: if two pushes overlapped, job B could finish its identity waits
+        // before job A did, write L2, and then have A overwrite `registration`
+        // with L1 -- orphaning L2 for the life of the process. A
+        // ListenerRegistration is not owned by the coroutine that made it, so
+        // cancelling the job never removed it.
         watchJob?.cancel()
+        registration?.remove()
+        registration = null
         watchJob = scope.launch { validateAndWatch(callId, seq) }
         return START_NOT_STICKY
     }
@@ -127,9 +161,39 @@ class CallForegroundService : Service() {
             return
         }
 
-        CallAudioManager.startRinging(applicationContext, CallAudioManager.OWNER_SERVICE)
+        // THE KILL SWITCH, ON THE WAKEUP PATH. This is the gate that was missing.
+        //
+        // Every other consumer reads a consent scope: CallViewModel at the button,
+        // at answer, and on the room listener; ChatViewModel and PhotoViewModel on
+        // their downloads; PttViewModel before the mic. This service was the one
+        // exception, and it is the exception that matters most, because it is the
+        // only path that runs when the app is NOT running. A parent who pressed
+        // "Turn everything off" would still have heard their child's phone ring at
+        // full volume, with the screen lighting up, for up to 45 seconds.
+        //
+        // It comes BEFORE startRinging and it fails CLOSED: a probe that errors,
+        // times out, or reads from cache DENIES. A wrong deny means the call does
+        // not ring and a parent tries again; a wrong allow means the control they
+        // believe is on is not.
+        if (!ConsentStore().decisionNow(callId, ownUid, peerUid).isGranted) {
+            // Publish ENDED so the CALLER is not left ringing out to nobody for 45s
+            // either. They are the grantor and may always call, but a call their
+            // child cannot answer is a lie to them too.
+            runCatching { finishDeniedRing(callId, ownUid, seq) }
+            WebRtcLog.transition("FGS ring suppressed: consent denied")
+            shutDown()
+            return
+        }
 
+        // Attach the liveness listener BEFORE ringing, and await a SERVER snapshot
+        // rather than assuming the push was honest. A push is only a claim: this
+        // device may have received it seconds after the call ended, or may not be
+        // able to reach Firestore at all (captive portal, VPN, DNS). Ringing first
+        // and checking later is how a phone ends up ringing at full volume in a
+        // quiet house for a call that is already over.
         registration?.remove()
+        registration = null
+        val firstLive = CompletableDeferred<Boolean>()
         registration = FirebaseFirestore.getInstance()
             .collection("calls").document(callId)
             .addSnapshotListener { snap, err ->
@@ -138,15 +202,54 @@ class CallForegroundService : Service() {
                     snap.getString("status") == "RINGING" &&
                     snap.getString("calleeUid") == ownUid &&
                     (seq < 0 || snap.getLong("seq")?.toInt() == seq)
-                if (!live && snap?.metadata?.isFromCache == false) {
-                    WebRtcLog.transition("FGS ring no longer live")
-                    shutDown()
+                // A cached-only snapshot is not evidence the room exists.
+                if (snap?.metadata?.isFromCache == false) {
+                    if (live) firstLive.complete(true)
+                    else {
+                        firstLive.complete(false)
+                        WebRtcLog.transition("FGS ring no longer live")
+                        shutDown()
+                    }
                 }
             }
+
+        val confirmed = withTimeoutOrNull(LIVE_CONFIRM_MS) { firstLive.await() } ?: false
+        if (!confirmed) {
+            WebRtcLog.transition("FGS ring unconfirmed by server; staying silent")
+            shutDown()
+            return
+        }
+
+        CallAudioManager.startRinging(applicationContext, CallAudioManager.OWNER_SERVICE)
 
         delay(RING_TIMEOUT_MS)
         WebRtcLog.transition("FGS ring timed out")
         shutDown()
+    }
+
+    /**
+     * Ends a ring this device refused to answer because consent denied it, so the
+     * caller gets a prompt, honest stop instead of a 45-second silence. Generation
+     * checked exactly like every other teardown write: a stale push must not be
+     * able to cancel a NEWER call.
+     */
+    private suspend fun finishDeniedRing(callId: String, ownUid: String, seq: Int) {
+        val firestore = FirebaseFirestore.getInstance()
+        val ref = firestore.collection("calls").document(callId)
+        firestore.runTransaction { txn ->
+            val snap = txn.get(ref)
+            val live = snap.exists() &&
+                snap.getString("status") == "RINGING" &&
+                snap.getString("calleeUid") == ownUid &&
+                (seq < 0 || snap.getLong("seq")?.toInt() == seq)
+            if (live) {
+                txn.update(ref, mapOf(
+                    "status" to "ENDED",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ))
+            }
+            null
+        }.await()
     }
 
     private fun shutDown() {
@@ -206,6 +309,19 @@ class CallForegroundService : Service() {
         private const val REQUEST_CODE_FSI = 2001
         private const val RING_TIMEOUT_MS = 60_000L
         private const val AUTH_WAIT_MS = 15_000L
+
+        /**
+         * How long to wait for a SERVER snapshot confirming the room is really
+         * RINGING before giving up on ringing at all.
+         *
+         * Failing closed here means a missed ring, and that is the correct
+         * trade: a ring the child's phone cannot explain is worse than one the
+         * parent has to try again. It also covers the captive-portal case, where
+         * a push can be delivered over a network that cannot reach Firestore —
+         * there the snapshot would only ever come from cache, and a cached
+         * snapshot is not evidence the call is still happening.
+         */
+        private const val LIVE_CONFIRM_MS = 6_000L
 
         fun startIncomingCall(context: Context, callId: String, seq: Int) {
             val intent = Intent(context, CallForegroundService::class.java)

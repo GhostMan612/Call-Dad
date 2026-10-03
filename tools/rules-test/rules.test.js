@@ -8,9 +8,10 @@ const path = require("node:path");
 const {
   initializeTestEnvironment, assertFails, assertSucceeds,
 } = require("@firebase/rules-unit-testing");
+const assert = require("node:assert/strict");
 const {
   doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs,
-  Timestamp, serverTimestamp, Bytes, addDoc,
+  query, where, Timestamp, serverTimestamp, Bytes, addDoc,
 } = require("firebase/firestore");
 const DAD = "DADTEST0001";
 const KID = "KIDTEST0001";
@@ -392,7 +393,18 @@ test("consent: a doc id that is not a pair member cannot be written", async () =
   // Otherwise a member could mint a cert under someone else's id, and a kid
   // could be granted rights by a pair that is not its own.
   await assertFails(setDoc(doc(consentsOf(DAD), EVE), grantDoc(EVE, DAD)));
-  await assertFails(getDoc(doc(db(DAD), "calls", ROOM, "consents", EVE)));
+  // Reading that path now succeeds, and that is the deliberate cost of making
+  // read member-level so the app's filtered queries work (see the read rule).
+  // It leaks NOTHING: a getDoc on a document that can never be created returns
+  // "does not exist" rather than data, because every write path above requires
+  // the grantor to be a member and the doc id to be the grantee. The invariant
+  // that matters is asserted here -- no cert can ever EXIST under a stranger's
+  // id, so there is nothing for the read to reveal.
+  const ghost = await assertSucceeds(getDoc(doc(db(DAD), "calls", ROOM, "consents", EVE)));
+  assert.strictEqual(ghost.exists(), false, "a non-member cert must not be able to exist");
+  // And an outsider cannot read the pair's real certs at all.
+  await assertSucceeds(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD)));
+  await assertFails(getDoc(doc(db(EVE), "calls", ROOM, "consents", KID)));
 });
 
 test("consent: a grant sequence must move FORWARD, so a stale write cannot roll it back", async () => {
@@ -444,6 +456,10 @@ test("consent: a client cannot back-date a revocation", async () => {
 test("consent: unknown scopes, empty scopes, a bad seq, and a mismatched grantee are refused", async () => {
   await assertFails(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD, [])));
   await assertFails(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD, ["CALL", "ADMIN"])));
+  // VOICE is a REAL scope -- the Ask Helper microphone had none, so the kill
+  // switch left a live mic in a child's hand while promising nothing was
+  // allowed. It must round-trip through the rules, or it is decorative.
+  await assertSucceeds(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD, ["CALL", "VOICE"], 2)));
   // Seq 0 is below the floor, so "nothing has been granted" cannot be claimed.
   await assertFails(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD, ["CALL"], 0)));
   // granteeUid must match the document id, or one cert could shadow another.
@@ -454,9 +470,215 @@ test("consent: unknown scopes, empty scopes, a bad seq, and a mismatched grantee
     { ...grantDoc(KID, DAD, ["CALL"], 1), expiresAt: Timestamp.fromMillis(Date.now() - 1000) }));
 });
 
-test("consent: nobody can list every cert in a room", async () => {
+// THIS TEST'S SHAPE CHANGED DELIBERATELY, and the old shape was the bug.
+//
+// It used to assert `assertFails(getDocs(consentsOf(DAD)))` -- "nobody can list
+// every cert in a room" -- and it PASSED. But it passed for the wrong reason: a
+// path-wildcard rule cannot be proven safe for a query, so it denied EVERY
+// listing, including the two filtered queries the app runs on every launch. A
+// green assertion was pinning the app's own consent listeners shut.
+//
+// The boundary that actually matters is WHO, not WHICH QUERY: the two members of
+// the pair may read the pair's consent state (they are the only parties, and the
+// room id is the two sorted UIDs), and nobody else may read anything.
+test("consent: the PAIR may read the room's certs; nobody else can", async () => {
   await assertSucceeds(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD)));
-  await assertFails(getDocs(consentsOf(DAD)));
-  // Revocations are readable only by the two named parties.
+  // A member may now list their own room's certs -- this is what the app needs.
+  await assertSucceeds(getDocs(consentsOf(DAD)));
+  // An authenticated stranger still cannot, and neither can an anonymous client.
+  await assertFails(getDocs(consentsOf(EVE)));
+  await assertFails(getDocs(collection(env.unauthenticatedContext().firestore(),
+    "calls", ROOM, "consents")));
+  // Revocations remain readable only by the two named parties.
   await assertFails(getDocs(revocationsAs(EVE)));
+  // And no member can list ANOTHER pair's room, because the room id is the
+  // authorization: an outsider's room is a different document path entirely.
+  await assertFails(getDocs(collection(db(EVE), "calls", "EVE_OTHER", "consents")));
+});
+
+// ---------------------------------------------------------------------------
+// AUDIT 2026-10-02 — four gaps in cells the suite never asserted. Every test
+// below failed against the rules as they stood. A gate nobody watched fail is a
+// gate nobody can trust, so these are here to be seen going red first.
+// ---------------------------------------------------------------------------
+
+// ###########################################################################
+// # KNOWN GAP, NOT A PASS. THIS TEST ASSERTS THE INSECURE TRUTH ON PURPOSE. #
+// ###########################################################################
+//
+// FINDING 1 — OPEN. The rules make a SELF-grant impossible and the suite
+// asserted exactly that. The CROSS grant is still permitted, and it cannot be
+// closed in the rules at all.
+//
+// WHY NO RULE CAN CLOSE IT: the room id is the two sorted UIDs and nothing in
+// Firestore says which of them is the grown-up. `grantorIsThePeer` requires
+// grantor != grantee, which BOTH directions satisfy, so `consents/DAD` written
+// by KID is byte-for-byte indistinguishable from `consents/KID` written by DAD.
+// Any rule that denied the first would deny the legitimate second.
+//
+// WHY IT MATTERS: the client's role discriminator is "did I author any cert?"
+// (ConsentStore: authoredReg where grantorUid == ownUid). So a child writing
+// `consents/DAD` makes `isGrantor` true on the CHILD'S OWN PHONE -- and
+// `recompute()` short-circuits on isGrantor, so a subsequent parental revocation
+// is never consulted. The kill switch would become a no-op on the one device it
+// exists to protect. Grants are delete:false, so no parent action recovers it.
+//
+// This is the decorative-consent bug again, aimed the other way. Closing it
+// needs a TRUST ROOT -- an asymmetric role decided at pairing time (the QR
+// payload already carries {v, uid, nonce}) or a signed credential -- which is an
+// ADR-017 architecture decision for the operator, not a rules edit. Do NOT
+// "fix" this by adding a role field that any member can also write: that is the
+// same bug wearing a hat.
+//
+// WHEN IT IS FIXED, this test fails, and that failure is the point: flip the two
+// assertSucceeds below to assertFails, delete this banner, and record the
+// trust-root decision in ADR-017. Until then the gap is documented, not hidden.
+test("consent: KNOWN GAP - a cross-grant IS permitted by the rules (needs a trust root)", async () => {
+  // The child writing a cert whose GRANTEE is the parent: currently ALLOWED.
+  await assertSucceeds(setDoc(doc(consentsOf(KID), DAD), grantDoc(DAD, KID)));
+  // It can also renew its own forgery, because grantFieldsOk only checks that
+  // grantorUid == request.auth.uid.
+  await assertSucceeds(updateDoc(doc(db(KID), "calls", ROOM, "consents", DAD),
+    grantDoc(DAD, KID, ["CALL"], 2)));
+  // The legitimate direction is unchanged and must keep working.
+  await assertSucceeds(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD)));
+  // What IS closed, and stays closed: a member cannot rewrite a peer's cert to
+  // change who granted it, because update re-checks grantorIsThePeer against
+  // the OLD data too. That is what stops a silent role transfer.
+  await assertFails(updateDoc(doc(db(KID), "calls", ROOM, "consents", DAD),
+    grantDoc(DAD, DAD, ["CALL"], 3)));
+});
+
+// FINDING 2. `allow read: if isMember() && granteeUid in members()` reads as
+// "only the two named parties", and the getDoc assertion passed. But Firestore
+// must prove a query is safe for EVERY doc the query could return, and
+// `granteeUid` here is a PATH wildcard, not a field. A whereEqualTo on a FIELD
+// does not narrow a path wildcard, so the engine still considers
+// `consents/EVETEST0001` -- where "EVE" in members() is false -- and denies.
+//
+// The app never getDocs. It runs two FILTERED queries
+// (ConsentStore.kt: whereEqualTo granteeUid/grantorUid == ownUid). Both fail
+// closed to an empty list, so _scopes = empty and _decision = Denied -- on BOTH
+// phones. That is the whole app inert after a real grant, with no error
+// anywhere, and it looks exactly like "correctly denied". The revokeReg query
+// works because the revocations read rule is a bare isMember() with no
+// wildcard, which is the asymmetry that proves the mechanism.
+test("consent: the app's OWN filtered consent queries are permitted", async () => {
+  await assertSucceeds(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD)));
+  // The child's grant listener. This is the exact query the app runs.
+  await assertSucceeds(getDocs(
+    query(consentsOf(KID), where("granteeUid", "==", KID))));
+  // The role listener that decides isGrantor. If THIS fails, the parent's phone
+  // can never grant at all.
+  await assertSucceeds(getDocs(
+    query(consentsOf(DAD), where("grantorUid", "==", DAD))));
+  // And a non-member's own filter still cannot widen it: EVE is not in the room
+  // so even querying for EVE is denied by isMember() upstream.
+  await assertFails(getDocs(
+    query(consentsOf(EVE), where("granteeUid", "==", EVE))));
+});
+
+// FINDING 3. chunkOk() bounded each chunk to 256KB but never bounded how many
+// chunks there are, and never required the manifest to exist. 10,000 in-bounds
+// chunks is ~2.5GB under a photo id whose manifest declares 800KB -- 3,900x.
+// PhotoClient fetches the chunks collection UNBOUNDED and materialises every one
+// into a HashMap before any validation, so the aggregate cap exists only in the
+// client, downstream of the download and the allocation. PhotoTransfer's
+// MAX_CHUNKS is a courtesy, not a control. (Not a data-integrity forgery: the
+// digest check still rejects it, so nothing can be made to look verified.)
+// The manifest CANNOT be a precondition: the client writes chunks first and the
+// manifest last (PhotoClient: chunks-then-manifest, because the other order lets
+// a receiver see a manifest and fetch chunks that do not exist yet). So the
+// ceiling is bound to the INDEX instead, which is what actually bounds the
+// number of chunks a writer may create -- each chunk was individually legal, so
+// without it 10,000 of them is ~2.5GB under a photo id whose manifest declares
+// at most 800KB.
+test("photos: a chunk index is bounded, so the chunk COUNT is bounded", async () => {
+  const chunksOf = (uid, photoId) =>
+    collection(db(uid), "calls", ROOM, "photos", photoId, "chunks");
+  const chunk = (from, index) => ({
+    from, bytes: Bytes.fromUint8Array(new Uint8Array(128000)),
+    index, createdAt: serverTimestamp(),
+  });
+  const manifest = (from, count) => ({
+    from, totalBytes: 800000, chunkCount: count,
+    sha256: "a".repeat(64), mime: "image/webp",
+    width: 1080, height: 810, createdAt: serverTimestamp(),
+  });
+
+  // Chunks with no manifest yet: the real send order, so this must WORK.
+  await assertSucceeds(setDoc(doc(chunksOf(KID, "P1"), "0000"), chunk(KID, 0)));
+  await assertSucceeds(setDoc(doc(chunksOf(KID, "P1"), "0001"), chunk(KID, 1)));
+  // The manifest then lands, as the real client writes it.
+  await assertSucceeds(setDoc(doc(db(KID), "calls", ROOM, "photos", "P1"), manifest(KID, 2)));
+  // Past the ceiling: refused even though every individual field is in bounds.
+  await assertFails(setDoc(doc(chunksOf(KID, "P1"), "0032"), chunk(KID, 32)));
+  await assertFails(setDoc(doc(chunksOf(KID, "P1"), "9999"), chunk(KID, 9999)));
+  // Out-of-order zero-padding must not become an alias for a different index.
+  await assertFails(setDoc(doc(chunksOf(KID, "P1"), "0002"), chunk(KID, 7)));
+  // A negative index is not a name for the front of the sequence.
+  await assertFails(setDoc(doc(chunksOf(KID, "P1"), "00ff"), chunk(KID, -1)));
+});
+
+// FINDING 4. The monotonic negotiationRound guard is applied to EVERY update,
+// including one that advances seq. publishOffer uses a non-merging set(), which
+// does not delete unmentioned fields -- so negotiationRound SURVIVES into the
+// next call. Meanwhile beginGeneration resets nextNegotiationRound to 1 on every
+// new attempt. So call #2's first ICE restart publishes round 1 against a room
+// still carrying round 2 -> PERMISSION_DENIED, forever, because the client only
+// advances its counter on a CONFIRMED publish and so retries round 1 forever.
+// The user sees a silently dropped call, not an error, and no client anywhere
+// deletes the room doc so the stale round never clears.
+//
+// The rule that must hold: monotonic WITHIN a generation, RESET when seq moves.
+test("renegotiation: the round RESETS when a new generation (higher seq) is published", async () => {
+  // Call #1 ran two restarts, so the room doc carries round 2 at seq 1.
+  await seed({ ...ringing(KID, DAD, 1), status: "CONNECTED", negotiationRound: 2 });
+  // Call #2: a fresh offer at seq 2. The round must be allowed to start again
+  // from 0/1, or ICE restart is dead for the rest of this pairing's life.
+  await assertSucceeds(setDoc(doc(db(KID), "calls", ROOM), {
+    ...ringing(KID, DAD, 2), negotiationRound: 0,
+  }));
+  // And the new generation's first restart is writable.
+  await assertSucceeds(updateDoc(doc(db(KID), "calls", ROOM), {
+    offer: { type: "OFFER", sdp: "v=0-call2-restart" },
+    renegotiating: true, negotiationRound: 1, updatedAt: serverTimestamp(),
+  }));
+  // Monotonicity still holds inside generation 2: no going backwards.
+  await assertFails(updateDoc(doc(db(KID), "calls", ROOM), { negotiationRound: 0 }));
+  // Generation 3 is the same: reset to 0, then one step forward.
+  await assertSucceeds(setDoc(doc(db(KID), "calls", ROOM), {
+    ...ringing(KID, DAD, 3), negotiationRound: 0,
+  }));
+  await assertSucceeds(updateDoc(doc(db(KID), "calls", ROOM), {
+    renegotiating: true, negotiationRound: 1, updatedAt: serverTimestamp(),
+  }));
+  // A peer cannot jump the ladder within one generation -- only the caller may,
+  // and only by the step it is entitled to. Asserting that a *stale* answer from
+  // the previous call cannot pose as current: the round went to 2, so a late
+  // answer written for round 1 is refused.
+  await assertSucceeds(updateDoc(doc(db(DAD), "calls", ROOM), {
+    renegotiating: true, negotiationRound: 2, updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(db(DAD), "calls", ROOM), {
+    answer: { type: "ANSWER", sdp: "v=0-call3-late-answer-for-round-1" },
+    renegotiating: false, negotiationRound: 1, updatedAt: serverTimestamp(),
+  }));
+  // And an outsider still cannot restart anything.
+  await assertFails(updateDoc(doc(db(EVE), "calls", ROOM), {
+    renegotiating: true, negotiationRound: 5, updatedAt: serverTimestamp(),
+  }));
+});
+
+// The gaps the audit listed as SAFE-but-untested. Asserted so a future edit
+// cannot quietly make them unsafe.
+test("consent: a member cannot overwrite a peer's existing grant to seize the role", async () => {
+  await assertSucceeds(setDoc(doc(consentsOf(DAD), KID), grantDoc(KID, DAD, ["CALL"], 1)));
+  // The kid tries to take over the parent's own cert. grantorIsThePeer is
+  // checked against BOTH the new and the old data, so the parent stays the
+  // grantor of the parent's own grant.
+  await assertFails(updateDoc(doc(db(KID), "calls", ROOM, "consents", DAD),
+    grantDoc(DAD, KID, ["CALL"], 2)));
+  // And nobody can list the users collection, where fcmTokens live.
+  await assertFails(getDocs(collection(db(EVE), "users")));
 });
