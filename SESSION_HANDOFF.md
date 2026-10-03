@@ -29,31 +29,45 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 ### State
 
 The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, and Source
-is at **`versionCode 12` / `0.3.2`** — the wakeup-path kill switch, 2026-10-02.
-**Both phones are still on vc11 / 0.3.1** (flashed 2026-10-02 10:17:56 child /
-10:18:11 parent), and **they must stay there until the operator builds vc12.**
-vc11 and vc12 are not interchangeable: vc11 rings at full volume on a child's
-killed phone after the grown-up switched calling off, which is the whole defect
-vc12 exists to fix. `firestore.rules` is deployed **but the deployed ruleset is
-the 2026-10-01 one and is now behind the tree** — see "BLOCKING" below.
+is at **`versionCode 12` / `0.3.2`** — the wakeup-path kill switch.
+
+**THE FLEET WAS RE-ASSIGNED 2026-10-03.** Moto G 2025 = **PARENT**, Q8K tablet =
+**CHILD** (replacing the retired BLU View 5). Both are now on **vc12 / 0.3.2**:
+`0.3.2-parent` on the Moto (16:39:00), `0.3.2-child` on the Q8K (16:38:44). One
+flavor per device, no crossed install. This is the first time since vc7 that
+source and hardware are the same build, and the first time the hardware carries
+the wakeup-path kill switch at all.
+
+**NOT PAIRED YET.** The Q8K is a fresh install: no anonymous account, no peer
+UID, so it generates a NEW uid and the pair room becomes a new
+`calls/{Q8K_MOTO}`. The Moto's peer store still holds the retired BLU's uid.
+**The operator must scan the QR from parent to child.** Until then nothing pairs,
+and a stale BLU room will simply never connect.
 
 Gates, re-run against the audit tree: verify PASS · unit **566 tests (283 per
 flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
 functions **13/13** (both files) · **rules emulator 49/49** · `prove_gates_bite`
 green → red → green (it proves a non-compiling tree fails the gate, and that the
-file is restored byte-for-byte) · **0 Kotlin warnings**.
+file is restored byte-for-byte) · **0 Kotlin warnings** · clean assemble
+**77/77 tasks executed, 0 from cache**.
 
 **BLOCKING, OPERATOR: `firebase deploy --only firestore:rules,functions`.** The
 live ruleset cannot prove a query, so both consent listeners are denied — which
-means **the app is inert on both phones right now, on both vc11 and vc12, until
-this deploys.** If nothing works and the shield icon leads nowhere, that is the
-cause, not a bad install.
+means **the app is inert on BOTH devices right now, on vc12 included, until this
+deploys.** If nothing works and the shield icon leads nowhere, that is the cause,
+not a bad install.
+
+**Why the lane could not do it:** `opencode.json` denied `firebase*deploy*`. The
+operator authorised a narrow allow and it was added on 2026-10-03 for exactly
+this one command — but **permission sets are read at session start**, so the
+running session still refuses it. A new session (or the operator running it
+directly) is required. This is the third time that fact has cost a deploy; it is
+recorded in `flash.md` too.
 
 **What the gates prove: the host suites and the compiler. They prove nothing
 about behaviour.** Zero features have been exercised by a human on any build
-after vc7, and the parental kill switch is still unwitnessed — which is the whole point of the next
-section.
-section.
+after vc7, and the parental kill switch is still unwitnessed — which is the whole
+point of the next section.
 
 Nothing in §2 has been exercised on hardware. Not one call, text, photo, consent
 grant or ICE restart has run against any build. Every feature row is

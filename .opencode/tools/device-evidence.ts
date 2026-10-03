@@ -54,13 +54,15 @@ export default tool({
         `adb devices -l:\n${r.out.trim()}`,
         "",
         "Map roles from each line's model: Moto G 2025 is the PARENT",
-        "(com.calldad.parent), BLU View 5 is the CHILD (com.calldad.child).",
-        "The Q8K tablet is a TARGET TEST RIG at SDK 30 -- it is NOT a third",
-        "member of the pair (ADR-015 is two-person: calls/{uidA_uidB}, one",
-        "paired contact). Do not pair it; do not install both flavors on it.",
+        "(com.calldad.parent); Q8K tablet is the CHILD (com.calldad.child).",
+        "The BLU View 5 is RETIRED from the pair as of 2026-10-03 -- it is no",
+        "longer a target device and must not be installed to or paired.",
+        "The pair is two-person by design (ADR-015: calls/{uidA_uidB}, one",
+        "paired contact), so exactly one parent and one child, never both",
+        "flavors on one device.",
         "The Moto is wireless-adb and its mDNS port changes per session; the",
-        "BLU and the Q8K are usually on USB, and plugging one in can drop the",
-        "other off the list until it is replugged.",
+        "Q8K is on USB, and plugging it in can drop a USB sibling off the list",
+        "until it is replugged.",
       ].join("\n")
     }
 

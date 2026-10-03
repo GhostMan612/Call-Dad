@@ -7,6 +7,15 @@ description: Hand the operator an exact, fingerprinted build-flash-verify runboo
 You do not build and you do not install. You produce a precise, copy-pasteable runbook with the
 version fingerprint resolved from source, and you state what evidence is still missing.
 
+## 0. Roles (re-assigned 2026-10-03)
+
+**Moto G 2025 = PARENT (`com.calldad.parent`). Q8K tablet = CHILD
+(`com.calldad.child`).** The BLU View 5 is retired and must not be installed to.
+
+The Q8K is **SDK 30** — the only device below API 31, so its Ask Helper tile is
+withheld by design. The Moto is wireless-adb and its mDNS port moves per session;
+the Q8K is on USB and plugging it in can drop a USB sibling off the list.
+
 ## 1. Resolve the fingerprint (read source, do not build)
 Read `app/build.gradle.kts` for `versionCode` and `versionName`. Report them, e.g.
 `versionCode 12 / versionName 0.3.2`, and the two flavor ids `0.3.2-parent` and `0.3.2-child`.

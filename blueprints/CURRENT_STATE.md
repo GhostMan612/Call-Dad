@@ -150,34 +150,40 @@ than merely green.
 
 ### Device evidence (VERIFIED, `dumpsys` fingerprint)
 
-| Device | Package | versionCode | versionName | installed | SDK |
-|---|---|---|---|---|---|
-| Moto G 2025 (PARENT) | `com.calldad.parent` | **11** | **0.3.1-parent** | 2026-10-02 10:18:11 | 36 |
-| BLU View 5 (CHILD) | `com.calldad.child` | **11** | **0.3.1-child** | 2026-10-02 10:17:56 | 34 |
-| Q8K tablet (target, unpaired) | neither | NOT INSTALLED | — | — | **30** |
+| Device | Role | Package | versionCode | versionName | installed | SDK |
+|---|---|---|---|---|---|---|
+| Moto G 2025 | **PARENT** | `com.calldad.parent` | **12** | **0.3.2-parent** | 2026-10-03 16:39:00 | 36 |
+| Q8K tablet | **CHILD** | `com.calldad.child` | **12** | **0.3.2-child** | 2026-10-03 16:38:44 | **30** |
+| ~~BLU View 5~~ | retired | — | — | — | left on vc11, out of the pair | 34 |
 
-**SOURCE IS vc12 / 0.3.2 AND THE PHONES ARE STILL ON vc11 / 0.3.1.** They were
-the same build for one commit (`c440ad4`) and then deliberately diverged: vc11 is
-the build that rings a child's killed phone after the grown-up switched calling
-off, and that posts its FGS notification on the loud channel before consent can
-be checked. **Do not treat the table as stale — the gap is the point.**
+**THE TARGET FLEET CHANGED 2026-10-03.** The Q8K tablet replaces the BLU View 5
+as the child device; the Moto G 2025 remains the parent. Source and BOTH target
+devices are now the same build, **vc12 / 0.3.2** — the first time since vc7, and
+the first time on hardware that has the wakeup-path kill switch at all.
 
-The Q8K is **SDK 30**, which makes it the first device in the fleet below API 31.
-That is not trivia: it is why the Ask Helper tile is withheld on it. The Helper is
+The BLU was left untouched on vc11 rather than uninstalled: `adb uninstall` is
+denied to this lane, and it is harmless once out of the pair.
+
+**Pairing MUST be redone and has not been done.** The Q8K is a fresh install, so
+it has no anonymous Firebase account and no peer UID; it will generate a NEW UID,
+which makes the pair room a new `calls/{Q8K_MOTO}`. The Moto's peer store still
+holds the retired BLU's UID. Nobody has scanned a QR yet.
+
+The Q8K is **SDK 30** — the first device in the fleet below API 31. That is not
+trivia: it is why the Ask Helper tile is withheld on it. The Helper is
 on-device-only (the network recognizer uploads a child's voice), and
 `isOnDeviceRecognitionAvailable` is API 31+, so on Android 11 the feature is
 *structurally* unavailable rather than merely unconfigured. Found by connecting
 real hardware, not by reasoning about the boundary.
 
-One flavor per device, no crossed install (each phone reports the other flavor as
-NOT INSTALLED, verified before and after).
+One flavor per device, no crossed install (each device reports the other flavor as
+NOT INSTALLED, verified after install).
 
-**What the install proves: that the tree compiles, packages, and installs with
-its data intact. What it does not prove: anything about behaviour.** Installed
-`-r`, so the anonymous Firebase account, the paired peer UID
-(`peer_store.preferences_pb`, still dated 2026-09-30) and the child's existing
-consent grant all survived — **no re-pair needed.** Still zero human-witnessed
-feature behaviour on any build after vc7; the kill switch remains unwitnessed.
+**What the install proves: that the tree compiles, packages, and installs. What
+it does not prove: anything about behaviour.** The parent's account and pairing
+data survived `-r`; the child's is new because the device is new. Still zero
+human-witnessed feature behaviour on any build after vc7; the kill switch remains
+unwitnessed.
 
 The vc7 → vc10 flash closed the widest source/device gap in the project's history,
 and with it the K12 loud-voice-message and K21 lock-screen-trap defects that had
