@@ -128,7 +128,11 @@ private fun HomeContent(
                 )
                 if (showPairingHint) {
                     Text(
-                        text = "Grown-ups: tap the gear to pair this phone first.",
+                        text = // "this phone" is wrong on the child device, which is a TABLET as of
+                        // 2026-10-03 (Q8K, 600x1024). "device" is true on both, and
+                        // a grown-up reading the wrong word concludes they are
+                        // holding the wrong one.
+                        "Grown-ups: tap the gear to pair this device first.",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -274,7 +278,14 @@ private fun HomeDestination.visuals(): ActionVisuals = when (this) {
 private fun HomeContentPreview() {
     CallDadTheme {
         HomeContent(
-            destinations = HomeDestination.entries.toList(),
+            // The SAME filter HomeViewModel applies. It used to render every
+            // destination unconditionally, so the preview showed an Ask Helper
+            // tile that the real app withholds below API 31 -- a preview that
+            // lies about the product is worse than no preview.
+            destinations = HomeDestination.entries.filter { destination ->
+                destination != HomeDestination.HELPER ||
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+            },
             showPairingHint = false,
             callback = null,
             onCallbackTapped = {},

@@ -94,9 +94,18 @@
   function actsAsX(turn) {
     return role === "caller" || (role === "solo" && turn === "X");
   }
+  // Who won, in the words of the person HOLDING this phone.
+  //
+  // This used to hardcode "Dad wins!" for every loss, which is only ever true on
+  // the CHILD's phone: `role === "caller"` IS the parent (GameScreen maps
+  // APP_THEME blue -> caller), so when the child won, the parent's own screen
+  // congratulated Dad for a game Dad had just lost. The loser's label has to
+  // name whoever actually beat THIS device, which depends on the role.
   function winText(winner) {
     if (role === "solo") return winner + " wins! 🎉";
-    return (winner === (role === "caller" ? "X" : "O")) ? "You win! 🎉" : "Dad wins!";
+    const iWon = winner === (role === "caller" ? "X" : "O");
+    if (iWon) return "You win! 🎉";
+    return role === "caller" ? "Your kid wins! 🎉" : "Dad wins! 🎉";
   }
   function turnText(turn) {
     if (role === "solo") return turn + "'s turn";

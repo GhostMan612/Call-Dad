@@ -269,9 +269,9 @@ fun AppNavHost(
                     R.string.ptt_receiving_banner,
                     stringResource(
                         if (BuildConfig.APP_THEME == "blue") {
-                            R.string.child_peer_name
+                            R.string.name_of_child
                         } else {
-                            R.string.parent_peer_name
+                            R.string.name_of_grown_up
                         }
                     )
                 ),

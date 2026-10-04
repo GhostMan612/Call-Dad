@@ -264,7 +264,10 @@ private fun PermissionContent(
         )
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "The phone needs the camera and microphone to call. Ask a grown-up to allow them.",
+            // "the phone" -> "this device": the child device is a TABLET (Q8K,
+            // 600x1024) as of 2026-10-03, and a six-year-old is told this about
+            // the device in front of them.
+            text = "This device needs the camera and microphone to call. Ask a grown-up to allow them.",
             style = MaterialTheme.typography.headlineSmall,
             color = Color.White,
             textAlign = TextAlign.Center

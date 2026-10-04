@@ -51,7 +51,7 @@ Handoff files (`SESSION_HANDOFF.md`, `blueprints/CURRENT_STATE.md`) must stay Ge
 
 - **Source and both phones are the same build: `vc11 / 0.3.1`.** Flashed 2026-10-02 (child 10:17:56, parent 10:18:11), one flavor per device, installed `-r` so pairing and the consent grant survived. **No re-pair needed.**
 - **Backend is live.** `firestore.rules` released 2026-10-01 (chat, photos, consents, revocations, `negotiationRound`), plus `onCallRoomWritten` and `onPttClipWritten`.
-- Host gates green: verify PASS · unit **566 (283 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **49/49**.
+- Host gates green: verify PASS · unit **580 (290 per flavor) / 0 failures** · lint **0 errors** · functions **13/13** · rules emulator **49/49**.
 - **The build gate passed too, for the first time in this project's history:** `clean assembleParentDebug assembleChildDebug` BUILD SUCCESSFUL, 77 tasks, **77 executed, 0 from cache** (`--no-build-cache`, so the Kotlin compiler genuinely ran). `8f47512` was pushed to `origin/main` with a duplicated brace and the host gate printed GREEN on it; `e0cb047` is the first commit proven to compile by the compiler rather than merely green.
 - **Two things none of that tells you:**
   1. **No `SPEC_SHEET` §2 feature has ever been exercised on hardware.** Not one call, text, photo, consent grant or ICE restart on vc11. The only proven E2E call is from vc7. An install is not a witness.

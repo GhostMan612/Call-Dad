@@ -288,13 +288,21 @@ private fun ConsentContent(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "What is allowed on this phone",
+                // "this phone" was wrong on the child device, which is a TABLET (Q8K)
+                // as of 2026-10-03. This screen is the grown-ups' own, so getting
+                // the noun wrong here is exactly what makes them doubt they are on
+                // the right device.
+                text = "What is allowed on this device",
                 style = MaterialTheme.typography.headlineMedium
             )
             Text(
                 text = "Calls, video, messages, the walkie talkie and photos. " +
                     "Nothing is allowed until you allow it here, and nothing can " +
-                    "reach anyone but the one paired phone.",
+                    // Two more "phone" literals, found by KidNamesRegressionTest rather than by
+                    // eye: the child device is a 600x1024 TABLET, and this is the
+                    // grown-ups' own screen, so a wrong noun here is what makes
+                    // someone doubt they are holding the right device.
+                    "reach anyone but the one paired device.",
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -314,7 +322,7 @@ private fun ConsentContent(
                     )
                     Text(
                         text = if (state.pair == null) {
-                            "Not paired to a phone yet."
+                            "Not paired to a device yet."
                         } else {
                             "Allowances last 30 days."
                         },

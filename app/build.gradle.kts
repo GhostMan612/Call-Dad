@@ -1,5 +1,5 @@
 // Call-Dad app module. BuildConfig fields injected from local.properties (gitignored).
-// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.3.2 / versionCode 12.
+// Package com.calldad. minSdk 26 per ADR-001-B. versionName 0.3.3 / versionCode 13.
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 import java.util.Properties
 
@@ -88,8 +88,30 @@ android {
         // switch works. Same rule as 9->10 and 10->11 -- a safety control that lies
         // is the worst failure this app has, and the fingerprint is the only thing
         // that lets a dumpsys tell the two apart.
-        versionCode = 12
-        versionName = "0.3.2"
+        // versionCode 13: THE NAMES WERE WRONG. Found by the operator looking at a
+        // screen, which is the only way this class of defect is ever found: no
+        // test crashes, nothing throws, and every host suite was green.
+        //
+        // Three instances of one mistake -- a peer-specific fact baked into a
+        // literal. The child app announced "Mama is calling". The walkie talkie
+        // said "Dad will hear it right away" on BOTH flavors, so on the grown-up's
+        // own phone it told them Dad would hear their message. And the game's
+        // loser label was hardcoded "Dad wins!", where `role === "caller"` IS the
+        // parent -- so when the CHILD won, the PARENT'S screen congratulated Dad
+        // for a game Dad had lost.
+        //
+        // Underneath was a naming trap: the resources were `child_peer_name` /
+        // `parent_peer_name`, and their VALUES were inverted relative to their
+        // NAMES, so no call site could be read reliably. There were also TWO
+        // different mappings in the tree. Now the resources name the PERSON
+        // (`name_of_grown_up` = Dad, `name_of_child` = Your kid) and every site
+        // uses one uniform mapping.
+        //
+        // MUST NOT reuse 12: 12 says "Mama is calling", and a dumpsys of 12 could
+        // not tell you whether the fix was on the phone. Same rule as every other
+        // bump here -- the fingerprint has to distinguish what a HUMAN would see.
+        versionCode = 13
+        versionName = "0.3.3"
 
         // Phase 5 provisioned secrets. Read from local.properties (gitignored,
         // operator-placed per local.properties.template). Empty defaults so a

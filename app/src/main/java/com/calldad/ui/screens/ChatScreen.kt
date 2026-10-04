@@ -85,8 +85,8 @@ fun ChatScreen(
         Column(Modifier.fillMaxSize()) {
             ChatHeader(
                 peerName = stringResource(
-                    if (BuildConfig.APP_THEME == "blue") R.string.child_peer_name
-                    else R.string.parent_peer_name
+                    if (BuildConfig.APP_THEME == "blue") R.string.name_of_child
+                    else R.string.name_of_grown_up
                 ),
                 onBackHome = onBackHome
             )

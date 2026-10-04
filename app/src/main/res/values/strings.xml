@@ -1,14 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Peer display names. The child flavor sees "Mama"; the parent
-         flavor sees "Dad". These are the names shown during a call. -->
-    <string name="child_peer_name">Mama</string>
-    <string name="parent_peer_name">Dad</string>
+    <!-- WHO IS BEING NAMED. Read this before renaming anything here again.
+         -->
+    <!-- These two strings name a PERSON, and the pair is asymmetric, so the
+         resource names are deliberately NOT "child_/parent_". They were, and
+         that is exactly how the bug survived: `child_peer_name` held a GROWN-UP's
+         name and was used in one place to name the child and in another to name
+         the grown-up, so nobody reading a call site could tell which was which.
+
+         `name_of_grown_up` - the paired adult, as the CHILD sees them. Also the
+         name on the child's incoming-call overlay ("Dad is calling").
+         `name_of_child`    - the child, as the GROWN-UP sees them. Also the name
+         on the grown-up's incoming-call overlay.
+
+         MAPPING, and it is the same in every call site: a parent device
+         (APP_THEME == "blue") shows `name_of_child`; a child device shows
+         `name_of_grown_up`. If you add a screen that names the peer, use that
+         mapping — do not re-derive it, and do not name the resources after a
+         flavor. -->
+    <string name="name_of_grown_up">Dad</string>
+    <string name="name_of_child">Your kid</string>
+
     <string name="incoming_call_title">Incoming call</string>
     <string name="incoming_call_text">Tap to answer</string>
 
     <!-- Shown app-wide (above the NavHost) while a voice clip from the paired
          grown-up is playing, so a message heard on the Game or Home screen is
-         always attributable. -->
+         always attributable. The argument is the name of whoever is TALKING,
+         which on a child's phone is `name_of_grown_up`. -->
     <string name="ptt_receiving_banner">%1$s is talking…</string>
 </resources>

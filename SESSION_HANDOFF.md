@@ -29,14 +29,29 @@ Conflict law: RULES.md > other docs; executable files (`*.gradle.kts`, `AndroidM
 ### State
 
 The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, and Source
-is at **`versionCode 12` / `0.3.2`** — the wakeup-path kill switch.
+is at **`versionCode 13` / `0.3.3`** — the NAMES pass.
 
 **THE FLEET WAS RE-ASSIGNED 2026-10-03.** Moto G 2025 = **PARENT**, Q8K tablet =
-**CHILD** (replacing the retired BLU View 5). Both are now on **vc12 / 0.3.2**:
+**CHILD** (replacing the retired BLU View 5). Both are on **vc12 / 0.3.2**:
 `0.3.2-parent` on the Moto (16:39:00), `0.3.2-child` on the Q8K (16:38:44). One
-flavor per device, no crossed install. This is the first time since vc7 that
-source and hardware are the same build, and the first time the hardware carries
-the wakeup-path kill switch at all.
+flavor per device, no crossed install.
+
+**vc13 is one commit ahead of both devices, and that gap is the point: vc12 says
+"Mama is calling".** Three peer-naming defects, all found by the operator looking
+at a screen with every host suite green: the child app announced "Mama is
+calling"; the walkie talkie hardcoded "Dad will hear it right away" on BOTH
+flavors, so the grown-up's own phone told them Dad would hear their message; and
+the game's loser label was hardcoded "Dad wins!" where `role === "caller"` IS the
+parent, so when the child won the PARENT's screen congratulated Dad for a game Dad
+had lost. Underneath it all, the resources were named `child_peer_name` /
+`parent_peer_name` with values INVERTED relative to their names, and two different
+mappings existed in the tree. Fixed by naming the PERSON (`name_of_grown_up` =
+Dad, `name_of_child` = Your kid) and using one uniform mapping everywhere, pinned
+by `KidNamesRegressionTest` — which then found two more "phone" literals in
+`ConsentScreen`, because the child device is a 600×1024 **tablet**.
+
+Device reference for the tablet, which is **on loan and gone after 2026-10-10**:
+`docs/q8k-tablet-reference.md`.
 
 **NOT PAIRED YET.** The Q8K is a fresh install: no anonymous account, no peer
 UID, so it generates a NEW uid and the pair room becomes a new
@@ -44,7 +59,7 @@ UID, so it generates a NEW uid and the pair room becomes a new
 **The operator must scan the QR from parent to child.** Until then nothing pairs,
 and a stale BLU room will simply never connect.
 
-Gates, re-run against the audit tree: verify PASS · unit **566 tests (283 per
+Gates, re-run against the audit tree: verify PASS · unit **580 tests (290 per
 flavor) / 0 failures** both flavors · lint **0 errors** both flavors ·
 functions **13/13** (both files) · **rules emulator 49/49** · `prove_gates_bite`
 green → red → green (it proves a non-compiling tree fails the gate, and that the

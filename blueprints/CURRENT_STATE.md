@@ -55,7 +55,7 @@ Not in the build (docs that mention them are historical): Hilt, Room, SQLCipher,
 | `ui/screens/PhotoViewModel.kt`, `ui/screens/PhotoScreen.kt` | Picture screen. Decode gated on `verified`; system photo picker only, no share/save |
 | `ui/screens/ConsentScreen.kt` | Parent-side grant/revoke behind `ParentGate` — the kill switch's only trigger |
 
-Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (27 classes, 283 tests per flavor / 566 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (49 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
+Backend: `firestore.rules`, `functions/index.js` + `functions/ring.js` + `functions/clip.js`. Tests: `app/src/test/` (28 classes, 290 tests per flavor / 580 across both flavors), `functions/ring.test.js`, `functions/clip.test.js`, `tools/rules-test/rules.test.js` (49 tests). Deploy config: `firebase.json` + `.firebaserc` (project `calldad-508d7`).
 
 ## Known-issue registry
 
@@ -95,7 +95,7 @@ so `assembleParentDebug` is the only thing that has ever caught that class, and
 `tools/prove_gates_bite.py` now asserts the gate goes red on one via the compiler.
 
 - `tools/verify_project.py`: PASS (10 dirs + 102 files, includes the control-byte ban).
-- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **283 tests per flavor / 566 across both, 0 failures**.
+- `:app:testParentDebugUnitTest :app:testChildDebugUnitTest`: **290 tests per flavor / 580 across both, 0 failures**.
 - `:app:lintParentDebug :app:lintChildDebug`: PASS, **0 errors** both flavors.
 - `node --test functions/*.test.js`: PASS, **13/13** (6 ring + 7 clip).
 - **Firestore rules emulator: 44/44**, including the chat, photo, consent,
@@ -155,6 +155,34 @@ than merely green.
 | Moto G 2025 | **PARENT** | `com.calldad.parent` | **12** | **0.3.2-parent** | 2026-10-03 16:39:00 | 36 |
 | Q8K tablet | **CHILD** | `com.calldad.child` | **12** | **0.3.2-child** | 2026-10-03 16:38:44 | **30** |
 | ~~BLU View 5~~ | retired | — | — | — | left on vc11, out of the pair | 34 |
+
+**SOURCE IS vc13 / 0.3.3; THE TWO TARGET DEVICES ARE ON vc12 / 0.3.2.** The gap
+is deliberate and is exactly one commit wide: **vc12 says "Mama is calling", and
+vc13 is the build that says "Dad".** A `dumpsys` of 12 cannot tell you whether
+the name fix is on the phone, which is the whole reason a fingerprint exists.
+
+### What vc13 fixes — all of it found by a person looking at a screen
+
+Every host suite was green through all three of these. Nothing threw; the app just
+told a child the wrong name about her own family.
+
+1. **"Mama is calling"** in the child app. The peer-name resources were named
+   `child_peer_name` / `parent_peer_name` with their **VALUES inverted relative to
+   their NAMES**, so no call site could be read reliably — and there were **two
+   different mappings** in the tree, with `CallViewModel.peerDisplayName()`
+   inverted against ChatScreen and the PTT banner.
+2. **The walkie talkie hardcoded "Dad will hear it right away"** on *both*
+   flavors, so on the grown-up's own device it announced that Dad would hear
+   their own message.
+3. **The game loser label was hardcoded "Dad wins!"** Since `role === "caller"`
+   *is* the parent (GameScreen maps `APP_THEME` blue → caller), when the **child**
+   won, the **parent's** screen congratulated Dad for a game Dad had lost.
+
+Now: `name_of_grown_up` = **Dad**, `name_of_child` = **Your kid**, one uniform
+mapping (a parent device shows the child's name; a child device shows the
+grown-up's), pinned by `KidNamesRegressionTest` — which found two further "phone"
+literals in `ConsentScreen` that no one had looked at, because the child device is
+a 600×1024 **tablet** and the text did not match the hardware in the child's hand.
 
 **THE TARGET FLEET CHANGED 2026-10-03.** The Q8K tablet replaces the BLU View 5
 as the child device; the Moto G 2025 remains the parent. Source and BOTH target

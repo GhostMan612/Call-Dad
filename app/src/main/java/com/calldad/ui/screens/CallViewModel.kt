@@ -1229,21 +1229,29 @@ class CallViewModel(application: Application) : AndroidViewModel(application) {
         commitTerminal(CallState.Error(kind = kind, message = message, seq = seq))
     }
 
+    /**
+     * The name of the OTHER person on the other end, from this device's point of
+     * view.
+     *
+     * The mapping is uniform across every call site in the app: a parent device
+     * (`APP_THEME == "blue"`) shows the CHILD's name, a child device shows the
+     * GROWN-UP's name. It used to be inverted here relative to ChatScreen and the
+     * PTT banner, so the outgoing call screen and the message thread named the
+     * same person two different ways.
+     */
     private fun peerDisplayName(): String =
         app.getString(
-            if (BuildConfig.APP_THEME == "blue") R.string.parent_peer_name
-            else R.string.child_peer_name
+            if (BuildConfig.APP_THEME == "blue") R.string.name_of_child
+            else R.string.name_of_grown_up
         )
 
     /**
-     * Name shown on the INCOMING overlay: the caller's side, i.e. the
-     * opposite flavor's label (parent sees "Mama", child sees "Dad").
+     * The name of the CALLER, shown on the incoming overlay.
+     *
+     * Same uniform mapping as [peerDisplayName]: the person being named is
+     * whichever human is on the other end, not whichever flavor this build is.
      */
-    private fun callerDisplayName(): String =
-        app.getString(
-            if (BuildConfig.APP_THEME == "blue") R.string.child_peer_name
-            else R.string.parent_peer_name
-        )
+    private fun callerDisplayName(): String = peerDisplayName()
 
     private companion object {
         const val SETUP_TIMEOUT_MS = 10_000L

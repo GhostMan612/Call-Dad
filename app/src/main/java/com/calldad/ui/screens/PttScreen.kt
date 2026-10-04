@@ -63,6 +63,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.calldad.ui.components.GiantIconButton
+import androidx.compose.ui.res.stringResource
+import com.calldad.BuildConfig
+import com.calldad.R
 
 private val ReceiveBlue = Color(0xFF1565C0)
 private val NeutralAmber = Color(0xFFE65100)
@@ -97,6 +100,16 @@ fun PttScreen(
         else -> "HOLD TO TALK"
     }
 
+    // "Dad will hear it right away" was HARDCODED, which is only ever true on the
+    // child's phone: both flavors have a walkie talkie, so on the GROWN-UP's
+    // device it cheerfully told them that Dad would hear their own message. Same
+    // bug class as the game and the call screen -- a peer-specific fact baked
+    // into a literal. It now names whoever is actually listening, via the same
+    // uniform mapping as every other screen.
+    val peerName = stringResource(
+        if (BuildConfig.APP_THEME == "blue") R.string.name_of_child
+        else R.string.name_of_grown_up
+    )
     val hintLabel = when {
         // Says the reason on the screen, permanently, rather than leaving a
         // button that silently refuses. A control that does nothing when pressed
@@ -105,7 +118,7 @@ fun PttScreen(
         !state.isAllowed -> "The walkie talkie is turned off right now. Ask a grown-up to turn it on."
         state.isTransmitting -> "Let go when you're done"
         state.isReceiving -> "Listen!"
-        state.justSent -> "Dad will hear it right away"
+        state.justSent -> "$peerName will hear it right away"
         else -> "Press and hold the big button"
     }
 

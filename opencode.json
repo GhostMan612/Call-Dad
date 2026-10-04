@@ -17,7 +17,24 @@
       "adb*shell*getprop*": "allow",
       "adb*shell*dumpsys*": "allow",
       "firebase*deploy*": "deny",
-      "//": "Operator-authorized 2026-10-03, for ONE task: the consent-read, chunk-cap and negotiationRound rule fixes plus the ring-push TTL/retry change had never been released, which left the app inert on every device. Deliberately NARROW and deliberately `ask`, not `allow`: it names one exact command, so no blanket firebase write is possible and it still stops for a human. The blanket deny above stays as the floor for everything else -- hosting, database, storage, `firebase use`. This mirrors the narrow allow that existed for the 2026-10-01 rules release and was removed afterwards; remove this one again once the deploy is done, because an allow that outlives its one use is a hole in the law.",
+      // Operator-authorized 2026-10-03, for ONE task: the consent-read,
+      // chunk-cap and negotiationRound rule fixes plus the ring-push TTL/retry
+      // change had never been released, which left the app inert on every
+      // device. Deliberately NARROW and deliberately `ask`, not `allow`: it
+      // names one exact command, so no blanket firebase write is possible and it
+      // still stops for a human. The blanket deny above stays as the floor for
+      // everything else -- hosting, database, storage, `firebase use`. This
+      // mirrors the narrow allow that existed for the 2026-10-01 rules release
+      // and was removed afterwards; remove this one again once the deploy is
+      // done, because an allow that outlives its one use is a hole in the law.
+      //
+      // This was previously a `"//"` KEY rather than a comment, which stopped
+      // the session loading entirely: every key inside `permission.bash` is a
+      // permission rule whose value must be "ask" | "allow" | "deny", so the
+      // prose was rejected as an invalid action
+      // (ConfigInvalidError -> "Failed to load sessions"). The schema sets
+      // "allowComments": true, so a real `//` comment is the correct way to
+      // keep this note next to the rule it explains.
       "firebase deploy --only firestore:rules,functions": "ask",
       "git*add*-A*": "deny",
       "git*add*--all*": "deny",
@@ -68,7 +85,11 @@
       "C:/Program Files/**": "deny",
       "C:/Program Files (x86)/**": "deny",
       "C:/ProgramData/**": "deny",
-      "C:/Users/<USER>/AppData/Local/Temp/opencode/**": "allow"
+      // Was `C:/Users/<USER>/AppData/...` — an unsubstituted template
+      // placeholder. Schema-valid (it is just a string pattern), so it never
+      // raised an error, but it can never match a real path: the literal
+      // segment "<USER>" does not exist. The temp-dir allow was silently dead.
+      "C:/Users/*/AppData/Local/Temp/opencode/**": "allow"
     }
   },
   "references": {

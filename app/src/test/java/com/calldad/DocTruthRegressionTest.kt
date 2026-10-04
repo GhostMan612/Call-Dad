@@ -335,15 +335,15 @@ class DocTruthRegressionTest {
             "test class count changed (now ${classes.size}) -- update the counts in " +
                 "CURRENT_STATE.md, CHECKPOINTS.md, SESSION_HANDOFF.md and README.md in " +
                 "the same commit",
-            classes.size == 27
+            classes.size == 28
         )
         val testMethods = classes.sumOf { classFile ->
             Regex("""^\s*@Test""", RegexOption.MULTILINE).findAll(classFile.readText()).count()
         }
         assertTrue(
-            "expected 283 @Test methods across the suite (566 across both flavors) " +
+            "expected 290 @Test methods across the suite (580 across both flavors) " +
                 "but found $testMethods -- update the recorded gate counts",
-            testMethods == 283
+            testMethods == 290
         )
 
         // The recorded TEXT, not just the source. These are the four files that
