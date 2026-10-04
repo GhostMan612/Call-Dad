@@ -163,9 +163,16 @@ The Q8K will generate a NEW uid, so the room becomes a new `calls/{Q8K_MOTO}` an
 the QR must be re-scanned from parent to child. The Moto's peer store still holds
 the retired BLU's uid; a stale room will simply never connect.
 
-The app is **inert until `firebase deploy --only firestore:rules,functions`
-runs** — the live ruleset is the 2026-10-01 set whose consent read cannot be
-proven for a query, so every scope reads empty and every feature denies.
+The backend is **LIVE** as of 2026-10-04: `firebase deploy --only
+firestore:rules,functions` ran from the lane, rules were released to
+`calldad-508d7`, and both functions are v2 / us-central1 / 256MB / nodejs22 with
+"no changes detected" — deployed code equals the tree. So the consent read is
+**not** the blocker on this device any more.
+
+What still gates a first launch is **consent itself**: a fresh install has no
+grant, so every feature denies until a grown-up taps the shield icon →
+grown-ups gate → "Allow everything". That looks identical to a broken app, and it
+is the intended fail-closed behaviour — check it before filing anything.
 
 ## Before Saturday — checklist for this window
 

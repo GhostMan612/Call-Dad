@@ -50,21 +50,41 @@ pairing and will drop). CHILD = BLU View 5 (ask the operator for its serial).
 Device serials are deliberately NOT written into this repo, and `tools/verify_project.py`
 now FAILS the gate if one appears in a tracked file (RULES §1.5a). Read them from
 `adb devices -l` at run time or from the operator's message. Map roles from the model
-field: Moto G 2025 = parent, BLU View 5 = child.
+field: **Moto G 2025 = parent, Q8K tablet = child** (re-assigned 2026-10-03; the
+BLU View 5 is retired).
 
 ## 4. Post-install verification the operator must run
 Re-run `device-evidence` `action=version` and require the on-device `versionCode` to equal the
 source `versionCode`. Only then collect logs.
 
-## 5. Console deploy (operator, never this lane)
+## 5. Console deploy
+
 ```
 firebase deploy --only firestore:rules,functions
 ```
-These are already live: `firestore.rules` was released 2026-09-30 and re-released 2026-10-01 to
-`calldad-508d7`, and `onCallRoomWritten` / `onPttClipWritten` are deployed v2. Re-running the
-deploy is only needed after an edit to `firestore.rules` or `functions/`. If a pairing write is
-denied in the field, the deployed ruleset is older than this tree — check the deploy date, do
-not assume the `pairings` stanza is missing.
+
+**Run from THIS LANE, not the operator's** — `opencode.json` carries a narrow
+`ask` allow for exactly this command, added 2026-10-03. It worked on the first
+attempt. Two corrections to what this section used to say, both of which were
+wrong and cost real time:
+
+- ~~"operator, never this lane"~~ — the lane CAN deploy, and did on 2026-10-04.
+- ~~"permission sets are read at session start, so a config change never affects
+  the session that made it"~~ — **false for this harness.** It re-reads the
+  file. Do not write that down as law without testing it.
+
+Current live state: rules released to `calldad-508d7` **2026-10-04**, with the
+consent-read fix, the chunk ceiling and the per-generation `negotiationRound`
+reset. `onCallRoomWritten` / `onPttClipWritten` are v2, us-central1, 256MB,
+nodejs22, with the ring TTL 1h + retry + `collapse_key`.
+
+Re-run the deploy after ANY edit to `firestore.rules` or `functions/` — it is the
+only thing that makes them live. If a write is denied in the field, the deployed
+ruleset is older than this tree; check the deploy date rather than assuming a
+stanza is missing.
+
+**Remove the narrow allow once the deploy is done.** It has one use and
+overstaying is a hole in the law.
 
 ## Output
 A single fenced block of commands the operator can paste, the expected fingerprint, the APK

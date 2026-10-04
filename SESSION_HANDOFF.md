@@ -68,18 +68,24 @@ green → red → green (it proves a non-compiling tree fails the gate, and that
 file is restored byte-for-byte) · **0 Kotlin warnings** · clean assemble
 **77/77 tasks executed, 0 from cache**.
 
-**BLOCKING, OPERATOR: `firebase deploy --only firestore:rules,functions`.** The
-live ruleset cannot prove a query, so both consent listeners are denied — which
-means **the app is inert on BOTH devices right now, on vc12 included, until this
-deploys.** If nothing works and the shield icon leads nowhere, that is the cause,
-not a bad install.
+**DEPLOYED 2026-10-04 — the app is NO LONGER INERT.** `firebase deploy --only
+firestore:rules,functions` ran from this lane: **rules compiled and released to
+`calldad-508d7`**, and `onCallRoomWritten` + `onPttClipWritten` are both **v2,
+us-central1, 256MB, nodejs22**. Both reported "no changes detected", which is the
+proof that matters — **the deployed code now equals the tree**, so the consent
+read fix (which was bricking every consent listener), the chunk-count ceiling and
+the per-generation `negotiationRound` reset are live, as are the ring-push TTL
+(30s → 1h), transient retry and `collapse_key`.
 
-**Why the lane could not do it:** `opencode.json` denied `firebase*deploy*`. The
-operator authorised a narrow allow and it was added on 2026-10-03 for exactly
-this one command — but **permission sets are read at session start**, so the
-running session still refuses it. A new session (or the operator running it
-directly) is required. This is the third time that fact has cost a deploy; it is
-recorded in `flash.md` too.
+The narrow allow in `opencode.json` is what unblocked it. **I was wrong to state
+three times that a config change could not affect the running session** — the
+harness re-reads the file, and the deploy succeeded on the first attempt after the
+edit. `flash.md` and `SESSION_HANDOFF.md` had recorded that claim as a standing
+fact; it is corrected here and removed there.
+
+⚠ **The narrow allow should be removed again now that the deploy is done.** An
+allow that outlives its one use is a hole in the law, and this repo has already
+had that argument once about this exact permission.
 
 **What the gates prove: the host suites and the compiler. They prove nothing
 about behaviour.** Zero features have been exercised by a human on any build
