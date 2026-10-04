@@ -32,9 +32,11 @@ The v0.1 contract in `SPEC_SHEET.md` §2 is **complete in source**, and Source
 is at **`versionCode 13` / `0.3.3`** — the NAMES pass.
 
 **THE FLEET WAS RE-ASSIGNED 2026-10-03.** Moto G 2025 = **PARENT**, Q8K tablet =
-**CHILD** (replacing the retired BLU View 5). Both are on **vc12 / 0.3.2**:
-`0.3.2-parent` on the Moto (16:39:00), `0.3.2-child` on the Q8K (16:38:44). One
-flavor per device, no crossed install.
+**CHILD** (replacing the retired BLU View 5). **The parent is on vc13 / 0.3.3
+(0.3.3-parent, installed 2026-10-04 15:01:20); the child is still on vc12 /
+0.3.2-child** because the Q8K dropped off the USB bus before its install could
+run. The vc13 child APK is **built, fingerprinted and waiting** — replug the
+tablet and install it, nothing else. One flavor per device, no crossed install.
 
 **vc13 is one commit ahead of both devices, and that gap is the point: vc12 says
 "Mama is calling".** Three peer-naming defects, all found by the operator looking

@@ -152,14 +152,18 @@ than merely green.
 
 | Device | Role | Package | versionCode | versionName | installed | SDK |
 |---|---|---|---|---|---|---|
-| Moto G 2025 | **PARENT** | `com.calldad.parent` | **12** | **0.3.2-parent** | 2026-10-03 16:39:00 | 36 |
+| Moto G 2025 | **PARENT** | `com.calldad.parent` | **13** | **0.3.3-parent** | 2026-10-04 15:01:20 | 36 |
 | Q8K tablet | **CHILD** | `com.calldad.child` | **12** | **0.3.2-child** | 2026-10-03 16:38:44 | **30** |
 | ~~BLU View 5~~ | retired | — | — | — | left on vc11, out of the pair | 34 |
 
-**SOURCE IS vc13 / 0.3.3; THE TWO TARGET DEVICES ARE ON vc12 / 0.3.2.** The gap
-is deliberate and is exactly one commit wide: **vc12 says "Mama is calling", and
-vc13 is the build that says "Dad".** A `dumpsys` of 12 cannot tell you whether
-the name fix is on the phone, which is the whole reason a fingerprint exists.
+**SOURCE IS vc13. THE PARENT IS ON vc13; THE CHILD IS STILL ON vc12** because the
+Q8K went off the USB bus before its install could run. That asymmetry is exactly
+what the fingerprint is for: **vc12 says "Mama is calling" and vc13 says "Dad"**,
+so a `dumpsys` of 12 on the tablet is positive evidence the name fix is *not*
+installed, with no guesswork.
+
+The child half of vc13 is **built, fingerprinted and waiting**. It needs the
+tablet replugged and nothing else — the APK is ready.
 
 ### What vc13 fixes — all of it found by a person looking at a screen
 

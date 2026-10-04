@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# ============================================================
+# As Above, So Below. As Within, So Without.
+# The Future Dictates the Past and the Past is Always Present.
+# ============================================================
+# tools/validate_opencode_config.py — gate opencode.json against the published schema
+# Location: tools/validate_opencode_config.py
 """Gate: `opencode.json` must satisfy the PUBLISHED opencode config schema.
 
 WHY THIS EXISTS. `opencode.json` failed to load with:
